@@ -11,6 +11,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
@@ -256,7 +257,8 @@ func TestLiveSessionHasTheBridgesTools(t *testing.T) {
 // TestStoppingALiveTurnEndsTheSession: !stop (the brain's StopCurrent)
 // cancels the run the turn is, whose half-done turn must not leave a Stop
 // hook to land in the next one: the session goes, and the next message
-// runs as a one-off while a new session starts.
+// runs as a one-off while a new session starts, also when it comes before
+// the old session's process is gone.
 func TestStoppingALiveTurnEndsTheSession(t *testing.T) {
 	t.Parallel()
 	setenv(t, "FRIDOLIN_FAKE_LIVE_HANG_ON", "hang")
@@ -268,11 +270,6 @@ func TestStoppingALiveTurnEndsTheSession(t *testing.T) {
 	if !h.b.brainMgr.Get("main").StopCurrent(false) {
 		t.Fatal("nothing to stop")
 	}
-	h.WaitFor("the session to end", func() bool {
-		h.b.live.mu.Lock()
-		defer h.b.live.mu.Unlock()
-		return h.b.live.sess["main"] == nil
-	})
 	if got := h.Answer(inbound{JID: harnessDM, Text: "after"}); !strings.HasPrefix(got, "echo:") {
 		t.Errorf("the message after the stop: %q", got)
 	}
@@ -362,5 +359,106 @@ func TestLiveSettings(t *testing.T) {
 	}
 	if !got.Skip || len(got.Hooks.Stop) != 1 || len(got.Hooks.Stop[0].Hooks) != 1 || got.Hooks.Stop[0].Hooks[0].Command != `"$FRIDOLIN_BIN" live-turn-end` || len(got.Excludes) == 0 {
 		t.Errorf("settings: %+v", got)
+	}
+}
+
+// TestLiveSessionTokenIsItsOwn: the session's brain API token, which
+// speaks for the owner's direct messages for as long as it lives, is in a
+// folder of its own, not in the run-tokens folder every run of the brain
+// reads.
+func TestLiveSessionTokenIsItsOwn(t *testing.T) {
+	t.Parallel()
+	h, _ := liveHarness(t, manifest.LiveSessionOwnerDM, nil)
+	h.Answer(inbound{JID: harnessDM, Text: "one"})
+	h.waitLive("main")
+	h.b.live.mu.Lock()
+	access := h.b.live.sess["main"].access
+	h.b.live.mu.Unlock()
+	data := h.b.cfgs.Boot().DataDir
+	if access.TokenDir != liveTokenDir(data, "main") {
+		t.Errorf("the session's token folder: %s", access.TokenDir)
+	}
+	files, _ := filepath.Glob(filepath.Join(runTokenDir(data, "main"), "*"))
+	for _, f := range files {
+		if b, err := os.ReadFile(f); err == nil && strings.Contains(string(b), access.Token) {
+			t.Errorf("%s holds the session's token", f)
+		}
+	}
+	held := false
+	files, _ = filepath.Glob(filepath.Join(access.TokenDir, "run-*.token"))
+	for _, f := range files {
+		if b, err := os.ReadFile(f); err == nil && string(b) == access.Token {
+			held = true
+		}
+	}
+	if !held {
+		t.Errorf("no file in %s holds the session's token: %v", access.TokenDir, files)
+	}
+}
+
+// TestLiveSessionReady: a session takes a message only while it is up, for
+// the chat it serves, and as long as the brain's settings are those it was
+// started with; one that ended, or was started with other settings, makes
+// way for a new one, with the message a one-off meanwhile. The reaper ends
+// an idle session, never one in a turn.
+func TestLiveSessionReady(t *testing.T) {
+	t.Parallel()
+	b := &App{waits: defaultWaits()}
+	b.waits.liveIdle = 40 * time.Millisecond
+	h := newLiveHost(b)
+	t.Cleanup(h.Stop)
+	r := &commandRunner{}
+	spec := brain.RunSpec{ID: "main", Dir: t.TempDir(), Settings: &brain.Settings{Model: "opus"}, Message: chat.Inbound{JID: harnessDM}}
+	session := func() *liveSession {
+		s := &liveSession{brain: "main", chat: harnessDM, fingerprint: liveFingerprint(r, spec), hub: claudecli.NewLiveHub(),
+			ready: true, started: time.Now(), idleSince: time.Now(), busy: true}
+		h.mu.Lock()
+		h.sess["main"] = s
+		h.fails["main"] = liveFailure{until: time.Now().Add(time.Hour)} // no new session starts here
+		h.mu.Unlock()
+		return s
+	}
+	free := func(s *liveSession) {
+		h.mu.Lock()
+		s.busy, s.idleSince = false, time.Now()
+		h.mu.Unlock()
+	}
+	stopped := func(s *liveSession) bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return s.stopped
+	}
+
+	s := session()
+	time.Sleep(4 * b.waits.liveIdle)
+	if stopped(s) {
+		t.Fatal("the reaper ended a session in a turn")
+	}
+	free(s)
+	if got := h.ready(r, spec); got != s {
+		t.Fatalf("the session for its chat and settings: %v", got)
+	}
+	other := spec
+	other.Message.JID = "15557654321@s.whatsapp.net" // personal-data:ignore (a placeholder number)
+	if got := h.ready(r, other); got != nil || stopped(s) {
+		t.Errorf("another chat's message got the session, or ended it: %v", got)
+	}
+	changed := spec
+	changed.Settings = &brain.Settings{Model: "sonnet"}
+	if got := h.ready(r, changed); got != nil || !stopped(s) {
+		t.Errorf("with other settings, the session took the message, or stayed: %v", got)
+	}
+	if got := h.ready(r, spec); got != nil {
+		t.Errorf("a session that ended took a message: %v", got)
+	}
+
+	s = session()
+	free(s)
+	deadline := time.Now().Add(5 * time.Second)
+	for !stopped(s) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !stopped(s) {
+		t.Error("the reaper left an idle session")
 	}
 }

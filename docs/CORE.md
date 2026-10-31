@@ -440,7 +440,7 @@ of a brain's Codex state), `secrets/`, `audit/`, `brains/`
 (the per-brain state), `nodes/`, `tsnet/`, the dashboard's token and
 sessions, `google/`, `plaud/`, `otp/`, `rclone/`, and brain folders that lie
 in the data dir. It leaves out what the next machine rebuilds or the cold
-tier already holds completely: `runs/`, `run-tokens/`, `media/`, `vault/`,
+tier already holds completely: `runs/`, `run-tokens/`, `live-tokens/`, `media/`, `vault/`,
 `core/`, `migration/` (a native install's own snapshots), lock files, SQLite's `-wal`, `-shm` and `-journal` files, the
 brains' `tmp/` and `cache/`, `node_modules/` and `*.tmp` files. Symbolic
 links are left out and named.

@@ -555,6 +555,9 @@ func (sp Policy) profile(brainID string) (string, error) {
 	// (google_calendar.go), so the files stay with the bridge.
 	if sp.DataDir != "" {
 		b.allow("file-read*", "subpath", sp.Tokens(brainID))
+		if sp.LiveTokens != "" {
+			b.allow("file-read*", "subpath", sp.LiveTokens)
+		}
 	}
 	// plaud.brain_access shares your Plaud login with brains, and the Plaud
 	// CLI rewrites it in place when it refreshes a login about to expire,
@@ -1401,6 +1404,9 @@ type Policy struct {
 	ConfigFile, ConfigEnvFile, BridgeExe string
 	Layout                               InstallLayout
 	Programs                             Programs
+	// LiveTokens is the folder of a live session's own brain API token,
+	// which its process reads and the brain's runs do not; "" for a run.
+	LiveTokens string
 }
 
 func (c Context) absolute(p string) (string, error) {

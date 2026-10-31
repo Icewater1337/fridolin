@@ -119,7 +119,7 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		args = withArgsBeforePrint(args, runMCPArgs(s.Provider, access))
 	}
 
-	binary, finalArgs, env, err := r.command(spec, s, args, providerEnv, runEnv)
+	binary, finalArgs, env, err := r.command(spec, s, args, providerEnv, runEnv, "")
 	if err != nil {
 		return claudecli.Result{Err: err}
 	}
@@ -153,8 +153,9 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 // command is the process that runs the agent for spec: the resolved
 // binary, wrapped by the sandbox, with args, and the environment it gets
 // (providerEnv and runEnv are its own variables on top of the brain's).
-// It is the same for a one-off run and a live session.
-func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, providerEnv, runEnv []string) (binary string, finalArgs, env []string, err error) {
+// It is the same for a one-off run and a live session, whose sandbox also
+// reads its own token folder, liveTokens ("" for a run).
+func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, providerEnv, runEnv []string, liveTokens string) (binary string, finalArgs, env []string, err error) {
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
 	// cannot reach another brain's tree or cross-session Claude state. The brain
 	// still runs with --dangerously-skip-permissions for tool freedom; the
@@ -205,7 +206,7 @@ func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, pro
 		// environment.
 		stateEnv, err := prepareBrainState(s.DataDir, s.MediaDir, spec.ID, s.InheritUser)
 		if err == nil && r.sandbox != nil && r.sandbox.Enabled() {
-			binary, finalArgs, err = r.sandbox.Command(spec.ID, agentBinary, args)
+			binary, finalArgs, err = r.sandbox.command(spec.ID, liveTokens, agentBinary, args)
 		}
 		if err != nil {
 			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", spec.ID, err)

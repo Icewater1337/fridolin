@@ -478,11 +478,12 @@ func (sp *SandboxProfiler) bwrapPolicy(id string) (sandbox.BwrapPolicy, error) {
 
 // bwrapProfile renders brain id's bubblewrap command line; the caller
 // holds sp.mu.
-func (sp *SandboxProfiler) bwrapProfile(id string) (string, error) {
+func (sp *SandboxProfiler) bwrapProfile(id, liveTokens string) (string, error) {
 	p, err := sp.bwrapPolicy(id)
 	if err != nil {
 		return "", err
 	}
+	p = sp.withLiveTokens(p, liveTokens)
 	agent := cmp.Or(sp.claudePath, "claude")
 	if found, err := exec.LookPath(agent); err == nil {
 		agent = AbsPath(found)
@@ -496,15 +497,31 @@ func (sp *SandboxProfiler) bwrapProfile(id string) (string, error) {
 	return sp.bwrapPath + "\n" + strings.Join(argv, "\n") + "\n", nil
 }
 
+// withLiveTokens has p read a live session's own token folder,
+// liveTokens; for a run (""), it keeps every live session's out of sight,
+// also where an allow_paths entry holds the data dir. The folder is made
+// first: a mask needs it there, and one made while a run goes would show.
+func (sp *SandboxProfiler) withLiveTokens(p sandbox.BwrapPolicy, liveTokens string) sandbox.BwrapPolicy {
+	if liveTokens != "" {
+		p.Read = append(p.Read, liveTokens)
+		return p
+	}
+	all := filepath.Join(AbsPath(sp.DataDir), liveTokensDirName)
+	_ = os.MkdirAll(all, 0o700) // without it, nothing is there to hide yet
+	p.Mask = append(p.Mask, all)
+	return p
+}
+
 // bwrapCommand writes brain id's passwd and group and returns bubblewrap's
 // command line for prog with args.
-func (sp *SandboxProfiler) bwrapCommand(id, prog string, args []string) (string, []string, error) {
+func (sp *SandboxProfiler) bwrapCommand(id, liveTokens, prog string, args []string) (string, []string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	p, err := sp.bwrapPolicy(id)
 	if err != nil {
 		return "", nil, err
 	}
+	p = sp.withLiveTokens(p, liveTokens)
 	if err := os.MkdirAll(filepath.Dir(p.Passwd), 0o700); err != nil {
 		return "", nil, err
 	}
@@ -527,13 +544,19 @@ func (sp *SandboxProfiler) bwrapCommand(id, prog string, args []string) (string,
 // the sandbox. The caller creates the brain's own state first, which the
 // profile pins, and points the run at it (see prepareBrainState).
 func (sp *SandboxProfiler) Command(brainID, prog string, args []string) (string, []string, error) {
+	return sp.command(brainID, "", prog, args)
+}
+
+// command is Command, for a live session (liveTokens, its own token
+// folder, which it reads and the brain's runs do not) or a run ("").
+func (sp *SandboxProfiler) command(brainID, liveTokens, prog string, args []string) (string, []string, error) {
 	if err := sp.Available(); err != nil {
 		return "", nil, err
 	}
 	if sp.backend == backendBwrap {
-		return sp.bwrapCommand(brainID, prog, args)
+		return sp.bwrapCommand(brainID, liveTokens, prog, args)
 	}
-	profile, err := sp.Profile(brainID)
+	profile, err := sp.profile(brainID, liveTokens)
 	if err != nil {
 		return "", nil, err
 	}
@@ -566,17 +589,22 @@ func sandboxInstallLayoutOf(l platform.BridgeLayout) sandbox.InstallLayout {
 // the container bubblewrap's command line, one argument per line, for the
 // agent's binary (what `fridolin check --print-sandbox` prints).
 func (sp *SandboxProfiler) Profile(id string) (string, error) {
+	return sp.profile(id, "")
+}
+
+// profile is Profile, for a live session (see command) or a run.
+func (sp *SandboxProfiler) profile(id, liveTokens string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	if sp.backend == backendBwrap {
-		return sp.bwrapProfile(id)
+		return sp.bwrapProfile(id, liveTokens)
 	}
 	ctx := sandboxContextNow(sp.home)
 	var layout sandbox.InstallLayout
 	if sp.bridgeExe != "" {
 		layout = sandboxInstallLayoutOf(platform.LayoutOf(sp.bridgeExe))
 	}
-	return sandbox.Profile(sandbox.Policy{Settings: sp.Settings, Context: ctx, WorkDirs: sp.workDirs, ConfigFile: sp.configFile, ConfigEnvFile: config.DotEnvPath(sp.configFile), BridgeExe: sp.bridgeExe, Layout: layout, Programs: sp.bridgeProgramsOf(ctx.Home)}, id)
+	return sandbox.Profile(sandbox.Policy{Settings: sp.Settings, Context: ctx, WorkDirs: sp.workDirs, ConfigFile: sp.configFile, ConfigEnvFile: config.DotEnvPath(sp.configFile), BridgeExe: sp.bridgeExe, Layout: layout, Programs: sp.bridgeProgramsOf(ctx.Home), LiveTokens: liveTokens}, id)
 }
 
 func (p sandboxConfig) protected(home string, l platform.BridgeLayout) []sandbox.ProtectedPath {

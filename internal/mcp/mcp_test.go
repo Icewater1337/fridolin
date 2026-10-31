@@ -302,13 +302,16 @@ func TestRegistryKeepsUnavailableToolsOut(t *testing.T) {
 	r.Register(Entry[caller]{Name: "delegate", Describe: func(caller) Tool { return Tool{} }, Call: func(context.Context, caller, json.RawMessage) (*CallResult, error) { return nil, nil }})
 }
 
-// A channel server declares its experimental capability and passes the
-// events it is given on to the client, unasked, one JSON line each.
+// A channel server declares its experimental capability and, once the
+// client said it is initialized, passes the events it is given on to it,
+// unasked, one JSON line each.
 func TestServerSendsChannelEvents(t *testing.T) {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	events := make(chan Notification)
-	srv := &Server{Name: "test", Version: "1", Handler: &fakeHandler{}, Experimental: map[string]any{"claude/channel": map[string]any{}}, Events: events}
+	initialized := make(chan struct{}, 2)
+	srv := &Server{Name: "test", Version: "1", Handler: &fakeHandler{}, Experimental: map[string]any{"claude/channel": map[string]any{}}, Events: events,
+		Initialized: func() { initialized <- struct{}{} }}
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(context.Background(), inR, outW); outW.Close() }()
 	t.Cleanup(func() { inW.Close() })
@@ -330,6 +333,19 @@ func TestServerSendsChannelEvents(t *testing.T) {
 	}
 	if _, ok := init.Result.Capabilities.Experimental["claude/channel"]; !ok {
 		t.Errorf("capabilities: %s", out.Text())
+	}
+	select {
+	case events <- Notification{Method: "notifications/claude/channel"}:
+		t.Fatal("an event went out before the client was initialized")
+	case <-time.After(100 * time.Millisecond):
+	}
+	for range 2 {
+		io.WriteString(inW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`+"\n")
+	}
+	select {
+	case <-initialized:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Initialized did not run")
 	}
 
 	events <- Notification{Method: "notifications/claude/channel", Params: map[string]any{"content": "hi", "meta": map[string]string{"kind": "message"}}}
@@ -356,6 +372,9 @@ func TestServerSendsChannelEvents(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve did not end with its input")
+	}
+	if len(initialized) != 0 {
+		t.Error("Initialized ran twice")
 	}
 }
 

@@ -83,9 +83,12 @@ type Server struct {
 	// Experimental are the experimental capabilities initialize declares,
 	// such as "claude/channel": {} for a Claude Code channel.
 	Experimental map[string]any
-	// Events, when set, are sent to the client as they come, until Serve
-	// ends. Closing it stops them.
+	// Events, when set, are sent to the client as they come, once it said
+	// it is initialized and until Serve ends. Closing it stops them.
 	Events <-chan Notification
+	// Initialized, when set, runs once the client said it is initialized
+	// (notifications/initialized): from then on it takes notifications.
+	Initialized func()
 	// Logf, when set, gets what the server logs; stdout is the protocol's.
 	Logf func(format string, args ...any)
 }
@@ -97,11 +100,16 @@ type Server struct {
 // Serve cancels the calls still running and waits for them.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
-	c := &conn{s: s, out: out, inflight: map[string]context.CancelFunc{}}
+	c := &conn{s: s, out: out, inflight: map[string]context.CancelFunc{}, initialized: make(chan struct{})}
 	defer c.wg.Wait()
 	defer cancel()
 	if s.Events != nil {
 		c.wg.Go(func() {
+			select {
+			case <-c.initialized:
+			case <-ctx.Done():
+				return
+			}
 			for {
 				select {
 				case n, ok := <-s.Events:
@@ -165,6 +173,9 @@ type conn struct {
 	mu       sync.Mutex
 	inflight map[string]context.CancelFunc // by the request's id
 	wg       sync.WaitGroup
+	// initialized closes once the client sent notifications/initialized.
+	initialized chan struct{}
+	initOnce    sync.Once
 }
 
 func (c *conn) logf(format string, args ...any) {
@@ -273,8 +284,17 @@ func (c *conn) initialize(m Message) response {
 }
 
 func (c *conn) notification(m Message) {
+	if m.Method == "notifications/initialized" {
+		c.initOnce.Do(func() {
+			close(c.initialized)
+			if c.s.Initialized != nil {
+				c.s.Initialized()
+			}
+		})
+		return
+	}
 	if m.Method != "notifications/cancelled" {
-		return // notifications/initialized and the rest need nothing
+		return // the rest need nothing
 	}
 	var p struct {
 		RequestID json.RawMessage `json:"requestId"`

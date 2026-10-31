@@ -120,10 +120,11 @@ type Settings struct {
 type Ownership struct {
 	Self int    // the bridge's PID
 	Exe  string // the bridge's binary, which runs `mcp --run`
-	// RunTokensDir is <data>/run-tokens and CoreDir <data>/core, both
-	// absolute.
-	RunTokensDir string
-	CoreDir      string
+	// RunTokensDir is <data>/run-tokens, LiveTokensDir <data>/live-tokens
+	// (the live sessions') and CoreDir <data>/core, all absolute.
+	RunTokensDir  string
+	LiveTokensDir string
+	CoreDir       string
 	// TokenLive reports whether a run's token file (by its path) still
 	// exists; MCPRunLive whether run id still has its MCP configuration.
 	TokenLive  func(path string) bool
@@ -314,7 +315,11 @@ func classify(p platform.Proc, byPID map[int]platform.Proc, bridgeTree map[int]b
 			}
 		}
 	}
-	ours := token != "" && under(o.RunTokensDir, token)
+	tokens := o.RunTokensDir
+	if o.LiveTokensDir != "" && under(o.LiveTokensDir, token) {
+		tokens = o.LiveTokensDir
+	}
+	ours := token != "" && under(tokens, token)
 	switch {
 	case len(args) >= 4 && args[1] == "mcp" && args[2] == "--run" && (args[0] == o.Exe || isFridolinName(base)):
 		// Another bridge's run's server names that bridge's token; one
@@ -339,7 +344,7 @@ func classify(p platform.Proc, byPID map[int]platform.Proc, bridgeTree map[int]b
 	if !ours {
 		return owned{}, false // nobody's run, or another bridge's
 	}
-	rel, _ := filepath.Rel(o.RunTokensDir, token)
+	rel, _ := filepath.Rel(tokens, token)
 	brain := filepath.Dir(rel)
 	live := bridgeTree[p.PID] || (o.TokenLive != nil && o.TokenLive(token))
 	return owned{kind: KindRunOrphan, owner: "a run of brain " + brain, live: live,

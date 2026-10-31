@@ -376,6 +376,7 @@ func dataDirExcludes(data string, dbs map[string]string) []string {
 	return append(excludes,
 		"*.lock", ".*-litestream", "node_modules", ".DS_Store",
 		filepath.Join(data, runTokensDirName),
+		filepath.Join(data, liveTokensDirName),
 		filepath.Join(data, brainStatesDirName, "*", "tmp"),
 		filepath.Join(data, brainStatesDirName, "*", "cache"),
 		filepath.Join(data, "core", "restic-cache"),

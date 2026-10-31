@@ -1697,7 +1697,8 @@ process, and run records whose process group is gone.
 
 It stops only what it can tell is the bridge's own: a run's processes
 carry `FRIDOLIN_BRAIN_TOKEN_FILE`, naming a file in the data dir's
-`run-tokens/` that exists exactly while the run lasts; the vault's
+`run-tokens/` (`live-tokens/` for a live session) that exists exactly
+while the run lasts; the vault's
 children run with the data dir's own paths. Each stop is SIGTERM, then
 SIGKILL after five seconds, for the process and what it started, after
 checking that each PID is still the process it saw. On a native install

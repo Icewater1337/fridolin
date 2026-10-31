@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -68,11 +71,17 @@ type liveSession struct {
 	hub    *claudecli.LiveHub
 	access runAccess
 	record string // the run record's file, to remove
+	// chat is the direct chat the session serves: another of the owner's
+	// chats runs one-off runs meanwhile, so that no session mixes two.
+	chat string
+	// fingerprint is liveFingerprint of what it was started with.
+	fingerprint string
 
 	// Under liveHost.mu.
 	proc      *claudecli.LiveProc
 	ready     bool
 	stopped   bool
+	busy      bool // a turn is under way
 	turns     int
 	started   time.Time
 	idleSince time.Time
@@ -151,27 +160,45 @@ func (h *liveHost) run(r *commandRunner, ctx context.Context, spec brain.RunSpec
 	return h.turn(ctx, r, s, spec, cb, pol), true
 }
 
-// ready is the brain's session if it is ready for a turn. Without one
-// under way, it starts one in the background, unless the last failed
-// lately.
+// ready is the brain's session if it is ready for a turn of spec's
+// message. Without one under way, or in place of one that ended, had its
+// turns or its time, idled too long or was started with other settings,
+// it starts one in the background, unless the last failed lately.
 func (h *liveHost) ready(r *commandRunner, spec brain.RunSpec) *liveSession {
+	fingerprint := liveFingerprint(r, spec)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	id := spec.ID
+	id, chat := spec.ID, spec.Message.JID
 	if s := h.sess[id]; s != nil {
-		if !s.ready {
+		var why string
+		switch {
+		case s.stopped:
+			// On its way out (stopped, timed out, interrupted, reaped); its
+			// watcher has not cleared it yet.
+		case !s.ready, s.busy:
 			return nil // still starting
-		}
-		if s.turns < h.b.waits.liveTurns && time.Since(s.started) < h.b.waits.liveAge {
+		case s.chat != chat:
+			return nil // another of the owner's chats'
+		case s.fingerprint != fingerprint:
+			why = "the brain's settings changed"
+		case s.turns >= h.b.waits.liveTurns:
+			why = fmt.Sprintf("it had its %d turns", s.turns)
+		case time.Since(s.started) >= h.b.waits.liveAge:
+			why = "it had its time"
+		case time.Since(s.idleSince) >= h.b.waits.liveIdle:
+			why = "it idled too long"
+		default:
 			return s
 		}
-		log.Printf("brain %s: the live session has had its turns (%d) or its time: starting a new one", id, s.turns)
-		h.stopLocked(s)
+		if why != "" {
+			log.Printf("brain %s: ending the live session, as %s: starting a new one", id, why)
+			h.stopLocked(s)
+		}
 	}
 	if f := h.fails[id]; time.Now().Before(f.until) {
 		return nil
 	}
-	s := &liveSession{brain: id, hub: claudecli.NewLiveHub(), started: time.Now()}
+	s := &liveSession{brain: id, chat: chat, fingerprint: fingerprint, hub: claudecli.NewLiveHub(), started: time.Now()}
 	h.sess[id] = s
 	h.wg.Go(func() { h.start(r, spec, s) })
 	return nil
@@ -239,7 +266,7 @@ func (h *liveHost) launch(r *commandRunner, spec brain.RunSpec, s *liveSession) 
 	args = append(args, runMCPArgs("claude", access)...)
 	// Last: the flag takes every argument after it that is no flag.
 	args = append(args, "--dangerously-load-development-channels", "server:"+mcpServerName)
-	binary, finalArgs, env, err := r.command(spec, st, args, nil, append(slices.Clone(access.Env), "TERM=xterm-256color"))
+	binary, finalArgs, env, err := r.command(spec, st, args, nil, append(slices.Clone(access.Env), "TERM=xterm-256color"), access.TokenDir)
 	if err != nil {
 		return fail(err)
 	}
@@ -278,12 +305,13 @@ func (h *liveHost) watch(s *liveSession) {
 	}
 	delete(h.token, s.access.Token)
 	s.ready, s.stopped = false, true
+	turns := s.turns
 	h.mu.Unlock()
 	s.access.Done()
 	if s.record != "" {
 		_ = os.Remove(s.record)
 	}
-	log.Printf("brain %s: the live session ended after %d turn(s)", s.brain, s.turns)
+	log.Printf("brain %s: the live session ended after %d turn(s)", s.brain, turns)
 }
 
 // check asks s to answer a message of its own, which shows that channels
@@ -347,7 +375,13 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 	s.turns++
 	n := s.turns
 	proc := s.proc
+	s.busy = true
 	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		s.busy, s.idleSince = false, time.Now()
+		h.mu.Unlock()
+	}()
 
 	answer, err := s.hub.Begin()
 	if err != nil {
@@ -387,9 +421,6 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 			res.Err = claudecli.ErrInterrupted
 		}
 	}
-	h.mu.Lock()
-	s.idleSince = time.Now()
-	h.mu.Unlock()
 	sink.Result(res)
 	return res
 }
@@ -406,7 +437,7 @@ func (h *liveHost) reap() {
 		case <-t.C:
 			h.mu.Lock()
 			for _, s := range h.sess {
-				if s.ready && !s.stopped && time.Since(s.idleSince) >= h.b.waits.liveIdle {
+				if s.ready && !s.stopped && !s.busy && time.Since(s.idleSince) >= h.b.waits.liveIdle {
 					log.Printf("brain %s: the live session idled for %s: ending it", s.brain, h.b.waits.liveIdle)
 					h.stopLocked(s)
 				}
@@ -438,6 +469,30 @@ func (h *liveHost) end(_ context.Context, token, text string) error {
 		log.Printf("brain %s: the live session stopped with no turn waiting (%d characters not sent)", s.brain, len(text))
 	}
 	return nil
+}
+
+// liveFingerprint sums up what a session of spec's brain is started with
+// that can change while it runs: the brain's folder, its settings and its
+// sandbox profile (deny_paths, allow_paths and the like). The session of
+// another is replaced, so that a tool taken away, a path denied or another
+// model holds from the next message on, as it does for a run.
+func liveFingerprint(r *commandRunner, spec brain.RunSpec) string {
+	sum := sha256.New()
+	if st := spec.Settings; st != nil {
+		s := *st
+		// What only the first turn's prompt tells, and a zone has no JSON.
+		s.Zone, s.FrideInstances = nil, nil
+		_ = json.NewEncoder(sum).Encode(s)
+	}
+	_, _ = io.WriteString(sum, spec.Dir+"\x00")
+	if r.sandbox != nil && r.sandbox.Enabled() {
+		profile, err := r.sandbox.Profile(spec.ID)
+		if err != nil {
+			profile = "error: " + err.Error()
+		}
+		_, _ = io.WriteString(sum, profile)
+	}
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
 func (h *liveHost) byToken(token string) *liveSession {

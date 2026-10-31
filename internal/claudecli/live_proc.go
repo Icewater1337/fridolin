@@ -120,8 +120,15 @@ func (p *LiveProc) Err() error {
 	return p.waitErr
 }
 
-// Kill stops the CLI and what it started.
-func (p *LiveProc) Kill() { _ = platform.KillProcessGroup(p.cmd.Process.Pid) }
+// Kill stops the CLI and what it started. Once the CLI was reaped its ID
+// may be another process's, and Kill does nothing.
+func (p *LiveProc) Kill() {
+	select {
+	case <-p.done:
+	default:
+		_ = platform.KillProcessGroup(p.cmd.Process.Pid)
+	}
+}
 
 // Screen is the end of what the CLI wrote, without escape sequences: for
 // the log when the session did not come up.

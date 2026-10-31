@@ -162,7 +162,7 @@ func excluded(rel string, dir bool) bool {
 		return dir || rel != EncryptionState
 	}
 	if dir {
-		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "media", "vault", "migration"}, base) {
+		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "live-tokens", "media", "vault", "migration"}, base) {
 			return true
 		}
 		// A brain's TMPDIR and caches (brains/<id>/tmp, brains/<id>/cache).

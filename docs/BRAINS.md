@@ -111,7 +111,10 @@ a Claude Code *channel*.
   `allowed_numbers`, from WhatsApp. Groups, other senders, untagged chatter,
   scheduled agents, delegated tasks, GitHub runs and the answers to approvals
   run `claude -p` as before. (Widening this to more chats is a later setting;
-  `owner_dm` is the narrowest.) A message that waits behind another waits in
+  `owner_dm` is the narrowest.) A session serves the direct chat it started
+  for: with more than one number in `allowed_numbers`, a message from
+  another runs `claude -p` meanwhile, so that no session mixes two chats.
+  A message that waits behind another waits in
   the brain's queue as ever, and `!stop` and the run timeout stop a turn the
   way they stop a run, by ending the session.
 - **How it starts.** The first message that could use a session runs as a
@@ -140,8 +143,10 @@ a Claude Code *channel*.
   the policy note. The `catch_up` tool gives the counts of what came in since
   the session last answered, and with `read: true` the last 10 lines of the
   chat.
-- **When it ends.** After 50 turns, 12 hours, or 30 minutes idle, and when
-  the bridge stops; Claude Code compacts its context itself meanwhile. The
+- **When it ends.** After 50 turns, 12 hours, or 30 minutes idle (never in
+  the middle of a turn), when the brain's settings or its sandbox change (a
+  tool taken away, a path denied, another model or folder), and when the
+  bridge stops; Claude Code compacts its context itself meanwhile. The
   next message runs as a one-off while a new session starts. A session that
   dies in the middle of a turn ends that message in an error, as a failed run
   would, and is not run again: it may have done something already.
@@ -152,7 +157,11 @@ a Claude Code *channel*.
   interactive `claude` for the session to start. A session holds the brain's
   login token in its environment as a run does, for as long as it lives.
 - **Security.** A session reads the owner's direct messages with the brain's
-  tools, as a run does. Nothing it can call changes who may message the
+  tools, as a run does. Its brain API token, which speaks for those messages
+  for as long as the session lives, is in a folder of its own,
+  `live-tokens/<brain>` in the data dir, which only the session's sandbox
+  opens: the brain's other runs (a group's, a scheduled agent's) read
+  `run-tokens/<brain>` and never see it. Nothing it can call changes who may message the
   bridge: the allowed numbers and groups, the nodes and the pairing are
   changed in the dashboard, the CLI, or by the owner's own chat commands,
   never by a tool.

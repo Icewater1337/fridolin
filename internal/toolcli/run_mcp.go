@@ -60,7 +60,10 @@ func RunMCP(ctx context.Context, args []string, stdin io.Reader, t IO) int {
 		srv.Events = events
 		pumpCtx, stopPump := context.WithCancel(ctx)
 		defer stopPump()
-		go pumpLive(pumpCtx, client, events, srv.Logf)
+		// Only once Claude Code took the server's capabilities: the bridge
+		// counts the session's first request for a message as its channel
+		// being up.
+		srv.Initialized = func() { go pumpLive(pumpCtx, client, events, srv.Logf) }
 	}
 	if err := srv.Serve(ctx, stdin, t.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(t.Stderr, "fridolin mcp: %v\n", err)
