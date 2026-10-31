@@ -10,6 +10,13 @@ for compatibility.
 
 ### Added
 
+- **GitHub in your chats.** A brain's `github` in brain.json (`{"repos":
+  ["you/project"], "permissions": {"issues": "write"}}`) logs the runs
+  that answer you, your direct messages and Plaud voice questions, in to
+  `gh` with a token for exactly that, minted per run and revoked when it
+  ends, as scheduled agents' `github` does. Groups, other people,
+  hand-offs and delegated tasks get none. Off unless you set it
+  (docs/BRAINS.md, "GitHub in your chats").
 - **Approve by reaction.** A 👍 on an approval poll (`request_approval`,
   `node_exec`, a skill's approve step) from your own number counts as Yes,
   a 👎 as No, as a tap in the poll does. A reaction from anyone else, any
