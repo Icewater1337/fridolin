@@ -107,9 +107,13 @@ type FrideInstanceState struct {
 	Notes   string `json:"notes,omitempty"`
 	// NoLogin says why its agents did not log in to Claude in the last
 	// start that worked; "" when they did.
-	NoLogin string    `json:"no_login,omitempty"`
-	Made    time.Time `json:"made,omitzero"`
-	Started time.Time `json:"started,omitzero"`
+	NoLogin string `json:"no_login,omitempty"`
+	// LentLogin says its agents logged in with the token the core lent in
+	// the last start that worked, which holds while it runs, also after
+	// the agent restarted.
+	LentLogin bool      `json:"lent_login,omitempty"`
+	Made      time.Time `json:"made,omitzero"`
+	Started   time.Time `json:"started,omitzero"`
 }
 
 // FrideInstanceIdentity is a git identity an instance has: never its

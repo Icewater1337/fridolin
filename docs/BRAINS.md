@@ -91,6 +91,7 @@ restart.
 | `memory` | The [memory index](#memory): `inject` (default `false`) puts the owner's messages and the brain's own notes that match a new message into its prompt; `top_k` (default 5, at most 20) and `max_chars` (default 2000, at most 20000) bound how much; `consolidate` (`"weekly sun 18:00"`, `"daily 07:00"`; default none) runs `skills/memory-consolidation.md` on that schedule, as the [scheduled agent](#scheduled-agents) `memory-consolidation`. Left out, nothing changes for the brain. |
 | `schedules` | The brain's [scheduled agents](#scheduled-agents): tasks it runs by itself on a schedule, or programs the bridge runs on a node. |
 | `files` | `files.uploads`: the folders, with their subfolders, that take uploads from the site roles allowed to upload to the brain, each `{"folder": "documents", "to_brain": true}`; `to_brain` hands an upload to the brain, as a file sent on WhatsApp, instead of leaving it in the folder. Set on the Files page; see [FILES.md](FILES.md#uploads). |
+| `github` | The GitHub access of the runs that answer *you*: your direct messages to the brain and your Plaud voice questions, never a group, a hand-off or another brain's task. `{"repos": ["you/project"], "permissions": {"issues": "write", "contents": "read"}}`; each such run is logged in to `gh` with a token for exactly these, which ends with the run. See [GitHub in your chats](#github-in-your-chats). |
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
@@ -822,6 +823,37 @@ github.token` (it becomes `FRIDOLIN_GITHUB_TOKEN` at the next `fridolin
 core start`); on a native install, set `FRIDOLIN_GITHUB_TOKEN` in the
 service's environment (CONFIGURATION.md, "Where to set them"). A run
 can read its own gh login, so the token is the brain's while it runs.
+
+### GitHub in your chats
+
+Scheduled agents are not the only runs that may use GitHub: a brain's
+own `github` in brain.json, with the same shape as an agent's, logs in
+the runs that answer you, so "file that as an issue" in your DM or in a
+voice question just works.
+
+```json
+"github": {"repos": ["you/project", "you/other"], "permissions": {"issues": "write", "contents": "read"}}
+```
+
+Only runs that answer the owner get it: a direct message from a number
+in `allowed_numbers` to the brain, and what the Plaud Sync app's voice
+mode sends, which only your paired phone can sign: a question, or a
+recording from your pin. A pin recording can hold other people's voices
+(a meeting), and the brain decides whether you spoke to it, so keep the
+grant narrow. A run for a group, for someone else's DM, for a hand-off
+(`/ingest`, a Plaud recording with voice mode off, an upload), for a
+task the core brain delegated, or for untagged chatter gets none, so
+what other people write cannot reach your GitHub through it. A scheduled agent keeps its own grant. The token is
+minted per run from the GitHub App (or the typed fallback token) and
+revoked when the run ends, as [above](#github-for-scheduled-agents).
+
+**A trade-off.** A run that answers you also reads what it fetches,
+files and web pages among them, so a page it reads could try to make it
+use the token. Keep the grant to the repositories and permissions you
+want filed from chat (`issues: write`, `contents: read` is enough for
+issues). Like every field of brain.json, a change the brain makes
+itself waits for your approval, which names the repositories and
+permissions.
 
 ### The Schedules page and the CLI
 

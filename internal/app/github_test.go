@@ -24,6 +24,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/ghapp"
 	"github.com/Icewater1337/fridolin/internal/ghapp/ghapptest"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
@@ -447,5 +448,71 @@ func TestGitHubConnectLikeABrowser(t *testing.T) {
 	done()
 	if len(fake.Live()) != 0 {
 		t.Errorf("tokens left: %v", fake.Live())
+	}
+}
+
+// TestGitHubGrantOfARun: the brain's own grant goes only to a run that
+// answers the owner's direct message; a message's own grant (a scheduled
+// agent's, a voice question's) wins; a group, someone else, a hand-off
+// and a delegated task get nothing of the brain's.
+func TestGitHubGrantOfARun(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Settings{Live: config.Live{AllowedNumbers: []string{"15551234567"}}}
+	own := &chat.GitHubGrant{Repos: []string{"you/fridolin"}, Permissions: map[string]string{"issues": "write"}}
+	sched := &chat.GitHubGrant{Repos: []string{"you/other"}, Permissions: map[string]string{"contents": "read"}}
+	owner := chat.Inbound{JID: apiTestDM, Sender: "15551234567", Source: chat.SourceWhatsApp}
+	for _, tc := range []struct {
+		name string
+		m    chat.Inbound
+		own  *chat.GitHubGrant
+		want *chat.GitHubGrant
+	}{
+		{"owner's DM", owner, own, own},
+		{"owner's DM, brain without a grant", owner, nil, nil},
+		{"the message's grant wins", chat.Inbound{JID: apiTestDM, Sender: "15551234567", Source: chat.SourceSchedule, GitHub: sched}, own, sched},
+		{"someone else's DM", chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Source: chat.SourceWhatsApp}, own, nil},
+		{"the owner in a group", chat.Inbound{JID: apiTestGroup, Sender: "15551234567", Source: chat.SourceWhatsApp}, own, nil},
+		{"a hand-off", chat.Inbound{JID: apiTestDM, Brain: "a", Sender: "plaud", Source: chat.SourceIngest}, own, nil},
+		{"a delegated task", chat.Inbound{JID: chat.DelegateChatPrefix + "x", Sender: "15551234567", Source: chat.SourceDelegate}, own, nil},
+		{"untagged chatter", chat.Inbound{JID: apiTestDM, Sender: "15551234567", Source: chat.SourceWhatsApp, Silent: true}, own, nil},
+	} {
+		run := runInfoFor("a", tc.m)
+		run.OwnerGitHub = tc.own
+		if got := githubGrantOf(run, cfg); got != tc.want {
+			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestGitHubTokenForTheOwnersDM: a brain with a github grant in its
+// brain.json logs the run that answers the owner's direct message in to
+// gh with a token for exactly that grant.
+func TestGitHubTokenForTheOwnersDM(t *testing.T) {
+	t.Parallel()
+	tb, _ := serveTestBridge(t, "")
+	grant := &chat.GitHubGrant{Repos: []string{"you/fridolin"}, Permissions: map[string]string{"issues": "write", "contents": "read"}}
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}, GitHub: grant})
+	if _, err := tb.cfgs.Update("", func(c *config.File) error { c.AllowedNumbers = []string{"15551234567"}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	fake := useFakeGitHub(t, tb.github)
+	creds, err := tb.github.client.Convert(context.Background(), ghapptest.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.github.secrets.save(creds); err != nil {
+		t.Fatal(err)
+	}
+	envLog := filepath.Join(t.TempDir(), "brain.env")
+	setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
+
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "file the issue", Source: chat.SourceWhatsApp}})
+	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
+	logged, err := os.ReadFile(envLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := fake.LastMinted(); fmt.Sprint(m.Repos, m.Permissions) != "[fridolin] map[contents:read issues:write]" || !strings.Contains(string(logged), "GH_CONFIG_DIR=") {
+		t.Errorf("the owner's DM got %+v, environment:\n%s", m, logged)
 	}
 }

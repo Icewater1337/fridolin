@@ -49,7 +49,8 @@ type Inbound struct {
 	// activity log: a scheduled agent's run keeps its own log too.
 	Log func(line string)
 	// GitHub, when set, asks for a GitHub token for the run that answers
-	// the message (docs/GITHUB.md): a scheduled agent's grant.
+	// the message (docs/GITHUB.md): a scheduled agent's grant, or the
+	// brain's own for a voice question from the owner's phone.
 	GitHub *GitHubGrant
 	// RunTimeout, when set, stops the run that answers the message after
 	// that long, in place of run_timeout_minutes, shorter or longer: a
