@@ -422,7 +422,16 @@ the CLI default. Brains can override it.
 ### `disallowed_tools`
 
 Tools brains may not use, passed as `--disallowed-tools`, e.g.
-`["WebFetch", "WebSearch"]`. Brains can override the list.
+`["WebFetch", "WebSearch"]`. Brains can override the list: set `[]` on a
+brain to allow it every tool, for instance web access for the brain only
+you message while the others keep the global list. Without
+`dangerously_skip_permissions` the bridge allows WebSearch explicitly
+(`--allowed-tools`), since `claude -p` cannot ask, but not WebFetch: it
+fetches any URL the model picks, so what a brain read could leave in a
+request nobody sees in the chat. A brain that is to have WebFetch there
+gets it from a `permissions.allow` rule (`"WebFetch"`) in its folder's
+`.claude/settings.json`. A tool on the `disallowed_tools` list stays off
+either way.
 
 ### `dangerously_skip_permissions`
 
@@ -439,8 +448,9 @@ reading and searching the files in the brain's folder, and whatever a
 `permissions.allow` rule in the brain folder's `.claude/settings.json`
 allows (or one in your own settings, with
 [`inherit_claude_user_config`](#inherit_claude_user_config)). A brain then
-answers and reads its files, but cannot write its memories, run its
-skills' scripts or look anything up on the web.
+answers and reads its files and may search the web (WebSearch, unless
+`disallowed_tools` lists it), but cannot write its memories, run its
+skills' scripts or fetch a web page.
 
 The [sandbox](#sandbox-macos) does not depend on this setting: it limits
 what every run can read and write either way. With this on, it is what
@@ -1063,6 +1073,11 @@ everything but files alone. A manipulated brain can therefore still:
 - read whatever else your user can read: other projects in your home
   folder, configuration under `~/.config` and `~/Library` not listed above,
   and the files the bridge runs (its tools, the Claude CLI)
+- send what it read out of the machine: the profile limits files, not the
+  network, so a brain with WebFetch (or a shell, with
+  `dangerously_skip_permissions`) can put it in a request to any address,
+  which nobody sees in the chat. Keep `WebFetch` in `disallowed_tools` for
+  brains that people you do not trust may message
 - find out whether a name it guesses is there in a folder it may not read
   (the top of the media folder, another brain's inbox, `~/.ssh`): the
   sandbox refuses a name that exists with "Operation not permitted" and one

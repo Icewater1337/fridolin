@@ -46,6 +46,11 @@ func (b *App) devVote(req httpapi.DevVoteRequest) error {
 	if err != nil {
 		return err
 	}
+	voter := types.NewJID(chat.NormalizeJID(req.Voter), types.DefaultUserServer)
+	if req.Reaction != "" {
+		b.recordReaction(pollReaction{Poll: poll, Reactor: voter, Emoji: req.Reaction})
+		return nil
+	}
 	selected := []string{}
 	for _, o := range req.Option {
 		if !slices.Contains(poll.Options, o) {
@@ -53,7 +58,6 @@ func (b *App) devVote(req httpapi.DevVoteRequest) error {
 		}
 		selected = append(selected, o)
 	}
-	voter := types.NewJID(chat.NormalizeJID(req.Voter), types.DefaultUserServer)
 	if err := b.store.SavePollVote(req.Poll, voter.String(), selected); err != nil {
 		return err
 	}

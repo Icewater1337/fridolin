@@ -10,6 +10,12 @@ for compatibility.
 
 ### Added
 
+- **Approve by reaction.** A 👍 on an approval poll (`request_approval`,
+  `node_exec`, a skill's approve step) from your own number counts as Yes,
+  a 👎 as No, as a tap in the poll does. A reaction from anyone else, any
+  other emoji, or one on a poll that is not an approval counts for
+  nothing, and the poll keeps working. Reactions are logged as
+  `approval_vote` lines in the audit log.
 - **A live Claude session per brain, for your direct messages.** With
   `"live_session": "owner_dm"` in a brain's `brain.json`, the brain keeps one
   Claude Code session running and wakes it with each message you write to it
@@ -38,6 +44,32 @@ for compatibility.
   [docs/PLAUD.md](docs/PLAUD.md#updates)
 
 ### Fixed
+
+- **WebFetch is no longer on by default for brains without
+  `dangerously_skip_permissions`** (#410). Since #406 such a brain got
+  `--allowed-tools WebSearch,WebFetch`, while the docs said it could not
+  reach the web: WebFetch fetches any URL the model picks, a way out for
+  what a brain read, in the mode chosen for brains that strangers may
+  message. It now gets WebSearch only; one that is to fetch pages gets
+  `"WebFetch"` from a `permissions.allow` rule in its folder's
+  `.claude/settings.json`. To give one brain the web while the others keep
+  the global `disallowed_tools`, set `"disallowed_tools": []` on that
+  brain. The docs say so, and the sandbox section names the network as
+  what it does not limit.
+
+- **`!approved` approves.** Typed in the past tense, the owner's
+  `!approve`, `!deny` and `!revoke` went to the brain, which knows
+  nothing of the bridge's own approvals and answered that nothing waited
+  (2026-10-29, while a node's request did). `!approved`, `!denied` and
+  `!revoked` now mean the commands.
+
+- **FrIDE's questions reach your chat whole.** Every piece of FrIDE's news
+  was cut to three lines and 300 characters, inside a word if need be, so
+  a question you had to answer often ended mid-sentence ("… more in the
+  dashboard"). Now a question comes whole (only a runaway text over 4000
+  characters is cut), a failure keeps its reason up to 1500 characters,
+  and other news is up to five lines and 600 characters, cut at the end of
+  a sentence or a word.
 
 - **FrIDE's agents merge their own green pull requests again.** They run
   Claude Code in auto mode, whose own judgement refuses by default to

@@ -86,6 +86,7 @@ func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure
 	opts.Container = fixedDeviceContainer{dev}
 	opts.Log = waLog.Noop
 	opts.OnVote = whatsAppVoteHandler(tb.recordVote)
+	opts.OnReaction = whatsAppReactionHandler(tb.recordReaction)
 	opts.OnChange = tb.handleChange
 	opts.GroupRules = whatsAppGroupRules(tb.groupRules)
 	opts.Notify = func(jid, text string) { _ = tb.dev.SendMessage(context.Background(), jid, text) }

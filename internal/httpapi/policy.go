@@ -62,6 +62,8 @@ type DevVoteRequest struct {
 	Poll   string   `json:"poll"`
 	Voter  string   `json:"voter"`
 	Option []string `json:"options"`
+	// Reaction reacts with this emoji to the poll instead of voting.
+	Reaction string `json:"reaction,omitempty"`
 }
 
 // PolicyAPI serves the policy's views: threads, approvals, the audit log,

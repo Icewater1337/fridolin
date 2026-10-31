@@ -6,15 +6,42 @@ import (
 )
 
 func TestFrideShort(t *testing.T) {
+	words := strings.Repeat("word ", 130)                                                                         // 650 runes, no sentence end
+	sentences := strings.Repeat("A short sentence here. ", 20) + "And the last one" + strings.Repeat(" more", 40) // a sentence end past the half
 	for _, tc := range []struct{ in, want string }{
 		{"one\ntwo", "one\ntwo"},
 		{"one\n\n\ntwo\nthree", "one\ntwo\nthree"},
-		{"1\n2\n3\n4", "1\n2\n3\n" + FrideMore},
-		{strings.Repeat("x", 301), strings.Repeat("x", 300) + "\n" + FrideMore},
+		{"1\n2\n3\n4\n5\n6", "1\n2\n3\n4\n5\n" + FrideMore},
+		{strings.Repeat("x", 601), strings.Repeat("x", 600) + "\n" + FrideMore},
+		// Never inside a word: at the last space before the bound.
+		{words, strings.TrimSpace(words[:600]) + "\n" + FrideMore},
+		// At the last sentence end when there is one in the second half.
+		{sentences, strings.TrimSpace(sentences[:strings.LastIndex(sentences[:600], ".")+1]) + "\n" + FrideMore},
 	} {
 		if got := frideShort(tc.in); got != tc.want {
 			t.Errorf("frideShort(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// A question comes whole, however many lines, up to a bound only a
+// runaway text reaches; a failure keeps its reason at length; other news
+// is short.
+func TestFrideFor(t *testing.T) {
+	question := "May it use the development-channels flag with a fridolin-owned MCP server, or should it wait for an allowlisted channel?\n" +
+		strings.TrimSpace(strings.Repeat("Some context the owner needs to decide. ", 20)) + "\nOption one\nOption two\nOption three\nOption four\nOption five"
+	if got := frideFor("question", question); got != question {
+		t.Errorf("a question was cut:\n%s", got)
+	}
+	if got := frideFor("question", strings.Repeat("why ", 1100)); !strings.HasSuffix(got, FrideMore) || len([]rune(got)) > frideMaxQuestionRunes+len([]rune(FrideMore))+1 {
+		t.Errorf("a runaway question: %d runes", len([]rune(got)))
+	}
+	failed := strings.Repeat("the build broke because ", 50) // 1200 runes
+	if got := frideFor("failed", failed); got != strings.TrimSpace(failed) {
+		t.Errorf("a failure was cut:\n%s", got)
+	}
+	if got := frideFor("update", question); !strings.HasSuffix(got, FrideMore) {
+		t.Errorf("news was not shortened:\n%s", got)
 	}
 }
 

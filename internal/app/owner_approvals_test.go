@@ -475,3 +475,20 @@ func TestNodeRequestIgnoresFreeMemory(t *testing.T) {
 		t.Error("asking for notify too is the same request")
 	}
 }
+
+// TestApprovedMeansApprove: "!approved", as the owner types it now and
+// then, approves what waits, as !approve does, instead of going to the
+// brain, which knows nothing of the bridge's approvals.
+func TestApprovedMeansApprove(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true}}`)
+	addr := h.StartNodes()
+	id := h.joinNode(addr, "laptop", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
+	h.WaitSent(harnessDM, "*laptop*")
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!Approved"}); !strings.HasPrefix(got, "✅ *laptop* is approved") {
+		t.Fatalf("!Approved: %q", got)
+	}
+	if d := h.device(id); d != nodeproto.DeviceApproved {
+		t.Errorf("after !Approved: %s", d)
+	}
+}

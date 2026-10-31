@@ -691,6 +691,8 @@ func TestClaudeArgs(t *testing.T) {
 		{"own setup only", brainruntime.Settings{}, "", "",
 			[]string{"--setting-sources project,local", "--strict-mcp-config"},
 			[]string{"--settings", "--mcp-config", "--dangerously-skip-permissions", "--model", "--effort", "--disallowed-tools"}},
+		{"web search without --dangerously-skip-permissions, not WebFetch", brainruntime.Settings{DisallowedTools: []string{"WebSearch"}}, "", "",
+			[]string{"--allowed-tools WebSearch --", "--disallowed-tools WebSearch"}, []string{"WebFetch"}},
 		{"with the folder's .mcp.json", brainruntime.Settings{}, mcp, "",
 			[]string{"--setting-sources project,local", "--strict-mcp-config --mcp-config " + mcp}, nil},
 		{"with the instructions above excluded", brainruntime.Settings{}, mcp, settings,
@@ -698,7 +700,7 @@ func TestClaudeArgs(t *testing.T) {
 		{"inherit_claude_user_config", brainruntime.Settings{InheritUser: true}, mcp, settings,
 			nil, []string{"--setting-sources", "--strict-mcp-config", "--settings", "--mcp-config"}},
 		{"model, effort, tools, permissions", brainruntime.Settings{Model: "m", Effort: "high", DisallowedTools: []string{"WebFetch", "WebSearch"}, Dangerously: true}, mcp, settings,
-			[]string{"--model m", "--effort high", "--disallowed-tools WebFetch,WebSearch", "--dangerously-skip-permissions"}, nil},
+			[]string{"--model m", "--effort high", "--disallowed-tools WebFetch,WebSearch", "--dangerously-skip-permissions"}, []string{"--allowed-tools"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

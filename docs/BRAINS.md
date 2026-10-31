@@ -396,6 +396,8 @@ WhatsApp chat (a delegated task whose core run was not in one), to your
 DM, the first number in `allowed_numbers`. Only votes from the numbers in
 `allowed_numbers` count; anyone else's is ignored and logged. *Show me
 the draft* sends what the run gave as `details` and leaves the poll open.
+A 👍 reaction on the poll from an allowed number counts as *Yes*, a 👎 as
+*No*; other emoji and other people's reactions are ignored and logged.
 The dashboard's Approvals page shows what waits, with *Approve* and
 *Deny*, which count as yours. No answer within
 `policy.approval_timeout_hours` (24) counts as no.

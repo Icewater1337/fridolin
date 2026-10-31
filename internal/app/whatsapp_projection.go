@@ -42,6 +42,15 @@ func whatsAppVoteHandler(handler func(pollVote)) func(whatsapp.Vote) {
 	}
 }
 
+func whatsAppReactionHandler(handler func(pollReaction)) func(whatsapp.Reaction) {
+	if handler == nil {
+		return nil
+	}
+	return func(r whatsapp.Reaction) {
+		handler(pollReaction{Poll: store.SentPoll(r.Poll), Reactor: r.Reactor, Emoji: r.Emoji})
+	}
+}
+
 func whatsAppGroupRules(rules func(string) groupRules) func(string) whatsapp.GroupRules {
 	if rules == nil {
 		return nil
@@ -97,6 +106,7 @@ func whatsAppIdentity() whatsapp.Identity {
 func (b *App) whatsAppOptions() whatsapp.Options {
 	opts := whatsAppOptions(func() config.Settings { return RuntimeSettings(b.cfgs) }, b.store, b.handleInbound, b.recordIgnored)
 	opts.OnVote = whatsAppVoteHandler(b.recordVote)
+	opts.OnReaction = whatsAppReactionHandler(b.recordReaction)
 	opts.OnChange = b.handleChange
 	opts.GroupRules = whatsAppGroupRules(b.groupRules)
 	return opts
