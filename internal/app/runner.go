@@ -103,6 +103,7 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	if r.hooks != nil && r.hooks.RunEnv != nil {
 		run := runInfoFor(spec.ID, spec.Message)
 		run.Policy = pol
+		run.OwnerGitHub = s.Manifest.GitHub
 		access := r.hooks.RunEnv(run)
 		// After Wait: the tools the run started have exited by then, or
 		// are left behind and lose the brain API with the run.

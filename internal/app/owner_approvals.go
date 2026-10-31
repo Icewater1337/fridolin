@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -645,6 +646,9 @@ func (b *App) brainItem(id, brainName string, disk, approved manifest.Manifest, 
 	m.Unexpected = brainFileUnexpected
 	if changed := changedFields(disk, approved); len(changed) > 0 {
 		m.Allows = []string{"run with these settings changed: " + strings.Join(changed, ", ")}
+		if g := disk.GitHub; g != nil && slices.Contains(changed, "github") {
+			m.Allows = append(m.Allows, "use GitHub when it answers your direct messages and voice questions: "+githubPlain(*g))
+		}
 	}
 	freshness(&it, since)
 	it.approve = func(context.Context, string) (string, error) {
@@ -657,6 +661,16 @@ func (b *App) brainItem(id, brainName string, disk, approved manifest.Manifest, 
 		return outboundmsg.DeniedReply(m.Label, "It keeps running as you approved it before; the change waits on the Brains page."), nil
 	}
 	return it
+}
+
+// githubPlain says what a GitHub grant gives: each permission with its
+// access, in the grant's repositories.
+func githubPlain(g chat.GitHubGrant) string {
+	var perms []string
+	for _, p := range slices.Sorted(maps.Keys(g.Permissions)) {
+		perms = append(perms, g.Permissions[p]+" "+p)
+	}
+	return strings.Join(perms, ", ") + " in " + strings.Join(g.Repos, ", ")
 }
 
 // changedFields are the settings of brain.json that differ between disk

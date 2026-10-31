@@ -131,5 +131,14 @@
         "folder": "inbox/scans"
       }
     ]
+  },
+  "github": {
+    "repos": [
+      "you/project"
+    ],
+    "permissions": {
+      "contents": "read",
+      "issues": "write"
+    }
   }
 }
