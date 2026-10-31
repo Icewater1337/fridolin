@@ -35,6 +35,18 @@ for compatibility.
 
 ### Fixed
 
+- **WebFetch is no longer on by default for brains without
+  `dangerously_skip_permissions`** (#410). Since #406 such a brain got
+  `--allowed-tools WebSearch,WebFetch`, while the docs said it could not
+  reach the web: WebFetch fetches any URL the model picks, a way out for
+  what a brain read, in the mode chosen for brains that strangers may
+  message. It now gets WebSearch only; one that is to fetch pages gets
+  `"WebFetch"` from a `permissions.allow` rule in its folder's
+  `.claude/settings.json`. To give one brain the web while the others keep
+  the global `disallowed_tools`, set `"disallowed_tools": []` on that
+  brain. The docs say so, and the sandbox section names the network as
+  what it does not limit.
+
 - **`!approved` approves.** Typed in the past tense, the owner's
   `!approve`, `!deny` and `!revoke` went to the brain, which knows
   nothing of the bridge's own approvals and answered that nothing waited
