@@ -23,9 +23,12 @@ func Args(s Options, mcpConfig, settings string) []string {
 	if s.Dangerously {
 		args = append(args, "--dangerously-skip-permissions")
 	} else {
-		// Nobody can approve a prompt in -p, so without this the web tools
-		// are refused. DisallowedTools still wins over it.
-		args = append(args, "--allowed-tools", "WebSearch,WebFetch")
+		// Nobody can approve a prompt in -p, so without this web search is
+		// refused. WebFetch is not allowed so: it fetches any URL the model
+		// picks, an outbound channel for what the brain reads (#410); a
+		// brain that is to have it gets it from a permissions.allow rule of
+		// its own folder's .claude/settings.json. DisallowedTools still wins.
+		args = append(args, "--allowed-tools", "WebSearch")
 	}
 	if s.Model != "" {
 		args = append(args, "--model", s.Model)
