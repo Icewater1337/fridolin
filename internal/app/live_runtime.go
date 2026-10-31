@@ -407,6 +407,12 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 		h.mu.Unlock()
 	}()
 
+	// Before the turn waits for its answer: a Stop that comes while the
+	// token is minted then finds no turn waiting, rather than ending this
+	// one before its message went in.
+	if s.gh != "" {
+		defer h.loginGitHub(ctx, s, spec)()
+	}
 	answer, err := s.hub.Begin()
 	if err != nil {
 		return claudecli.Result{Err: err}
@@ -424,9 +430,6 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 	notice := time.AfterFunc(r.waits.workingNotice, cb.Notice)
 	defer notice.Stop()
 
-	if s.gh != "" {
-		defer h.loginGitHub(s, spec)()
-	}
 	if err := s.hub.Deliver(claudecli.LiveEvent{Content: spec.LivePrompt(kind), Meta: map[string]string{"kind": "message", "turn": strconv.Itoa(n)}}); err != nil {
 		return claudecli.Result{Err: err}
 	}
@@ -456,15 +459,18 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 // token of the brain's grant minted for it, as a one-off run's gh is
 // (withGitHubToken); what it returns logs gh out and revokes the token,
 // once the turn is over. A token that cannot be minted leaves the turn
-// without one, and the log says why.
-func (h *liveHost) loginGitHub(s *liveSession, spec brain.RunSpec) func() {
+// without one, and the log says why; a session on its way out gets none.
+func (h *liveHost) loginGitHub(ctx context.Context, s *liveSession, spec brain.RunSpec) func() {
 	run := runInfoFor(spec.ID, spec.Message)
 	run.OwnerGitHub = spec.Settings.Manifest.GitHub
 	g := githubGrantOf(run, h.b.cfgs.Get())
-	if g == nil {
+	h.mu.Lock()
+	stopped := s.stopped
+	h.mu.Unlock()
+	if g == nil || stopped {
 		return func() {}
 	}
-	ctx, cancel := context.WithTimeout(h.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	tok, done, err := h.b.github.Mint(ctx, *g)
 	if err != nil {

@@ -16,7 +16,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/ghapp"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
@@ -522,7 +521,8 @@ func newGitHubConfigDir(dir string) (string, error) {
 
 // writeGitHubHosts logs gh in to GitHub with tok: hosts.yml in gh, which
 // replaces the one there whole, so that a gh running meanwhile reads the
-// old login or the new one.
+// old login or the new one. A folder that is gone (its session ended) is
+// not made again.
 func writeGitHubHosts(gh, tok string) error {
 	// The user an installation token acts as; gh only shows it.
 	const user = "x-access-token"
@@ -533,5 +533,19 @@ func writeGitHubHosts(gh, tok string) error {
 		"    git_protocol: https\n" +
 		"    oauth_token: " + tok + "\n" +
 		"    user: " + user + "\n"
-	return fsx.WriteFileAtomic(filepath.Join(gh, "hosts.yml"), []byte(hosts), 0o600, false)
+	tmp, err := os.CreateTemp(gh, ".hosts.yml.*.tmp")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.WriteString(hosts)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), filepath.Join(gh, "hosts.yml"))
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return err
 }

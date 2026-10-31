@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,8 @@ import (
 // hook of its --settings with the answer as last_assistant_message.
 //
 // FRIDOLIN_FAKE_LIVE_LOG gets one JSON line per start and per message
-// (args, content, pid, and the gh login it sees: ghLogin);
+// (args, content, pid, and the gh login it sees: ghLogin, with the status
+// FRIDOLIN_FAKE_GH_API, a fake GitHub, answers it: ghStatus);
 // FRIDOLIN_FAKE_LIVE_DEAF=1 makes it ignore every
 // notification, as a CLI with channels off would; FRIDOLIN_FAKE_LIVE_EXIT_ON
 // makes it exit at a message holding that text, before it answers;
@@ -105,7 +107,8 @@ func fakeLive(args []string) {
 			continue
 		}
 		content := m.Params.Content
-		logLine(map[string]any{"event": "message", "kind": m.Params.Meta["kind"], "turn": m.Params.Meta["turn"], "content": content, "gh": ghLogin()})
+		gh := ghLogin()
+		logLine(map[string]any{"event": "message", "kind": m.Params.Meta["kind"], "turn": m.Params.Meta["turn"], "content": content, "gh": gh, "gh_status": ghStatus(gh)})
 		if log := os.Getenv("FRIDOLIN_FAKE_PROMPT_LOG"); log != "" {
 			if f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 				fmt.Fprintf(f, "%s\n%s\n", PromptMark, content)
@@ -162,6 +165,26 @@ func ghLogin() string {
 		}
 	}
 	return ""
+}
+
+// ghStatus is the status FRIDOLIN_FAKE_GH_API answers a request made with
+// tok, which tells whether the token is live; 0 without either.
+func ghStatus(tok string) int {
+	api := os.Getenv("FRIDOLIN_FAKE_GH_API")
+	if api == "" || tok == "" {
+		return 0
+	}
+	req, err := http.NewRequest("GET", api+"/installation/repositories", nil)
+	if err != nil {
+		return 0
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0
+	}
+	resp.Body.Close()
+	return resp.StatusCode
 }
 
 // stopHook is the command of the Stop hook in the --settings argument.
