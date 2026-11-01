@@ -352,15 +352,17 @@ func (b *BoxCore) ImportFiles(ctx context.Context, dir string, files map[string]
 	}
 	defer clear(in)
 	out, err := b.run(ctx, 3*time.Minute, b.DataDir, in, "core", "files", "import")
-	if err != nil {
-		return nil, nil, err
-	}
 	var res struct {
 		Stored []string `json:"stored"`
 		Kept   []string `json:"kept"`
 	}
-	if err := decodeLast(out, &res); err != nil {
-		return nil, nil, err
+	derr := decodeLast(out, &res)
+	if err != nil {
+		// What a failed import wrote is printed all the same.
+		return res.Stored, res.Kept, err
+	}
+	if derr != nil {
+		return nil, nil, derr
 	}
 	return res.Stored, res.Kept, nil
 }

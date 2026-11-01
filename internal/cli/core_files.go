@@ -103,6 +103,13 @@ func coreFiles(args []string, env coreEnv) int {
 		}
 	}()
 	res := secretFilesResult{Stored: []string{}, Kept: []string{}}
+	// A failure still prints what was written, so the move records it
+	// (and forget can remove it) even though the import did not finish.
+	failed := func(err error) int {
+		fmt.Fprintf(env.stderr, "fridolin core files import: %v\n", err)
+		_ = json.NewEncoder(env.stdout).Encode(res)
+		return 1
+	}
 	creds, local := secretxfer.SplitFiles(in.Files)
 	if len(creds) > 0 {
 		if err := secretxfer.CheckFilesDir(in.Dir); err != nil {
@@ -110,23 +117,20 @@ func coreFiles(args []string, env coreEnv) int {
 			return 2
 		}
 		stored, kept, err := secretxfer.StoreFiles(expandTilde(in.Dir, home), creds)
-		if err != nil {
-			fmt.Fprintf(env.stderr, "fridolin core files import: %v\n", err)
-			return 1
-		}
 		res.Stored, res.Kept = append(res.Stored, stored...), append(res.Kept, kept...)
+		if err != nil {
+			return failed(err)
+		}
 	}
 	if len(local) > 0 {
 		if derr != nil {
-			fmt.Fprintf(env.stderr, "fridolin core files import: the data dir: %v\n", derr)
-			return 1
+			return failed(fmt.Errorf("the data dir: %w", derr))
 		}
 		// Into core/, which the import that follows keeps.
 		stored, replaced, err := secretxfer.StoreLocalFiles(dataDir, local)
 		res.Stored, res.Replaced = append(res.Stored, stored...), replaced
 		if err != nil {
-			fmt.Fprintf(env.stderr, "fridolin core files import: %v\n", err)
-			return 1
+			return failed(err)
 		}
 	}
 	_ = json.NewEncoder(env.stdout).Encode(res)

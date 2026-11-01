@@ -234,15 +234,18 @@ func (n NativeCore) ImportFiles(ctx context.Context, dir string, files map[strin
 	stderr := &limitedBuffer{max: 64 << 10}
 	cmd := exec.CommandContext(ctx, n.Exe, "core", "run", "core", "files", "import")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(in), &stdout, stderr
-	if err := cmd.Run(); err != nil {
-		return nil, nil, fmt.Errorf("fridolin core run core files import: %v: %s", err, lastLine(stderr.String()))
-	}
+	runErr := cmd.Run()
 	var res struct {
 		Stored []string `json:"stored"`
 		Kept   []string `json:"kept"`
 	}
-	if err := decodeLast(stdout.Bytes(), &res); err != nil {
-		return nil, nil, err
+	derr := decodeLast(stdout.Bytes(), &res)
+	if runErr != nil {
+		// What a failed import wrote is printed all the same.
+		return res.Stored, res.Kept, fmt.Errorf("fridolin core run core files import: %v: %s", runErr, lastLine(stderr.String()))
+	}
+	if derr != nil {
+		return nil, nil, derr
 	}
 	return res.Stored, res.Kept, nil
 }

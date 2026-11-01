@@ -169,3 +169,22 @@ func TestCoreFilesLocal(t *testing.T) {
 		t.Errorf("a credentials file without its folder: exit %d", code)
 	}
 }
+
+// An import that fails after the credential files were written still
+// prints them, so the move records them and forget can remove them (#452).
+func TestCoreFilesImportPartialFailure(t *testing.T) {
+	dst := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dst, "core"), nil, 0o600); err != nil { // StoreLocalFiles cannot make core/local-secrets
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	in, _ := json.Marshal(secretFiles{Dir: "~/.creds", Files: map[string][]byte{"google_calendar_token_home.json": []byte("{}"), "local:gitlab.json": []byte("{}")}})
+	var out bytes.Buffer
+	if code := runCore([]string{"files", "import"}, coreEnv{environ: []string{"HOME=" + home, "FRIDOLIN_HOME=" + dst}, stdin: bytes.NewReader(in), stdout: &out, stderr: io.Discard}); code != 1 {
+		t.Fatalf("import: exit %d, want 1", code)
+	}
+	var res secretFilesResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil || !slices.Equal(res.Stored, []string{"google_calendar_token_home.json"}) {
+		t.Fatalf("import printed %q, %v", out.String(), err)
+	}
+}
