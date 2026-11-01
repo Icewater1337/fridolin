@@ -133,6 +133,18 @@ func (h *liveHost) Stop() {
 	h.wg.Wait()
 }
 
+// up reports whether the brain's live session runs and is ready for a
+// turn, for the core brain's system_status.
+func (h *liveHost) up(brainID string) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sess[brainID]
+	return s != nil && s.ready && !s.stopped
+}
+
 // eligible reports whether spec's message is one a live session takes:
 // the brain has one, and it is its owner's direct message to it, from
 // WhatsApp, in a brain that runs the CLI as the session needs it (without

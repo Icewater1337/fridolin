@@ -175,11 +175,17 @@ func stateOf(v scheduleView) string {
 }
 
 // list answers GET /api/schedules.
-func (a *agents) list(context.Context) (any, error) {
+func (a *agents) list(ctx context.Context) (any, error) {
+	return a.view(ctx)
+}
+
+// view is the Schedules page's list of agents and reminders, which the
+// core brain's system_status sums up too.
+func (a *agents) view(context.Context) (schedulesView, error) {
 	cfg := a.b.cfgs.Get()
 	states, err := a.store.States()
 	if err != nil {
-		return nil, err
+		return schedulesView{}, err
 	}
 	now := time.Now().In(cfg.Live.Location())
 	views, _ := a.b.nodes.Views()

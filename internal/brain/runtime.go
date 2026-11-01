@@ -175,6 +175,8 @@ type brainRun struct {
 	msg     Inbound
 	started time.Time
 	lane    Lane
+	// timeout is how long the run may take, 0 for no limit.
+	timeout time.Duration
 }
 
 var (
@@ -443,7 +445,7 @@ func (br *Brain) worker(q *lane) {
 			timeout = m.RunTimeout
 		}
 		ctx, cancel := runContext(timeout)
-		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now(), lane: q.which}
+		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now(), lane: q.which, timeout: timeout}
 		q.current = run
 		br.mu.Unlock()
 
@@ -870,6 +872,10 @@ type RunView struct {
 	Silent  bool      `json:"silent"`
 	Started time.Time `json:"started"`
 	PID     int       `json:"pid"`
+	// Source is how its message came in (chat.Inbound.Source), and
+	// TimeoutSeconds how long it may take, 0 for no limit.
+	Source         string `json:"source"`
+	TimeoutSeconds int64  `json:"timeout_seconds"`
 }
 
 // QueuedView describes a waiting message.
@@ -907,7 +913,7 @@ func (q *lane) view() (*RunView, []QueuedView) {
 	var run *RunView
 	if cur := q.current; cur != nil {
 		run = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: textx.Truncate(cur.msg.TextWithQuote(), 160),
-			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
+			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid, Source: cur.msg.Source, TimeoutSeconds: int64(cur.timeout / time.Second)}
 	}
 	queue := []QueuedView{}
 	for _, i := range q.order() {

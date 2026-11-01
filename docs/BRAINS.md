@@ -275,6 +275,7 @@ what the model says:
 | `node_update(node)` | with nodes on: updates a node's fridolin to the core's version, a write action ([NODES.md](NODES.md#updates)) | absent |
 | `node_exec(argv, node, dir, timeout_seconds, approval_id, wait_seconds)`, `node_exec_rules(node)` | while a node whose `exec` you approved is online: runs one command its allowlist allows, a write action; a command whose rule has `approve` asks you in a poll each time ([NODES.md](NODES.md#the-core-brain-runs-commands)) | absent |
 | `plaud_app_update()`, `plaud_app_status()` | while the Plaud Sync app uploads through the site (`plaud.phone_upload`): builds the app as the Plaud card does, which the paired phones then install, a write action; and says what each phone runs and how its last update went ([PLAUD.md](PLAUD.md#updates)) | absent |
+| `system_status()`, `schedule_run(brain, name)`, `run_stop(brain, lane)`, `housekeeping_run(dry_run)` | the ops tools, see [below](#the-core-brains-ops-tools) | absent |
 
 Any brain, core or not, also gets the tools of Fridolin's
 [connections](CONNECTIONS.md#brains) while the connection has a key and
@@ -330,6 +331,23 @@ its `.md` files) or `skills/`. The bridge reads it outside the sandbox,
 so it follows no symlink on the way, not even one inside the folder.
 What the core learns about a sub-brain goes into its own notes, never the
 sub-brain's files.
+
+### The core brain's ops tools
+
+Every core run, a scheduled agent's too, can see how the system stands
+and act on it as you would on the dashboard, so that a maintenance agent
+(hourly, say) can look after things:
+
+| Tool | What |
+| --- | --- |
+| `system_status()` | one JSON snapshot: each brain's runs in both lanes (chat, source, start, age, timeout; see [Agents run beside the chats](#scheduled-agents)), what waits, whether its live session is up, how its last run ended; each scheduled agent's state, pause, run in progress, last run, next run, failures in a row and a change waiting for your approval; housekeeping and its last report; the Drive backup, the vault (sync, snapshots, Litestream) and each node target, with the last success and error; the nodes (online, last seen, version, what they offer, with problems such as `fride-host (not ready)`); FrIDE's instances and open threads; the Plaud phones' last upload and check-in; the core's version, uptime and the data folder's free disk. It holds no message text, token or secret |
+| `schedule_run(brain, name)` | starts a scheduled agent now, as the Schedules page's **Run now** does (its run history says "by hand (core brain)"); a write action |
+| `run_stop(brain, lane)` | stops a brain's current run in its `chat` or `background` lane, as the brain page's **Stop** does for both; what waits runs next. It refuses the run that calls it: a run in its own brain's lane is itself. A write action |
+| `housekeeping_run(dry_run)` | runs [housekeeping](CONFIGURATION.md#housekeeping) now, as its **Run now** does, and answers its report, without the command lines it found; `dry_run` only reports. A write action |
+
+A sub-brain's run, and a delegated one, has none of them. Like every
+write tool they are refused in a lockdown and to a run whose risk is
+`read`: give a maintenance agent `"risk": "write"`.
 
 ## Skills, risk and approvals
 
