@@ -240,3 +240,33 @@ func TestFrideInstanceCarryNextToSandbox(t *testing.T) {
 		t.Errorf("the saved history is %q, not the VM's", b)
 	}
 }
+
+// The carry tar runs as root and a file that changed while it read is
+// no failure; any other tar failure still stops the remake and keeps
+// the sandbox (#456).
+func TestFrideInstanceCarryTarAsRoot(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	f.start(workParams())
+	writeTestFile(t, f.home("work", "fride-companion/workspaces/w1/x.go"), "package x")
+	p := workParams()
+	p.MemoryMB = 8192
+	writeTestFile(t, filepath.Join(f.fake, "tar-exit"), "2\n")
+	if _, perr := f.a.frideInstanceStart(context.Background(), p); perr == nil {
+		t.Fatalf("a tar that could not read went on\n%s", f.log)
+	}
+	if called(fakeCalls(t, f.fake), "rm") {
+		t.Error("the remake removed the sandbox")
+	}
+	writeTestFile(t, filepath.Join(f.fake, "tar-exit"), "1\n")
+	if out := f.start(p); out.MemoryMB != 8192 {
+		t.Fatalf("the remake over a changing file: %+v\n%s", out, f.log)
+	}
+	if b, _ := os.ReadFile(f.home("work", "fride-companion/workspaces/w1/x.go")); string(b) != "package x" {
+		t.Errorf("the workspace did not come back: %q", b)
+	}
+	if !called(fakeCalls(t, f.fake), "exec", "-u", "root", "fride-work", "tar") {
+		t.Error("tar did not run as root")
+	}
+}

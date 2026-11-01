@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -185,22 +186,34 @@ func (o instanceOps) saveVM(ctx context.Context, sandbox, store string, paths []
 }
 
 // tarOut has the VM tar those of paths under home into the file tarball
-// on the host, which only stores it.
+// on the host, which only stores it. It tars as root, which reads what
+// another uid owns (a database container's data folder), and takes tar's
+// exit status 1, files that changed while it read, as done. The tarball
+// is written aside and only then replaces an earlier one, so a failed
+// tar keeps what was saved.
 func (o instanceOps) tarOut(sandbox, tarball, home string, paths []string) error {
-	f, err := os.OpenFile(tarball, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	part := tarball + ".part"
+	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
+	defer os.Remove(part)
 	defer f.Close()
 	var stderr bytes.Buffer
-	c, err := o.d.start(nil, f, &stderr, nil, append([]string{"exec", sandbox, "tar", "-cz", "-C", home}, paths...)...)
+	c, err := o.d.start(nil, f, &stderr, nil, append([]string{"exec", "-u", "root", sandbox, "tar", "--warning=no-file-changed", "-cz", "-C", home}, paths...)...)
 	if err == nil {
 		err = c.Wait()
+	}
+	if ee := (*exec.ExitError)(nil); errors.As(err, &ee) && ee.ExitCode() == 1 {
+		err = nil
 	}
 	if err != nil {
 		return fmt.Errorf("sbx could not tar %s out of the sandbox: %w", strings.Join(paths, ", "), sbxError(err, stderr.Bytes()))
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(part, tarball)
 }
 
 // restoreVM copies those of paths store has into the VM, into what is

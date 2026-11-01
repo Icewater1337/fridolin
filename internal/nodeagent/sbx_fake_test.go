@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -259,6 +260,15 @@ func fakeAgentRun(dir, pidFile string, argv, env []string, tok string) int {
 // fakeTar is `tar -cz -C DIR PATH…` (to stdout) and `tar -xz -C DIR`
 // (from stdin) in the VM's home, keeping symlinks as tar does.
 func fakeTar(dir, sandbox string, args []string) int {
+	// tar-exit in the fake's dir is the status a creating tar ends with
+	// after writing its archive (1: a file changed; 2: it could not read one).
+	exit := 0
+	if args[0] == "--warning=no-file-changed" {
+		args = args[1:]
+		if b, err := os.ReadFile(filepath.Join(dir, "tar-exit")); err == nil {
+			exit, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		}
+	}
 	if len(args) < 3 || args[1] != "-C" || args[2] != fakeVMHome {
 		fmt.Fprintf(os.Stderr, "the fake tars only under %s: %v\n", fakeVMHome, args)
 		return 2
@@ -274,7 +284,10 @@ func fakeTar(dir, sandbox string, args []string) int {
 		fmt.Fprintln(os.Stderr, "tar:", err)
 		return 2
 	}
-	return 0
+	if exit != 0 {
+		fmt.Fprintln(os.Stderr, "tar: exits", exit)
+	}
+	return exit
 }
 
 func tarCreate(home string, paths []string, w io.Writer) error {
