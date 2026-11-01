@@ -181,6 +181,11 @@ func (o instanceOps) make(ctx context.Context, st *FrideInstanceState, host *Fri
 // the old sandbox; removed is whether remake took it away.
 func (o instanceOps) remake(ctx context.Context, st *FrideInstanceState, host *FrideHostState, status string) (removed bool, err error) {
 	carry := o.carryDir(st.Name)
+	// A carry next to a sandbox is an earlier remake's, which saveVM would
+	// write over (tar truncates) and a failed save would delete.
+	if o.carrying(st.Name) {
+		return false, fmt.Errorf("%s holds an earlier remake's things; finish or remove the instance %s first", carry, st.Name)
+	}
 	if status == "running" {
 		if err := o.exec(ctx, st.Sandbox, nil, frideInstanceStop); err != nil {
 			return false, err

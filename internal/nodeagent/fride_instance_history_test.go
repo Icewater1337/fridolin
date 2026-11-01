@@ -206,3 +206,37 @@ func TestFrideInstanceTimedOutRemakeKeepsState(t *testing.T) {
 		t.Error("the next start did not remake")
 	}
 }
+
+// A carry next to a live sandbox (a remake whose carry could not be
+// removed) is not written over by the next remake, and removing the
+// instance saves the VM's newer history over the carry's.
+func TestFrideInstanceCarryNextToSandbox(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	f.start(workParams())
+	o := f.a.instanceOps()
+	ctx := context.Background()
+	stale := filepath.Join(o.carryDir("work"), "stale.txt")
+	writeTestFile(t, stale, "older VM")
+	writeTestFile(t, filepath.Join(o.carryDir("work"), ".claude/projects/p1/a.jsonl"), "old session")
+	writeTestFile(t, f.home("work", ".claude/projects/p1/a.jsonl"), "new session")
+	p := workParams()
+	p.MemoryMB = 8192
+	if _, perr := f.a.frideInstanceStart(ctx, p); perr == nil {
+		t.Fatalf("the remake went on over a carry\n%s", f.log)
+	}
+	if b, err := os.ReadFile(stale); err != nil || string(b) != "older VM" {
+		t.Errorf("the carry was touched: %q, %v", b, err)
+	}
+	if called(fakeCalls(t, f.fake), "rm") {
+		t.Error("the remake removed the sandbox")
+	}
+	if err := o.remove(ctx, "work", false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(o.historyDir("work"), ".claude/projects/p1/a.jsonl"))
+	if string(b) != "new session" {
+		t.Errorf("the saved history is %q, not the VM's", b)
+	}
+}
