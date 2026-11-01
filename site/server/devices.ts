@@ -138,8 +138,9 @@ export function deviceRoutes(devicesFile: string, spoolDir: string): express.Rou
       ok(await run())
     } catch (err) {
       // A refusal counts as a failure too: a pairing request needs only a key anyone can make.
-      if (err instanceof RefusedError) fail(req.ip ?? '')
-      res.status(err instanceof RefusedError ? 403 : 503).json({ error: (err as Error).message })
+      const refused = err instanceof RefusedError && !err.temporary
+      if (refused) fail(req.ip ?? '')
+      res.status(refused ? 403 : 503).json({ error: (err as Error).message })
     }
   }
 

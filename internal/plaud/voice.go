@@ -190,13 +190,20 @@ func (b *voiceBook) init() {
 	}
 }
 
+// temporaryError is a failure that a retry can get past: the bridge tells
+// the site, which tells the phone to try again.
+type temporaryError struct{ error }
+
+func (temporaryError) Temporary() bool { return true }
+func (e temporaryError) Unwrap() error { return e.error }
+
 // add keeps q under key, unless there are too many.
 func (b *voiceBook) add(key string, q *voiceQuestion) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.init()
 	if len(b.byID) >= maxVoiceWaiting {
-		return errors.New("too many voice questions at once; try again in a few minutes")
+		return temporaryError{errors.New("too many voice questions at once; try again in a few minutes")}
 	}
 	b.byID[key] = q
 	return nil
@@ -317,7 +324,7 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 		rec := phoneRecording(voicePinName, started, question)
 		path, err := p.inboxRecording(cfg, br, plaudPhonePrefix+c.Name, rec)
 		if err != nil {
-			return nil, err
+			return nil, temporaryError{err}
 		}
 		text, media = voicePinPrompt+"\n\n"+recordingMessage(cfg, rec), []string{path}
 		if len(question) <= VoiceQuestionMax {
@@ -359,7 +366,7 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 	}
 	if err := br.Ask(jid, voiceSender, text, media, quiet, answer, done); err != nil {
 		p.voice.remove(key)
-		return nil, fmt.Errorf("brain %s did not take the %s: %w", br.ID(), what, err)
+		return nil, temporaryError{fmt.Errorf("brain %s did not take the %s: %w", br.ID(), what, err)}
 	}
 	if c.Src == voiceSrcPin {
 		p.noteUpload(c.Iss, now)

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -371,5 +373,32 @@ func TestSiteLiveConnectionCaps(t *testing.T) {
 	m.settings.Enabled = true
 	if mods := m.LiveModules(); len(mods) != 3 {
 		t.Errorf("modules while the site is on: %v", mods)
+	}
+}
+
+type tempErr struct{}
+
+func (tempErr) Error() string   { return "queue is full" }
+func (tempErr) Temporary() bool { return true }
+
+// Only a temporary error is marked so: the site answers a plain refusal 403
+// and a temporary one 503.
+func TestSpoolAnswerMarksTemporaryErrors(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{{tempErr{}, true}, {fmt.Errorf("wrapped: %w", tempErr{}), true}, {errors.New("not allowed"), false}} {
+		dir := t.TempDir()
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Mkdir(filepath.Join(dir, "e"), 0o700)
+		spoolAnswer(root, "e", c.err, nil)
+		root.Close()
+		got := readSpoolAnswer(t, filepath.Join(dir, "e"))
+		if got["ok"] != false || (got["temporary"] == true) != c.want {
+			t.Errorf("%v: answer %v, want temporary %v", c.err, got, c.want)
+		}
 	}
 }
