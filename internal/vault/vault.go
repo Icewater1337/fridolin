@@ -422,6 +422,9 @@ func (v *Vault) Put(ctx context.Context, rel string, r io.Reader, prov Provenanc
 		return Entry{}, err
 	}
 	_, err = io.Copy(f, r)
+	if err == nil {
+		err = f.Sync() // data on disk before the rename, or a crash can publish an empty file
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
