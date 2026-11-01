@@ -445,3 +445,19 @@ func TestBoxCorePortsRefuseFride(t *testing.T) {
 		t.Errorf("FrIDE reached the core: %q", got)
 	}
 }
+
+// A files import that failed halfway still answers with what it wrote, so
+// the move records it (#452).
+func TestBoxCoreImportFilesPartial(t *testing.T) {
+	b, st := testBoxCore(t, &spawner{})
+	if err := st.Set(hostsecrets.ExportKey, "test-export-value"); err != nil {
+		t.Fatal(err)
+	}
+	b.Exec = func(context.Context, []string, []byte, ...string) ([]byte, error) {
+		return []byte(`{"stored":["a.json"],"kept":[]}`), errors.New("exit status 1")
+	}
+	stored, _, err := b.ImportFiles(context.Background(), "~/.credentials", map[string][]byte{"a.json": []byte("{}")})
+	if err == nil || !slices.Equal(stored, []string{"a.json"}) {
+		t.Fatalf("stored %q, err %v", stored, err)
+	}
+}
