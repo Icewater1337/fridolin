@@ -67,6 +67,16 @@ func TestRecurringNext(t *testing.T) {
 	if next, _ := either.Next(at("2026-10-23 10:00")); !next.Equal(at("2026-10-25 09:00")) {
 		t.Errorf("1st-or-Sunday next = %v", next)
 	}
+	// A day field starting with * (also */n) is unrestricted: the other
+	// field must match too, as in Vixie cron. 2026-10-25 is a Sunday.
+	oddWeekdays, _ := ParseRecurring("cron 0 9 */2 * 1-5", loc)
+	if next, _ := oddWeekdays.Next(at("2026-10-23 10:00")); !next.Equal(at("2026-10-27 09:00")) {
+		t.Errorf("*/2 with weekdays next = %v, want Tuesday the 27th", next)
+	}
+	oddDays, _ := ParseRecurring("cron 0 9 */2 * *", loc)
+	if next, _ := oddDays.Next(at("2026-10-23 10:00")); !next.Equal(at("2026-10-25 09:00")) {
+		t.Errorf("*/2 next = %v, want the 25th", next)
+	}
 	never, _ := ParseRecurring("cron 0 0 31 2 *", loc)
 	if _, ok := never.Next(at("2026-10-23 10:00")); ok {
 		t.Error("31 February came")

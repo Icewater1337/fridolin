@@ -81,6 +81,11 @@ for compatibility.
 
 ### Fixed
 
+- **Cron `*/n` in a day field.** A day-of-month or day-of-week field that
+  starts with `*` (`*/2`) no longer counts as restricted, so `0 9 */2 * 1-5`
+  runs on odd weekdays, not odd days or weekdays, and `0 9 */2 * *` skips
+  even days, as in cron.
+
 - **Moving a scheduled agent to an earlier time today is no missed run.**
   After an edit that changes `when`, a scheduled agent counts from the
   edit: it no longer runs at once (or logs a skipped run "while the bridge

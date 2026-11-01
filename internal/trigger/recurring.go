@@ -77,8 +77,8 @@ func ParseEvery(s string) (time.Duration, error) {
 // cronSpec is a parsed cron expression: the values each field allows.
 type cronSpec struct {
 	minute, hour, dom, month, dow [64]bool
-	// domAny and dowAny are "*" in those fields: with both restricted, a
-	// day matches either, as cron has it.
+	// domAny and dowAny: those fields start with "*" (also */n). With both
+	// restricted, a day matches either, as cron has it; otherwise both.
 	domAny, dowAny bool
 }
 
@@ -96,7 +96,7 @@ func parseCron(expr string) (*cronSpec, error) {
 	if len(f) != 5 {
 		return nil, fmt.Errorf("cron expression %q must have five fields: minute hour day-of-month month day-of-week", expr)
 	}
-	c := &cronSpec{domAny: f[2] == "*", dowAny: f[4] == "*"}
+	c := &cronSpec{domAny: strings.HasPrefix(f[2], "*"), dowAny: strings.HasPrefix(f[4], "*")}
 	sets := []*[64]bool{&c.minute, &c.hour, &c.dom, &c.month, &c.dow}
 	for i, field := range f {
 		spec := cronFields[i]
@@ -163,13 +163,8 @@ func cronValue(s string, lo, hi int, weekday bool) (int, error) {
 // dayMatches reports whether t's day is one the expression runs on.
 func (c *cronSpec) dayMatches(t time.Time) bool {
 	dom, dow := c.dom[t.Day()], c.dow[int(t.Weekday())]
-	switch {
-	case c.domAny && c.dowAny:
-		return true
-	case c.domAny:
-		return dow
-	case c.dowAny:
-		return dom
+	if c.domAny || c.dowAny {
+		return dom && dow
 	}
 	return dom || dow
 }
