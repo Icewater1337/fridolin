@@ -63,7 +63,7 @@ ARG LITESTREAM_VERSION=0.5.17
 # renovate: datasource=github-releases depName=cli/cli
 ARG GH_VERSION=2.103.2
 # renovate: datasource=github-releases depName=cloudflare/cloudflared
-ARG CLOUDFLARED_VERSION=2026.10.3
+ARG CLOUDFLARED_VERSION=2026.10.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
