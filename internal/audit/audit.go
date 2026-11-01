@@ -83,6 +83,14 @@ const (
 	// approved it; Outcome the exit code ("exit 0"), "timed out",
 	// "pending", "denied", or why it failed or was refused.
 	NodeExec = "node_exec"
+	// Errand is a step of an errand (docs/BRAINS.md, "Errands"), in
+	// which Fridolin writes to someone who is not in allowed_numbers:
+	// Brain the brain that asked for it, Run its run (or "errand:<id>"),
+	// ID the errand, Chat the person's number masked, Detail the step
+	// (asked, opened, sent, answered, ended, blocked, unblocked) and
+	// Outcome how it went. The messages themselves stay in bridge.db's
+	// errand_lines, never in the log.
+	Errand = "errand"
 	// FileView is a file, folder or wiki page read on the Files page, the
 	// wiki or the site's /files and /wiki (docs/FILES.md): By is
 	// "dashboard" or "site:<account>", Brain the brain whose folder it is,

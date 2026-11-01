@@ -141,5 +141,10 @@
       "contents": "read",
       "issues": "write"
     }
+  },
+  "errands": {
+    "owner_name": "Sam",
+    "intro": "Hi, this is Fridolin, Sam's assistant.",
+    "model": "gpt-5"
   }
 }

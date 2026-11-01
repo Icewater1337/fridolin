@@ -108,6 +108,7 @@ func (b *App) whatsAppOptions() whatsapp.Options {
 	opts.OnVote = whatsAppVoteHandler(b.recordVote)
 	opts.OnReaction = whatsAppReactionHandler(b.recordReaction)
 	opts.OnChange = b.handleChange
+	opts.Errands, opts.OnErrand = b.errandClaims, b.errandInbound
 	opts.GroupRules = whatsAppGroupRules(b.groupRules)
 	return opts
 }

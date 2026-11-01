@@ -85,6 +85,17 @@
         }
       }
     },
+    "errands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_name"],
+      "description": "On the core brain: lets it have Fridolin write to people who are not in allowed_numbers and carry the conversation with them, the first time only with your approval (docs/BRAINS.md, Errands).",
+      "properties": {
+        "owner_name": {"type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^\\r\\n]*$", "description": "How Fridolin names you to the people it writes to."},
+        "intro": {"type": "string", "maxLength": 300, "description": "What Fridolin's first message to someone opens with. Default: Hi, this is Fridolin, <owner_name>'s assistant."},
+        "model": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$", "description": "The OpenAI model of the errands' runs in Codex mode. Default gpt-5. In Claude mode they run on the brain's model."}
+      }
+    },
     "github": {
       "type": "object",
       "additionalProperties": false,

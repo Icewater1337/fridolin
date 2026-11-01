@@ -131,6 +131,15 @@ export interface BrainManifest {
   grants?: Record<string, string[]>;
   memory?: BrainMemory;
   schedules?: Schedule[];
+  /** On the core brain: Fridolin writes to people for the owner (docs/BRAINS.md, Errands). */
+  errands?: BrainErrands;
+}
+
+/** brain.json's errands (manifest.Errands). */
+export interface BrainErrands {
+  owner_name: string;
+  intro?: string;
+  model?: string;
 }
 
 /** Why a configured brain needs attention. */
