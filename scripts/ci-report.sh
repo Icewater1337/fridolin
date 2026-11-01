@@ -24,14 +24,14 @@
 # is printed to the job's log, where a line could be read as a workflow
 # command.
 #
-# Environment: GH_TOKEN, REPO (owner/name), RUN_ID, RUN_ATTEMPT, RUN_URL,
-# HEAD_SHA, SELF_JOB (this job's name, which is still running), and
-# optionally GH (the gh to run), MAX_ISSUES (default 10), BRANCH (whose
-# newest commit a run must be on to close, default main),
-# GITHUB_STEP_SUMMARY, and for a workflow that reports apart from ci.yml
-# (the nightly macOS suite) REPORT_NAME (the titles' prefix, default "CI
-# on main"), REPORT_LABEL (default ci-main) and REPORT_WORKFLOW (the file
-# named in the issues). Issues are told apart by their label: a run closes
+# Environment: GH_TOKEN, and the variables GitHub Actions sets in every step
+# (GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_SERVER_URL,
+# GITHUB_SHA, GITHUB_JOB, which is this job's name, still running, and
+# GITHUB_WORKFLOW_REF, whose file is named in the issues), and optionally GH
+# (the gh to run), MAX_ISSUES (default 10), GITHUB_STEP_SUMMARY, and for a
+# workflow that reports apart from ci.yml (the nightly macOS suite)
+# REPORT_NAME (the titles' prefix, default "CI on main") and REPORT_LABEL
+# (default ci-main). Issues are told apart by their label: a run closes
 # only issues of its own, so a passing push to main, which no longer runs
 # the whole macOS suite, does not close the issue of a test that fails
 # only there.
@@ -43,16 +43,19 @@ set -euo pipefail
 
 gh="${GH:-gh}"
 max="${MAX_ISSUES:-10}"
-branch="${BRANCH:-main}"
+branch=main
 [[ $max =~ ^[0-9]+$ ]] || { echo "$0: MAX_ISSUES must be a number" >&2; exit 2; }
 name_="${REPORT_NAME:-CI on main}"
 label="${REPORT_LABEL:-ci-main}"
-workflow="${REPORT_WORKFLOW:-.github/workflows/ci.yml}"
-[[ $name_ =~ ^[A-Za-z0-9\ ]+$ && $label =~ ^[a-z0-9-]+$ && $workflow =~ ^[A-Za-z0-9./_-]+$ ]] ||
-	{ echo "$0: REPORT_NAME, REPORT_LABEL or REPORT_WORKFLOW has characters it may not" >&2; exit 2; }
+[[ $name_ =~ ^[A-Za-z0-9\ ]+$ && $label =~ ^[a-z0-9-]+$ ]] ||
+	{ echo "$0: REPORT_NAME or REPORT_LABEL has characters it may not" >&2; exit 2; }
 marker="<!-- ci-main-report"
 module="github.com/Icewater1337/fridolin"
-: "${REPO:?}" "${RUN_ID:?}" "${RUN_ATTEMPT:?}" "${RUN_URL:?}" "${HEAD_SHA:?}" "${SELF_JOB:?}"
+REPO="${GITHUB_REPOSITORY:?}" RUN_ID="${GITHUB_RUN_ID:?}" RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:?}" HEAD_SHA="${GITHUB_SHA:?}" SELF_JOB="${GITHUB_JOB:?}"
+RUN_URL="${GITHUB_SERVER_URL:?}/$REPO/actions/runs/$RUN_ID"
+workflow="${GITHUB_WORKFLOW_REF:?}"
+workflow="${workflow#"$REPO"/}"; workflow="${workflow%%@*}"
+[[ $workflow =~ ^[A-Za-z0-9./_-]+$ ]] || { echo "$0: GITHUB_WORKFLOW_REF has characters it may not" >&2; exit 2; }
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

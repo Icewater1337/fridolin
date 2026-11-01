@@ -22,7 +22,7 @@
 # old when they were chosen.
 
 ARG GO_IMAGE=golang:1.27.2-bookworm
-ARG NODE_IMAGE=node:22.23.2-bookworm-slim
+ARG NODE_IMAGE=node:22.23.3-bookworm-slim
 
 # ── FrIDE and ponytail ────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS fride
@@ -45,12 +45,12 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 FROM ${GO_IMAGE} AS tools
 ARG TARGETARCH
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.102.0
+ARG GH_VERSION=2.103.2
 WORKDIR /dl
 RUN set -eu; \
     case "${TARGETARCH}" in \
-      amd64) gh_sha=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386 ;; \
-      arm64) gh_sha=7862c86c72f43df3a2d93ddde6f473285b4e2af61b494849846827e513ef6484 ;; \
+      amd64) gh_sha=62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8 ;; \
+      arm64) gh_sha=4c3e99a50bd8b181a3fe9d69b25dd978bac768148d88f01507c6b4d1ef61a443 ;; \
       *) echo "unsupported architecture ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSLo gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz"; \
@@ -62,7 +62,7 @@ RUN set -eu; \
 FROM ${NODE_IMAGE} AS node
 # The version the core's image has (container/Dockerfile).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.303
+ARG CLAUDE_CODE_VERSION=2.1.310
 RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
 
