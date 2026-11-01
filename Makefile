@@ -206,7 +206,7 @@ lint-web: ## ESLint on the dashboard's JS (npx fetches it)
 # renovate: datasource=npm depName=typescript
 TYPESCRIPT_VERSION := 7.0.2
 # renovate: datasource=npm depName=@types/node
-TYPES_NODE_VERSION := 24.19.2
+TYPES_NODE_VERSION := 26.6.5
 TSC_NPX ?= $(NPX) --yes -p typescript@$(TYPESCRIPT_VERSION) -p @types/node@$(TYPES_NODE_VERSION)
 typecheck-web: ## tsc --noEmit on the dashboard's JS and tests (npx fetches it)
 	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(TSC_NPX) -c 'tsc -p . && tsc -p test --typeRoots "$$(dirname "$$(command -v tsc)")/../@types"'
