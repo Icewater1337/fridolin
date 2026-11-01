@@ -232,6 +232,23 @@ func TestFrideInstances(t *testing.T) {
 // An instance with no open thread and no news stops after its
 // idle_stop_minutes, and one with an open thread does not; one set to
 // never (-1) stays.
+// A thread whose last news is a login failure does not hold back the
+// stop that the not-logged-in notice asks for (#453).
+func TestFrideInstanceStopAfterLoginFailure(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, frideInstancesConfig)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	mini := h.fakeHostNode("mini", h.StartNodes(), 32768, 16000, 6144)
+	h.coreSays("fix the login", step("fride_task", `{"message":"Fix the login","instance":"work"}`))
+	mini.emit(nodeproto.FrideEvent{Instance: "work", Event: "failed", ThreadID: 1, Text: "Not logged in · Please run /login", Status: "failed"})
+	h.WaitSent(harnessDM, "Claude there is not logged in")
+	if reply := h.coreSays("renewed", step("fride_stop", `{"instance":"work"}`)); !strings.Contains(reply, "Stopped the FrIDE instance work on mini") {
+		t.Fatalf("fride_stop after a login failure:\n%s", reply)
+	}
+}
+
 func TestFrideInstanceIdleStop(t *testing.T) {
 	t.Parallel()
 	o := optionsOf(t)

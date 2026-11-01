@@ -220,6 +220,31 @@ func (i *frideInstances) openThreads(ctx context.Context) (map[string][]store.Fr
 	return out, nil
 }
 
+// blockingThreads are the open threads of each instance that a stop would
+// interrupt: not those whose last news is a login failure, which wait for
+// the stop that gives the instance its new login (#453).
+func (i *frideInstances) blockingThreads(ctx context.Context) (map[string][]store.FrideThread, error) {
+	open, err := i.openThreads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for name, ts := range open {
+		var keep []store.FrideThread
+		for _, t := range ts {
+			news, err := i.f.b.store.FrideNews(ctx, t.ID)
+			if err != nil {
+				return nil, err
+			}
+			if n := len(news); n > 0 && news[n-1].Kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(news[n-1].Text) {
+				continue
+			}
+			keep = append(keep, t)
+		}
+		open[name] = keep
+	}
+	return open, nil
+}
+
 // threadList names threads as the chat does: #1, #3.
 func threadList(ts []store.FrideThread) string {
 	ids := make([]string, len(ts))
@@ -642,7 +667,7 @@ func (i *frideInstances) stop(ctx context.Context, name, by, why string, force b
 	if len(where) == 0 {
 		return fmt.Sprintf("The FrIDE instance %s does not run.", name), nil
 	}
-	open, err := i.openThreads(ctx)
+	open, err := i.blockingThreads(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -754,7 +779,7 @@ func (i *frideInstances) refreshAll(ctx context.Context, again bool) {
 // the default's), and starts counting for one it sees run first.
 func (i *frideInstances) idleStop(ctx context.Context) {
 	views := i.views()
-	open, err := i.openThreads(ctx)
+	open, err := i.blockingThreads(ctx)
 	if err != nil {
 		log.Printf("fride: reading the FrIDE threads for the idle stop: %v", err)
 		return
