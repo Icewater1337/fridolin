@@ -10,7 +10,7 @@ require (
 	github.com/kardianos/service v1.3.0
 	github.com/klauspost/compress v1.20.3
 	github.com/mdp/qrterminal/v4 v4.0.0
-	github.com/yuin/goldmark v1.8.6
+	github.com/yuin/goldmark/v2 v2.1.9
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
