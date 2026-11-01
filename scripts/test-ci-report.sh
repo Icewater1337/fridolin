@@ -77,8 +77,9 @@ log() {
 
 run() {
 	export FAKE
-	GH="$work/gh" GH_TOKEN=x REPO=o/r RUN_ID=42 RUN_ATTEMPT=1 \
-		RUN_URL=https://github.com/o/r/actions/runs/42 HEAD_SHA="$tip" SELF_JOB=report \
+	GH="$work/gh" GH_TOKEN=x GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=1 \
+		GITHUB_SERVER_URL=https://github.com GITHUB_SHA="$tip" GITHUB_JOB=report \
+		GITHUB_WORKFLOW_REF="o/r/${WORKFLOW:-.github/workflows/ci.yml}@refs/heads/main" \
 		GITHUB_STEP_SUMMARY="$FAKE/summary" MAX_ISSUES="${MAX_ISSUES:-10}" \
 		"$report" >"$FAKE/out" 2>&1 || echo "exit status $?" >>"$FAKE/out"
 }
@@ -268,7 +269,7 @@ log 20 <<EOF
     a_test.go:1: boom
 FAIL	$mod/internal/x	0.1s
 EOF
-REPORT_NAME="macOS nightly" REPORT_LABEL=ci-macos-nightly REPORT_WORKFLOW=.github/workflows/macos-full.yml run
+REPORT_NAME="macOS nightly" REPORT_LABEL=ci-macos-nightly WORKFLOW=.github/workflows/macos-full.yml run
 check "nightly: the script succeeds" succeeded
 check "nightly: only its own label's issues are read" grep -q '^issue list --repo o/r --label ci-macos-nightly ' "$FAKE/calls"
 check "nightly: the issue has its title and label" grep -q '^issue create --repo o/r --title macOS nightly: TestA failing --label ci-macos-nightly ' "$FAKE/calls"
