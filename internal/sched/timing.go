@@ -86,14 +86,23 @@ func latestSlot(sc trigger.Schedule, slot, by time.Time) time.Time {
 		}
 		return slot
 	}
-	for range 10000 {
-		n, ok := sc.Next(slot)
-		if !ok || n.After(by) {
-			return slot
+	for {
+		start := slot
+		for range 10000 {
+			n, ok := sc.Next(slot)
+			if !ok || n.After(by) {
+				return slot
+			}
+			slot = n
 		}
-		slot = n
+		// Cap reached: by is far off. Jump to twice the span just walked
+		// before by (still on the schedule, via Next), so a long outage
+		// costs a few walks, not one per missed slot.
+		jump := by.Add(-2 * slot.Sub(start))
+		if n, ok := sc.Next(jump); ok && n.After(slot) {
+			slot = n
+		}
 	}
-	return slot
 }
 
 // NextAfter is when an agent anchored at last falls due next, with its

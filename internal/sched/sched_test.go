@@ -232,3 +232,24 @@ func TestDecideAcrossDST(t *testing.T) {
 		}
 	}
 }
+
+// A minutely cron missed for longer than the walk used to give up after
+// (10000 steps, about 7 days) still takes only the latest slot, once.
+func TestDecideLongMissedCron(t *testing.T) {
+	cron, err := trigger.ParseRecurring("cron * * * * *", time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := at(t, "2026-10-23 12:00")
+	d := Decide(cron, now.AddDate(0, 0, -8), 0, false, now)
+	if !d.Run || !d.Last.Equal(now) {
+		t.Fatalf("8 days missed: %+v", d)
+	}
+	if d := Decide(cron, d.Last, 0, false, now.Add(30*time.Second)); d.Run {
+		t.Errorf("ran a second time: %+v", d)
+	}
+	// Months missed: still the latest slot, and quickly.
+	if d := Decide(cron, now.AddDate(-1, 0, 0), 0, false, now); !d.Last.Equal(now) {
+		t.Errorf("a year missed: %+v", d)
+	}
+}
