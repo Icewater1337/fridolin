@@ -41,7 +41,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/fride .
 FROM ${BASE_IMAGE}
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.303
+ARG CLAUDE_CODE_VERSION=2.1.310
 # ponytail v5.3.2 (docs/NODES.md, "Ponytail for every agent").
 ARG PONYTAIL_REPO=https://github.com/DietrichGebert/ponytail
 ARG PONYTAIL_COMMIT=16352ac229eb08a9598dcae48fe9f2b342567d86
