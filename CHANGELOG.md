@@ -46,7 +46,8 @@ for compatibility.
   still run `claude -p`, which is also the fallback whenever the session is
   not up, was refused channels, or died. A brain's own `github` grant
   goes with it: each turn gets a token of its own, revoked when the turn
-  ends. Off by default.
+  ends. What a session says after its answer (a background task it
+  started ends) reaches the chat too. Off by default.
   [docs/BRAINS.md](docs/BRAINS.md#live-session)
 - **The Plaud Sync phone app updates itself.** Each build on the Plaud
   card (**Build and update phones**), or one the core brain starts with

@@ -151,6 +151,11 @@ a Claude Code *channel*.
   next message runs as a one-off while a new session starts. A session that
   dies in the middle of a turn ends that message in an error, as a failed run
   would, and is not run again: it may have done something already.
+- **After its answer.** A session can go on after it answered: a
+  background task it started ends, and it says how it went. What it says
+  then is sent to its chat as a message of its own, not dropped. What a
+  session says while it is on its way out (stopped, timed out) goes
+  nowhere.
 - **GitHub.** A brain with a [`github`](#github-in-your-chats) grant of
   its own keeps its session: `gh` in it is logged in for each turn with a
   token of the grant minted for that turn, and logged out, the token
