@@ -152,8 +152,9 @@ func (o instanceOps) stop(ctx context.Context, name string) (*FrideInstanceState
 	return st, nil
 }
 
-// remove saves the instance's history (unless skipHistory), from the
-// carry of an unfinished remake if there is one, else from the VM, then
+// remove saves the instance's history (unless skipHistory), from the VM
+// if its sandbox exists (over the history of a carry left next to it),
+// else from the carry of an unfinished remake, then
 // removes its sandbox, with its workspaces and repositories, and the
 // instance's state, pairing and tokens; the history stays, for the next
 // sandbox of that name.
@@ -176,13 +177,20 @@ func (o instanceOps) remove(ctx context.Context, name string, skipHistory bool) 
 	// (new, or no) VM.
 	switch {
 	case skipHistory:
+	case status != "":
+		// A carry next to a sandbox is older than the VM: keep its history
+		// first, so that the VM's replaces it.
+		if o.carrying(name) {
+			if err := o.keepCarryHistory(name); err != nil {
+				return fmt.Errorf("%w; nothing removed, %s stays", err, o.carryDir(name))
+			}
+		}
+		if err := o.saveHistory(ctx, st, status); err != nil {
+			return fmt.Errorf("%w; nothing removed", err)
+		}
 	case o.carrying(name):
 		if err := o.keepCarryHistory(name); err != nil {
 			return fmt.Errorf("%w; nothing removed, %s stays and the next start puts it back", err, o.carryDir(name))
-		}
-	case status != "":
-		if err := o.saveHistory(ctx, st, status); err != nil {
-			return fmt.Errorf("%w; nothing removed", err)
 		}
 	}
 	if status != "" {
