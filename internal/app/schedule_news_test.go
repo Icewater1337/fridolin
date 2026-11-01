@@ -178,3 +178,35 @@ func TestScheduledAgentsKeepTheirSummary(t *testing.T) {
 		t.Errorf("the log: %s", w.Body.String())
 	}
 }
+
+// A scheduled agent's FrIDE work that fails for want of a Claude login
+// goes to a run of the agent like any other failure (#454), not only to
+// the agent's history, where nobody reads it.
+func TestScheduledAgentFrideNotLoggedIn(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	prompts := filepath.Join(t.TempDir(), "prompts.log")
+	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", prompts)
+	ff := testutil.StartFakeFride(t, "api")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	h.fakeFrideNode("laptop", addr, ff)
+	if w := h.Do("PUT", "/api/schedules/core/fix-bugs", map[string]any{"when": "daily 18:00", "prompt": "Fix the bugs " + testutil.FakeMCPTrigger}); w.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", w.Code, w.Body.String())
+	}
+	h.WaitFor("the agent", func() bool { return len(h.schedules().Agents) == 1 })
+	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"core","tool":"fride_task","args":{"message":"Fix GitHub issue #12","repos":["api"]}}]`)
+	h.runAgentNow("core", "fix-bugs", 1)
+
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	ff.Emit(map[string]any{"event": "failed", "thread_id": 1, "text": "FrIDE inbox #1 · failed\nthe orchestrator could not think: Not logged in · Please run /login", "status": "failed"})
+	if r := h.waitRunEnded("core", "fix-bugs", 2); r.Trigger != sched.TriggerFride {
+		t.Fatalf("the run for the login failure: %+v", r)
+	}
+	data, _ := os.ReadFile(prompts)
+	if !strings.Contains(string(data), "not logged in") {
+		t.Errorf("the run's prompt lacks the login failure:\n%s", data)
+	}
+}

@@ -264,6 +264,17 @@ func (f *frideRuntime) say(t store.FrideThread, text string) {
 	}
 }
 
+// sayLoginFailure tells of a failure for want of a Claude login. A scheduled
+// agent's chat is no WhatsApp chat, so there it is a failure like any other
+// (toAgent): a run of the agent tells the owner, who has to renew the login.
+func (f *frideRuntime) sayLoginFailure(t store.FrideThread, node, notice string) {
+	if chat.IsScheduleChat(t.Chat) {
+		f.toAgent(t, outboundmsg.FrideNews{Thread: t.ID, Node: f.where(node, t.Instance), Kind: nodeproto.FrideFailed, Text: notice, Task: t.TaskID, Branch: t.Branch})
+		return
+	}
+	f.say(t, notice)
+}
+
 // fridePost is a piece of FrIDE's news that relay decided a chat gets.
 type fridePost struct {
 	t    store.FrideThread
@@ -333,7 +344,7 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 			return fridePost{}, false
 		}
 		f.lastErr[t.ID] = notice
-		f.say(t, notice)
+		f.sayLoginFailure(t, node, notice)
 		return fridePost{}, false
 	}
 	if kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) {
@@ -354,7 +365,7 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 			return fridePost{}, false
 		}
 		f.lastErr[t.ID] = notice
-		f.say(t, notice)
+		f.sayLoginFailure(t, node, notice)
 		return fridePost{}, false
 	}
 	unlock()
