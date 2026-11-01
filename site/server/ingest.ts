@@ -75,7 +75,10 @@ export function makeIngest(moduleId: string, allowed: string[], spoolDir: string
 }
 
 /** Thrown when the bridge answered no: its message says why. */
-export class RefusedError extends Error {}
+export class RefusedError extends Error {
+  /** The bridge says a retry can work: a full queue, not a no. */
+  temporary = false
+}
 
 /**
  * Waits for the bridge's result.json in spool folder dir and returns it;
@@ -89,7 +92,9 @@ export async function awaitAnswer(dir: string, refused: string): Promise<Record<
     if (!existsSync(result)) continue
     const r = JSON.parse(readFileSync(result, 'utf8')) as { ok?: boolean; error?: string }
     if (r.ok) return r
-    throw new RefusedError(r.error || refused)
+    const err = new RefusedError(r.error || refused)
+    err.temporary = (r as { temporary?: boolean }).temporary === true
+    throw err
   }
   throw new Error(`Fridolin did not answer within ${ANSWER_MS / 1000} seconds; is the bridge running?`)
 }

@@ -501,3 +501,20 @@ func TestVoicePinRecordingsAreRefused(t *testing.T) {
 		t.Errorf("the brain was asked %q", rec.asked)
 	}
 }
+
+// A full voice book is a temporary failure the site lets the phone retry;
+// a refusal like an empty question is not.
+func TestVoiceTooManyQuestionsIsTemporary(t *testing.T) {
+	var b voiceBook
+	var err error
+	for i := 0; i <= maxVoiceWaiting && err == nil; i++ {
+		err = b.add(voiceKey("dev_1", strings.Repeat("a", 15)+string(rune('A'+i%26))+string(rune('a'+i/26))), &voiceQuestion{})
+	}
+	var tmp interface{ Temporary() bool }
+	if !errors.As(err, &tmp) || !tmp.Temporary() {
+		t.Fatalf("full book: %v, want a temporary error", err)
+	}
+	if errors.As(errors.New("the question is empty"), &tmp) {
+		t.Error("a plain error is temporary")
+	}
+}

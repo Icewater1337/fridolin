@@ -154,6 +154,11 @@ func spoolAnswer(root *os.Root, entry string, err error, extra map[string]any) {
 	if err != nil {
 		log.Printf("[site] refused a request from the site: %v", err)
 		answer = map[string]any{"ok": false, "error": err.Error()}
+		// A temporary failure is worth a retry; the site answers it 503, not 403.
+		var t interface{ Temporary() bool }
+		if errors.As(err, &t) && t.Temporary() {
+			answer["temporary"] = true
+		}
 	}
 	data, _ := json.Marshal(answer)
 	part := path.Join(entry, "result.json."+siteRandomToken(6))

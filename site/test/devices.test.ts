@@ -108,6 +108,12 @@ test('the bridge’s refusal reaches the phone', async (t) => {
   assert.match(((await res.json()) as { error: string }).error, /pairing code does not work/)
 })
 
+test('a temporary failure of the bridge is a 503 the phone retries, and no failed attempt', async (t) => {
+  const { url } = await start(t, () => ({ ok: false, temporary: true, error: 'too many voice questions at once; try again in a few minutes' }))
+  const attempt = () => { const p = phone(); return pair(url, jwt(p.key, { aud: 'fridolin:pair', iat: now(), exp: now() + 300, code: 'x', key: p.jwk })) }
+  for (let i = 0; i < 11; i++) assert.equal((await attempt()).status, 503)
+})
+
 test('pairing attempts Fridolin refuses count as failures', async (t) => {
   const { url } = await start(t, () => ({ ok: false, error: 'the pairing code does not work' }))
   const attempt = () => { const p = phone(); return pair(url, jwt(p.key, { aud: 'fridolin:pair', iat: now(), exp: now() + 300, code: 'guess', key: p.jwk })) }
