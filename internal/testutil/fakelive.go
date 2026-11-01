@@ -28,7 +28,9 @@ import (
 // notification, as a CLI with channels off would; FRIDOLIN_FAKE_LIVE_EXIT_ON
 // makes it exit at a message holding that text, before it answers;
 // FRIDOLIN_FAKE_LIVE_HANG_ON makes it sit a minute on a message holding
-// that text; FRIDOLIN_FAKE_LIVE_NO_DIALOG=1 never shows the dialog nor waits for the
+// that text; FRIDOLIN_FAKE_LIVE_LATE_ON makes it, after answering a message
+// holding that text, end another turn of its own a moment later, as a
+// background task that finishes after its turn does ("later: <message>"); FRIDOLIN_FAKE_LIVE_NO_DIALOG=1 never shows the dialog nor waits for the
 // key; FRIDOLIN_FAKE_MCP steps play on a message holding #mcp, as in the
 // one-off fake.
 func fakeLive(args []string) {
@@ -137,13 +139,14 @@ func fakeLive(args []string) {
 		if hook == "" {
 			continue
 		}
-		body, _ := json.Marshal(map[string]any{"hook_event_name": "Stop", "last_assistant_message": answer})
-		h := exec.Command("sh", "-c", hook)
-		h.Env = append(os.Environ(), "FRIDOLIN_TEST_RUN_MAIN=1")
-		h.Stdin = strings.NewReader(string(body))
-		h.Stderr = os.Stderr
-		if err := h.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, "the Stop hook failed:", err)
+		runStop(hook, answer)
+		if on := os.Getenv("FRIDOLIN_FAKE_LIVE_LATE_ON"); on != "" && m.Params.Meta["kind"] == "message" {
+			if msg := NewMessage(content); strings.Contains(msg, on) {
+				go func() {
+					time.Sleep(300 * time.Millisecond)
+					runStop(hook, "later: "+msg)
+				}()
+			}
 		}
 	}
 }
@@ -185,6 +188,18 @@ func ghStatus(tok string) int {
 	}
 	resp.Body.Close()
 	return resp.StatusCode
+}
+
+// runStop runs the Stop hook with answer as the turn's last message.
+func runStop(hook, answer string) {
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "Stop", "last_assistant_message": answer})
+	h := exec.Command("sh", "-c", hook)
+	h.Env = append(os.Environ(), "FRIDOLIN_TEST_RUN_MAIN=1")
+	h.Stdin = strings.NewReader(string(body))
+	h.Stderr = os.Stderr
+	if err := h.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "the Stop hook failed:", err)
+	}
 }
 
 // stopHook is the command of the Stop hook in the --settings argument.
