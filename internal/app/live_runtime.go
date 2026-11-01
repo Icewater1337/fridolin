@@ -152,7 +152,11 @@ func (h *liveHost) eligible(spec brain.RunSpec) bool {
 // ready. It reports false, with nothing done, when the message is not for
 // a session or there is none ready.
 func (h *liveHost) run(r *commandRunner, ctx context.Context, spec brain.RunSpec, cb claudecli.Callbacks, pol *runPolicy) (claudecli.Result, bool) {
-	if h == nil || !h.eligible(spec) {
+	if h == nil {
+		return claudecli.Result{}, false
+	}
+	if !h.eligible(spec) {
+		h.endIfAnswersInChat(spec)
 		return claudecli.Result{}, false
 	}
 	s := h.ready(r, spec)
@@ -160,6 +164,19 @@ func (h *liveHost) run(r *commandRunner, ctx context.Context, spec brain.RunSpec
 		return claudecli.Result{}, false
 	}
 	return h.turn(ctx, r, s, spec, cb, pol), true
+}
+
+// endIfAnswersInChat ends the brain's session when a one-off run is about
+// to answer in the chat it serves: its later turns only get the new message,
+// so they would never see this exchange. The next message starts a session
+// that is given the chat's history.
+func (h *liveHost) endIfAnswersInChat(spec brain.RunSpec) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s := h.sess[spec.ID]; s != nil && !s.stopped && !s.busy && s.chat == spec.Message.JID {
+		log.Printf("brain %s: ending the live session, as a one-off run answers in its chat", spec.ID)
+		h.stopLocked(s)
+	}
 }
 
 // ready is the brain's session if it is ready for a turn of spec's
