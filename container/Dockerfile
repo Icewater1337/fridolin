@@ -14,7 +14,7 @@
 # against the SHA-256 their release publishes.
 
 ARG GO_IMAGE=golang:1.26.8-bookworm
-ARG NODE_IMAGE=node:22.23.3-bookworm-slim
+ARG NODE_IMAGE=node:26.12.0-bookworm-slim
 ARG RUNTIME_IMAGE=debian:bookworm-20261020-slim
 
 # ── the bridge ────────────────────────────────────────────────────────────
@@ -157,9 +157,11 @@ LABEL org.opencontainers.image.title="fridolin-core" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="MIT"
 
+# libatomic1: Node 26, copied in from the node image, links against it.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates tzdata tini bubblewrap ffmpeg python3 git openssh-client curl jq sqlite3 age \
+      libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /usr/local/bin/restic /usr/local/bin/rclone /usr/local/bin/litestream \

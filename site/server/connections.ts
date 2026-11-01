@@ -289,7 +289,10 @@ function audioFile(opts: { audio: AudioInput; contentType?: string; filename?: s
   if (a instanceof Blob) {
     blob = opts.contentType && opts.contentType !== a.type ? new Blob([a], { type: opts.contentType }) : a
   } else if (a instanceof Uint8Array || a instanceof ArrayBuffer) {
-    blob = new Blob([a instanceof ArrayBuffer ? new Uint8Array(a) : a], { type: opts.contentType ?? '' })
+    // A Blob takes no view of a SharedArrayBuffer: such bytes are copied.
+    const bytes: Uint8Array<ArrayBuffer> = a instanceof ArrayBuffer ? new Uint8Array(a)
+      : a.buffer instanceof ArrayBuffer ? (a as Uint8Array<ArrayBuffer>) : new Uint8Array(a)
+    blob = new Blob([bytes], { type: opts.contentType ?? '' })
   } else {
     throw new ConnectionError(`${where} needs the audio as a Uint8Array, a Buffer, an ArrayBuffer or a Blob`, 400)
   }

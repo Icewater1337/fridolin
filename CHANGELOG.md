@@ -52,6 +52,10 @@ for compatibility.
 
 ### Changed
 
+- **The core's and FrIDE's images run Node.js 26** (was 22), the LTS
+  line, which brains' scripts and the Claude, Codex and Plaud CLIs in
+  the container now run on.
+
 - **In voice mode, whatever you record on the pin reaches the voice brain
   whole, and the brain decides what it is.** A NotePin recording used to
   be sent as a question: its speaker labels and timestamps were dropped,
