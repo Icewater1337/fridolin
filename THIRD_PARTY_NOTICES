@@ -54,7 +54,7 @@ github.com/mattn/go-colorable v0.1.15 (MIT)
 github.com/mattn/go-isatty v0.0.24 (MIT)
 github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 (MIT)
 github.com/mdlayher/socket v0.5.0 (MIT)
-github.com/mdp/qrterminal/v3 v3.2.1 (MIT)
+github.com/mdp/qrterminal/v4 v4.0.0 (MIT)
 github.com/mitchellh/go-ps v1.0.0 (MIT)
 github.com/ncruces/go-strftime v1.1.0 (MIT)
 github.com/petermattis/goid v0.0.0-20260713124913-97594f28f5ca (Apache-2.0)
@@ -1651,7 +1651,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ==============================================================================
-github.com/mdp/qrterminal/v3 v3.2.1: LICENSE
+github.com/mdp/qrterminal/v4 v4.0.0: LICENSE
 ==============================================================================
 
 Copyright 2019 Mark Percival <m@mdp.im>
