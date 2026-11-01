@@ -175,7 +175,11 @@ export interface RunInfo {
   error?: string;
 }
 
-/** A running brain's live state (brain.Runtime): an entry of Status.brains. */
+/**
+ * A running brain's live state (brain.Runtime): an entry of Status.brains.
+ * running and queue are its chats' lane; background and background_queue
+ * its scheduled agents', whose runs go beside the chats'.
+ */
 export interface BrainRuntime {
   id: string;
   name: string;
@@ -185,6 +189,10 @@ export interface BrainRuntime {
   effort: string;
   running: RunView | null;
   queue: QueuedView[];
+  /** A scheduled agent's run, in its chat schedule:<name>. */
+  background: RunView | null;
+  background_queue: QueuedView[];
+  /** The last run that finished, in either lane. */
   last: RunInfo | null;
   backup: BrainBackup;
   manifest: BrainManifest;

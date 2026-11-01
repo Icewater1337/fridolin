@@ -29,7 +29,7 @@ func slotState(mgr *Manager) (held, waiting int, stopped bool) {
 func waitsForSlot(br *Brain) bool {
 	br.mu.Lock()
 	defer br.mu.Unlock()
-	return br.slotWait != nil
+	return br.lane(LaneChat).slotWait != nil
 }
 
 // hasRun waits until br runs claude.
@@ -216,7 +216,7 @@ func TestRetiredBrainGivesUpItsWaitForASlot(t *testing.T) {
 	testutil.WaitFor(t, 3*time.Second, "a's worker to end", func() bool {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		return !a.working
+		return !a.lane(LaneChat).working
 	})
 	if held, waiting, _ := slotState(mgr); held != 1 || waiting != 0 {
 		t.Errorf("%d slots held, %d waits; want c's slot and no wait", held, waiting)

@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,11 +38,15 @@ import (
 // history and prompt file.
 //
 // A brain does not keep a Claude process alive between messages. Each message
-// spawns a fresh `claude -p` run seeded with the recent chat history. Messages
-// for a brain run one at a time from its queue (or, in interrupt mode, a newer
+// spawns a fresh `claude -p` run seeded with the recent chat history. A brain
+// has two lanes, each a queue with at most one run at a time (see Lane): its
+// chats', and its scheduled agents' in the background, beside them. In the
+// chat lane messages run one at a time (or, in interrupt mode, a newer
 // request from the same person in the same chat stops the run in flight),
 // each chat's in order and the chats in turn, so that one busy chat does not
-// keep the others waiting behind all of its messages.
+// keep the others waiting behind all of its messages. The background lane
+// runs its messages one at a time in the order they came in: a scheduled
+// agent that works for hours keeps no chat waiting.
 type Brain struct {
 	// Fixed for the brain's lifetime. Changing a brain's folder replaces the
 	// Brain; everything else is in settings and changes live.
@@ -73,25 +76,16 @@ type Brain struct {
 	// rather than take it out with nowhere to record it.
 	folderClosed bool
 
-	mu      sync.Mutex
-	current *brainRun
-	// pending holds what waits, in the order it came in. Each chat's
-	// messages in it are that chat's lane, which runs in order; which
-	// lane goes next is nextIn's choice.
-	pending []Inbound
-	// turns is, by chat, when its last run started, counted by turn: the
-	// chat whose turn is longest ago goes next. Chats with nothing waiting
-	// are forgotten once that no longer decides anything (takeTurnLocked).
-	turns   map[string]uint64
-	turn    uint64
-	working bool // a worker goroutine is draining pending
-	// workers counts the worker goroutines until they have returned,
-	// their last delivery done: a stop waits for them (shutdown).
+	mu sync.Mutex
+	// lanes are the brain's two queues, by Lane, each with its run and
+	// its worker.
+	lanes [laneCount]lane
+	// workers counts the worker goroutines of both lanes until they have
+	// returned, their last delivery done: a stop waits for them
+	// (shutdown).
 	workers sync.WaitGroup
-	retired bool // removed from the configuration, or the bridge stops
-	last    *RunInfo
-	// slotWait is set while the worker waits for a run slot.
-	slotWait *slotWait
+	retired bool     // removed from the configuration, or the bridge stops
+	last    *RunInfo // the last run that finished, in either lane
 
 	// tmuxViewer is an optional Terminal window tailing this brain's
 	// activity log. A run starts it in the background and a reload can close
@@ -180,6 +174,7 @@ type brainRun struct {
 	pid     int
 	msg     Inbound
 	started time.Time
+	lane    Lane
 }
 
 var (
@@ -255,10 +250,10 @@ func historyTime(t time.Time) string {
 
 // Submit hands a message to the brain: it goes into the history and, unless
 // it is untagged chatter that gets no run (see observeRuns), into the
-// queue. It returns the message's position in the queue (1 = next, 0 for
-// none) and whether it has to wait for other work: the brain's, or other
-// brains' runs that take every run slot. A run it interrupts does not
-// count.
+// queue of its lane (see Lane). It returns the message's position in that
+// queue (1 = next, 0 for none) and whether it has to wait for other work:
+// the lane's, or other runs that take every run slot it may have. A run it
+// interrupts does not count, nor does the other lane's run.
 func (br *Brain) Submit(m Inbound) (pos int, busy bool, err error) {
 	return br.submit(&m)
 }
@@ -278,6 +273,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	// Untagged chatter needs nothing more than the history, unless the
 	// brain observes it with runs: the next run in the chat reads it there.
 	queues := !m.Silent || br.input.Observe(s.Observe, m.Inbound)
+	q := br.laneFor(m.JID)
 
 	// Turned away before anything is written: a message the brain does not
 	// take is not in its history, where the sender's retry after "queue is
@@ -288,7 +284,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 		br.mu.Unlock()
 		return 0, false, ErrRetired
 	}
-	if queues && !br.hasRoomLocked(*m, s) {
+	if queues && !q.hasRoom(*m, s) {
 		if !m.Silent {
 			br.mu.Unlock()
 			return 0, true, ErrQueueFull
@@ -324,9 +320,11 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	// and other people's requests in a group, keep their place, and untagged
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
-	// the last one. Observe-only runs are another matter, see below.
-	next, gone, interrupting, err := admit(br.pending, *m, s.QueueMode, s.MaxPending)
-	br.pending = next
+	// the last one. Observe-only runs are another matter, see below. All
+	// of it within the message's lane: a chat's message and a scheduled
+	// agent's never replace or interrupt each other.
+	next, gone, interrupting, err := admit(q.pending, *m, s.QueueMode, s.MaxPending)
+	q.pending = next
 	defer Dropped(gone)
 	if err != nil {
 		br.mu.Unlock()
@@ -337,21 +335,21 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	// stops the one in flight and goes ahead of those waiting. Their chatter
 	// is in the history, where the next run in its chat reads it.
 	var interrupt *brainRun
-	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
+	if cur := q.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
 		interrupt = cur
 	}
-	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
-	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
-	start := !br.working
-	br.working = true
+	pos = slices.Index(q.order(), len(q.pending)-1) + 1
+	busy = pos > 1 || (q.current != nil && interrupt == nil) || br.slots.busy(!m.Silent, q.background())
+	start := !q.working
+	q.working = true
 	if start {
 		br.workers.Add(1)
 	}
 	// A worker that waits for a slot for chatter now waits for one for a
 	// request, which goes first.
 	var stopOther func()
-	if br.slotWait != nil && !m.Silent {
-		stopOther = br.slots.upgrade(br.slotWait)
+	if q.slotWait != nil && !m.Silent {
+		stopOther = br.slots.upgrade(q.slotWait)
 	}
 	br.mu.Unlock()
 
@@ -362,17 +360,18 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 		stopOther()
 	}
 	if start {
-		go br.worker()
+		go br.worker(q)
 	}
 	return pos, busy, nil
 }
 
-// nextIn returns where in pending, waiting messages in the order they came
-// in, the one to run next is. Work addressed to the brain goes before
-// untagged chatter, then the chat whose last turn (see Brain.turns) is
-// longest ago, one that never had one first, and among chats alike the one
-// whose message came in first. A chat's own messages run in the order they
-// came in: they share a turn, and the earliest of them wins the tie.
+// nextIn returns where in pending, the chat lane's waiting messages in the
+// order they came in, the one to run next is. Work addressed to the brain
+// goes before untagged chatter, then the chat whose last turn (see
+// lane.turns) is longest ago, one that never had one first, and among
+// chats alike the one whose message came in first. A chat's own messages
+// run in the order they came in: they share a turn, and the earliest of
+// them wins the tie.
 func nextIn(pending []Inbound, turns map[string]uint64) int {
 	best := -1
 	for i, p := range pending {
@@ -394,56 +393,6 @@ func nextIn(pending []Inbound, turns map[string]uint64) int {
 	return best
 }
 
-// takeTurnLocked records that a run for chat starts now. A chat with
-// nothing waiting whose turn came before every waiting chat's is
-// forgotten: it would go before all of them anyway, as one that never had
-// a turn does, so the record is no longer needed. br.mu is held.
-func (br *Brain) takeTurnLocked(chatJID string) {
-	if br.turns == nil {
-		br.turns = map[string]uint64{}
-	}
-	br.turn++
-	br.turns[chatJID] = br.turn
-	low := br.turn
-	waiting := map[string]bool{}
-	for _, p := range br.pending {
-		waiting[p.JID] = true
-		low = min(low, br.turns[p.JID])
-	}
-	for c, t := range br.turns {
-		if !waiting[c] && t < low {
-			delete(br.turns, c)
-		}
-	}
-}
-
-// queueOrderLocked returns the indexes of pending in the order the
-// messages will run as things stand (see nextIn). Messages that come
-// later can still go before some of them, in a chat whose turn comes
-// first. br.mu is held.
-func (br *Brain) queueOrderLocked() []int {
-	idx := make([]int, len(br.pending))
-	for i := range idx {
-		idx[i] = i
-	}
-	rest := slices.Clone(br.pending)
-	turns := maps.Clone(br.turns)
-	if turns == nil {
-		turns = map[string]uint64{}
-	}
-	turn := br.turn
-	order := make([]int, 0, len(rest))
-	for len(rest) > 0 {
-		i := nextIn(rest, turns)
-		order = append(order, idx[i])
-		turn++
-		turns[rest[i].JID] = turn
-		rest = slices.Delete(rest, i, i+1)
-		idx = slices.Delete(idx, i, i+1)
-	}
-	return order
-}
-
 // supersedes says what m replaces when it joins the queue (see Submit):
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
@@ -454,34 +403,19 @@ func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inboun
 	}
 }
 
-// hasRoomLocked reports whether the queue takes m: it has a free place,
-// or one m makes by what it replaces, or untagged chatter to drop. br.mu is
-// held.
-func (br *Brain) hasRoomLocked(m Inbound, s *Settings) bool {
-	_, replaces := supersedes(m, s.QueueMode)
-	n, silent := 0, false
-	for _, p := range br.pending {
-		if !replaces(p) {
-			n++
-			silent = silent || p.Silent
-		}
-	}
-	return n < s.MaxPending || silent
-}
-
-// worker drains the queue one message at a time, each in a run slot (see
-// runSlots).
-func (br *Brain) worker() {
+// worker drains lane q's queue one message at a time, each in a run slot
+// (see runSlots).
+func (br *Brain) worker(q *lane) {
 	defer br.workers.Done()
 	for {
 		br.mu.Lock()
-		if br.retired || len(br.pending) == 0 {
-			br.working = false
+		if br.retired || len(q.pending) == 0 {
+			q.working = false
 			br.mu.Unlock()
 			return
 		}
-		slot, ok := br.waitForSlotLocked()
-		if !ok || br.retired || len(br.pending) == 0 {
+		slot, ok := br.waitForSlotLocked(q)
+		if !ok || br.retired || len(q.pending) == 0 {
 			// Retired, or what waited was dropped meanwhile.
 			br.mu.Unlock()
 			if ok {
@@ -489,9 +423,9 @@ func (br *Brain) worker() {
 			}
 			continue
 		}
-		i := nextIn(br.pending, br.turns)
-		m := br.pending[i]
-		br.pending = slices.Delete(br.pending, i, i+1)
+		i := q.next()
+		m := q.pending[i]
+		q.pending = slices.Delete(q.pending, i, i+1)
 		if slot != nil && !slot.running(!m.Silent) {
 			// A request in another brain took this slot's place before
 			// the run began: the chatter is in the history, as for an
@@ -501,7 +435,7 @@ func (br *Brain) worker() {
 			Dropped([]Inbound{m})
 			continue
 		}
-		br.takeTurnLocked(m.JID)
+		q.takeTurn(m.JID)
 		s := br.settings.Load()
 		timeout := s.RunTimeout
 		if m.RunTimeout > 0 {
@@ -509,8 +443,8 @@ func (br *Brain) worker() {
 			timeout = m.RunTimeout
 		}
 		ctx, cancel := runContext(timeout)
-		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
-		br.current = run
+		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now(), lane: q.which}
+		q.current = run
 		br.mu.Unlock()
 
 		if m.Silent {
@@ -521,27 +455,27 @@ func (br *Brain) worker() {
 		// The answer goes into the history once it was delivered (see
 		// Outbox), not here: the next run must not read as said what
 		// never reached the chat.
-		br.finishRun(run)
+		br.finishRun(q, run)
 		if slot != nil {
 			slot.release()
 		}
-		br.recordLast(m, res)
+		br.recordLast(q, m, res)
 		br.deliverGuarded(m, res)
 	}
 }
 
-// waitForSlotLocked waits for a run slot for what runs next, with br.mu
-// held on entry and again on return, though not while it waits: messages
-// keep coming in, and a request among them makes the wait one for a
-// request (see Submit). It returns a nil slot without a limit, and false
-// when the brain was retired while it waited.
-func (br *Brain) waitForSlotLocked() (*runSlot, bool) {
+// waitForSlotLocked waits for a run slot for what runs next in q, with
+// br.mu held on entry and again on return, though not while it waits:
+// messages keep coming in, and a request among them makes the wait one
+// for a request (see Submit). It returns a nil slot without a limit, and
+// false when the brain was retired while it waited.
+func (br *Brain) waitForSlotLocked(q *lane) (*runSlot, bool) {
 	if br.slots == nil {
 		return nil, true
 	}
-	request := !br.pending[nextIn(br.pending, br.turns)].Silent
-	w, stopOther := br.slots.wait(request, br.stopObservation)
-	br.slotWait = w
+	request := !q.pending[q.next()].Silent
+	w, stopOther := br.slots.wait(request, q.background(), func() { br.stopObservation(q) })
+	q.slotWait = w
 	br.mu.Unlock()
 	if stopOther != nil {
 		stopOther()
@@ -549,20 +483,20 @@ func (br *Brain) waitForSlotLocked() (*runSlot, bool) {
 	select {
 	case <-w.ready:
 	default:
-		log.Printf("brain %s: waiting for a run slot: other brains' runs take all of max_concurrent_runs", br.id)
+		log.Printf("brain %s: waiting for a run slot for its %s lane: other runs take all of max_concurrent_runs that it may have", br.id, q.which)
 		<-w.ready
 	}
 	slot, ok := br.slots.take(w)
 	br.mu.Lock()
-	br.slotWait = nil
+	q.slotWait = nil
 	return slot, ok
 }
 
-// stopObservation stops the brain's observe-only run, for a request in
-// another brain that waits for its run slot.
-func (br *Brain) stopObservation() {
+// stopObservation stops the observe-only run in the brain's lane q, for a
+// request in another brain that waits for its run slot.
+func (br *Brain) stopObservation(q *lane) {
 	br.mu.Lock()
-	cur := br.current
+	cur := q.current
 	br.mu.Unlock()
 	if cur != nil && cur.msg.Silent {
 		log.Printf("brain %s: stopping the observe-only run in %s: a request waits for its run slot", br.id, cur.msg.JID)
@@ -620,29 +554,37 @@ func Dropped(ms []Inbound) {
 	}
 }
 
-// WaitIdle waits until the brain has nothing running or queued, for at
-// most max, and reports whether it got there. A backup asks before it
-// copies the brain's folder (see backupBrain). Between two queued runs no
-// run is current for a moment, so it waits for the worker to stop.
+// WaitIdle waits until the brain has nothing running or queued, in either
+// lane, for at most max, and reports whether it got there. A backup asks
+// before it copies the brain's folder (see backupBrain). Between two
+// queued runs no run is current for a moment, so it waits for the
+// workers to stop.
 func (br *Brain) WaitIdle(ctx context.Context, max time.Duration) bool {
 	deadline := time.NewTimer(max)
 	defer deadline.Stop()
 	for {
+		// A lane's run that ends, or a look again a moment later while a
+		// lane is between two runs.
+		var done [laneCount]<-chan struct{}
+		var next <-chan time.Time
+		working := false
 		br.mu.Lock()
-		run, working := br.current, br.working
+		for _, q := range br.eachLane() {
+			switch {
+			case !q.working:
+			case q.current != nil:
+				working, done[q.which] = true, q.current.done
+			default:
+				working, next = true, time.After(50*time.Millisecond)
+			}
+		}
 		br.mu.Unlock()
 		if !working {
 			return true
 		}
-		var done <-chan struct{}
-		var next <-chan time.Time
-		if run != nil {
-			done = run.done
-		} else {
-			next = time.After(50 * time.Millisecond)
-		}
 		select {
-		case <-done:
+		case <-done[LaneChat]:
+		case <-done[LaneBackground]:
 		case <-next:
 		case <-deadline.C:
 			return false
@@ -652,7 +594,7 @@ func (br *Brain) WaitIdle(ctx context.Context, max time.Duration) bool {
 	}
 }
 
-func (br *Brain) recordLast(m Inbound, res claudecli.Result) {
+func (br *Brain) recordLast(q *lane, m Inbound, res claudecli.Result) {
 	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: outcomeOK}
 	switch {
 	case errors.Is(res.Err, claudecli.ErrInterrupted):
@@ -663,48 +605,50 @@ func (br *Brain) recordLast(m Inbound, res claudecli.Result) {
 		info.Outcome = outcomeQuestion
 	}
 	br.mu.Lock()
-	br.last = info
+	br.last, q.last = info, info
 	br.mu.Unlock()
 }
 
-// StopCurrent kills the run in flight, whichever chat it serves, and, with
-// clearQueue, drops everything waiting. It is for the dashboard and shutdown;
-// a chat's own !stop uses StopChat. It reports whether a run was stopped.
+// StopCurrent kills the runs in flight, in both lanes, whichever chat they
+// serve, and, with clearQueue, drops everything waiting in both. It is for
+// the dashboard's stop and shutdown; a chat's own !stop uses StopChat, and
+// StopLane stops one lane's run. It reports whether a run was stopped.
 func (br *Brain) StopCurrent(clearQueue bool) bool {
 	br.mu.Lock()
 	var gone []Inbound
 	if clearQueue {
-		gone, br.pending = br.pending, nil
+		gone = br.takeWhereLocked(func(Inbound) bool { return true })
 	}
-	cur := br.current
+	runs := br.runWhereLocked(func(Inbound) bool { return true })
 	br.mu.Unlock()
 	Dropped(gone)
+	return br.stopRuns(runs)
+}
+
+// StopLane kills the run in flight in lane l, whichever chat it serves,
+// and leaves what waits in it, and the other lane, alone: the next
+// message in the lane runs once it has stopped. It reports whether a run
+// was stopped.
+func (br *Brain) StopLane(l Lane) bool {
+	br.mu.Lock()
+	cur := br.lane(l).current
+	br.mu.Unlock()
 	return br.stopRun(cur)
 }
 
 // StopChat stops what the brain does for one chat: the run in flight if it
 // is that chat's, and the chat's waiting messages. One brain serves several
-// chats, so nothing another chat asked for is touched. It reports whether a
-// run was stopped and how many waiting messages were dropped.
+// chats, so nothing another chat asked for is touched, nor anything in the
+// background lane (unless jid is a scheduled agent's chat). It reports
+// whether a run was stopped and how many waiting messages were dropped.
 func (br *Brain) StopChat(jid string) (stopped bool, n int) {
+	of := func(m Inbound) bool { return m.JID == jid }
 	br.mu.Lock()
-	var gone []Inbound
-	kept := br.pending[:0]
-	for _, p := range br.pending {
-		if p.JID == jid {
-			gone = append(gone, p)
-			continue
-		}
-		kept = append(kept, p)
-	}
-	br.pending = kept
-	cur := br.current
-	if cur != nil && cur.msg.JID != jid {
-		cur = nil
-	}
+	gone := br.takeWhereLocked(of)
+	runs := br.runWhereLocked(of)
 	br.mu.Unlock()
 	Dropped(gone)
-	return br.stopRun(cur), len(gone)
+	return br.stopRuns(runs), len(gone)
 }
 
 // ResetChat starts the chat that goes by chats (see chatJIDs) afresh for
@@ -727,23 +671,11 @@ func (br *Brain) ResetChat(chats []string, by string) {
 func (br *Brain) StopHandOffs(jid string) (stopped bool, n int) {
 	handOff := func(m Inbound) bool { return m.Brain != "" && m.JID == jid }
 	br.mu.Lock()
-	var gone []Inbound
-	kept := br.pending[:0]
-	for _, p := range br.pending {
-		if handOff(p) {
-			gone = append(gone, p)
-			continue
-		}
-		kept = append(kept, p)
-	}
-	br.pending = kept
-	cur := br.current
-	if cur != nil && !handOff(cur.msg) {
-		cur = nil
-	}
+	gone := br.takeWhereLocked(handOff)
+	runs := br.runWhereLocked(handOff)
 	br.mu.Unlock()
 	Dropped(gone)
-	return br.stopRun(cur), len(gone)
+	return br.stopRuns(runs), len(gone)
 }
 
 // stopRunWait is how long a stop waits for a run it killed to end.
@@ -754,23 +686,37 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	if run == nil {
 		return false
 	}
-	br.interruptRun(run)
-	select {
-	case <-run.done:
-	case <-time.After(StopRunWait):
-		log.Printf("brain %s: run did not stop within %v", br.id, StopRunWait)
+	return br.stopRuns([]*brainRun{run})
+}
+
+// stopRuns kills runs, all at once, and waits for them to end. It reports
+// whether there was a run to stop.
+func (br *Brain) stopRuns(runs []*brainRun) bool {
+	for _, run := range runs {
+		br.interruptRun(run)
 	}
-	return true
+	wait := time.NewTimer(StopRunWait)
+	defer wait.Stop()
+	for _, run := range runs {
+		select {
+		case <-run.done:
+		case <-wait.C:
+			log.Printf("brain %s: the run in its %s lane did not stop within %v", br.id, run.lane, StopRunWait)
+			return true
+		}
+	}
+	return len(runs) > 0
 }
 
 // shutdown stops the brain for good as the bridge stops. It takes no new
 // message and starts no new run, and hands what was waiting, which never
-// ran, to the Waiting hook at once. The run in flight gets grace to finish
-// and be delivered, and is interrupted after that, which the Interrupted
-// hook hears of. shutdown returns once the worker has ended, its last
-// delivery done. A second signal can abandon a stuck shutdown. The activity viewer
-// stays, for the next start to replace. killWait is how long it waits for
-// the interrupted run before it logs that it is still waiting.
+// ran, to the Waiting hook at once. The runs in flight, one in each lane at
+// most, get grace to finish and be delivered, and are interrupted after
+// that, which the Interrupted hook hears of. shutdown returns once both
+// workers have ended, their last delivery done. A second signal can
+// abandon a stuck shutdown. The activity viewer stays, for the next start
+// to replace. killWait is how long it waits for the interrupted runs
+// before it logs that it is still waiting.
 func (br *Brain) shutdown(grace, killWait time.Duration) {
 	waiting := br.closeQueue()
 	br.sink.Waiting(br, waiting)
@@ -781,14 +727,14 @@ func (br *Brain) shutdown(grace, killWait time.Duration) {
 	}()
 	graceOver := time.NewTimer(grace)
 	defer graceOver.Stop()
-	var cut *brainRun
+	var cut []*brainRun
 	select {
 	case <-idle:
 	case <-graceOver.C:
 		br.mu.Lock()
-		cur := br.current
+		runs := br.runWhereLocked(func(Inbound) bool { return true })
 		br.mu.Unlock()
-		if cur != nil {
+		for _, cur := range runs {
 			log.Printf("brain %s: the run for %s is not done %v into the stop; stopping it", br.id, cur.msg.JID, grace)
 			br.interruptRun(cur)
 		}
@@ -801,39 +747,41 @@ func (br *Brain) shutdown(grace, killWait time.Duration) {
 			// the hand-off of its result.
 			<-idle
 		}
-		// The run may have answered as it was stopped, and then it was
-		// delivered like any other.
+		// A run may have answered as it was stopped, and then it was
+		// delivered like any other. Each was its lane's last.
 		br.mu.Lock()
-		if cur != nil && br.last != nil && br.last.Outcome == outcomeInterrupted {
-			cut = cur
+		for _, cur := range runs {
+			if last := br.lane(cur.lane).last; last != nil && last.Outcome == outcomeInterrupted {
+				cut = append(cut, cur)
+			}
 		}
 		br.mu.Unlock()
 	}
-	if cut != nil {
-		br.sink.Interrupted(br, cut.msg)
+	for _, run := range cut {
+		br.sink.Interrupted(br, run.msg)
 	}
 	// Done with the folder after every worker has released it.
 	br.closeFolder()
 }
 
 // closeQueue stops the brain taking messages and starting runs, and
-// returns what it had waiting, which never ran. A worker that waits for a
-// run slot gives up its place.
+// returns what it had waiting in both lanes, which never ran, the chat
+// lane's first. A worker that waits for a run slot gives up its place.
 func (br *Brain) closeQueue() []Inbound {
 	br.mu.Lock()
 	defer br.mu.Unlock()
 	br.freezeQueueLocked()
-	gone := br.pending
-	br.pending = nil
-	return gone
+	return br.takeWhereLocked(func(Inbound) bool { return true })
 }
 
 // freezeQueueLocked stops admission and further turns, retaining pending
 // messages for shutdown persistence. br.mu is held.
 func (br *Brain) freezeQueueLocked() {
 	br.retired = true
-	if br.slotWait != nil {
-		br.slots.giveUp(br.slotWait)
+	for _, q := range br.eachLane() {
+		if q.slotWait != nil {
+			br.slots.giveUp(q.slotWait)
+		}
 	}
 }
 
@@ -896,17 +844,22 @@ func (br *Brain) readFile(name string) ([]byte, error) {
 
 // BrainRuntime is a brain's live state, for the dashboard.
 type Runtime struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Dir      string            `json:"dir"`
-	Routing  manifest.Routing  `json:"routing"`
-	Model    string            `json:"model"`
-	Effort   string            `json:"effort"`
-	Running  *RunView          `json:"running"`
-	Queue    []QueuedView      `json:"queue"`
-	Last     *RunInfo          `json:"last"`
-	Backup   manifest.Backup   `json:"backup"`
-	Manifest manifest.Manifest `json:"manifest"`
+	ID      string           `json:"id"`
+	Name    string           `json:"name"`
+	Dir     string           `json:"dir"`
+	Routing manifest.Routing `json:"routing"`
+	Model   string           `json:"model"`
+	Effort  string           `json:"effort"`
+	// Running and Queue are the chat lane's, Background and
+	// BackgroundQueue the background lane's: its scheduled agents' (see
+	// Lane).
+	Running         *RunView          `json:"running"`
+	Queue           []QueuedView      `json:"queue"`
+	Background      *RunView          `json:"background"`
+	BackgroundQueue []QueuedView      `json:"background_queue"`
+	Last            *RunInfo          `json:"last"`
+	Backup          manifest.Backup   `json:"backup"`
+	Manifest        manifest.Manifest `json:"manifest"`
 }
 
 // RunView describes the run in flight.
@@ -928,25 +881,19 @@ type QueuedView struct {
 	Queued  time.Time `json:"queued"`
 }
 
-// Snapshot returns the brain's live state, the queue in the order it will
-// run.
+// Snapshot returns the brain's live state, each lane's queue in the order
+// it will run.
 func (br *Brain) Snapshot() Runtime {
 	s := br.settings.Load()
 	rt := Runtime{
 		ID: br.id, Name: s.Name, Dir: br.workDir,
 		Routing: s.Manifest.Routing, Model: s.Model, Effort: s.Effort,
-		Backup: s.Manifest.Backup, Manifest: s.Manifest, Queue: []QueuedView{},
+		Backup: s.Manifest.Backup, Manifest: s.Manifest,
 	}
 	br.mu.Lock()
 	defer br.mu.Unlock()
-	if cur := br.current; cur != nil {
-		rt.Running = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: textx.Truncate(cur.msg.TextWithQuote(), 160),
-			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
-	}
-	for _, i := range br.queueOrderLocked() {
-		p := br.pending[i]
-		rt.Queue = append(rt.Queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: textx.Truncate(p.TextWithQuote(), 160), Silent: p.Silent, Queued: p.At})
-	}
+	rt.Running, rt.Queue = br.lane(LaneChat).view()
+	rt.Background, rt.BackgroundQueue = br.lane(LaneBackground).view()
 	if br.last != nil {
 		l := *br.last
 		rt.Last = &l
@@ -954,17 +901,36 @@ func (br *Brain) Snapshot() Runtime {
 	return rt
 }
 
+// view returns the lane's run in flight, nil for none, and what waits in
+// it in the order it will run. Brain.mu is held.
+func (q *lane) view() (*RunView, []QueuedView) {
+	var run *RunView
+	if cur := q.current; cur != nil {
+		run = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: textx.Truncate(cur.msg.TextWithQuote(), 160),
+			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
+	}
+	queue := []QueuedView{}
+	for _, i := range q.order() {
+		p := q.pending[i]
+		queue = append(queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: textx.Truncate(p.TextWithQuote(), 160), Silent: p.Silent, Queued: p.At})
+	}
+	return run, queue
+}
+
 // OpenMedia lists the files of the messages the brain is working on or has
-// waiting: the vault keeps them hot (they are an open thread's files).
+// waiting, in both lanes: the vault keeps them hot (they are an open
+// thread's files).
 func (br *Brain) OpenMedia() []string {
 	br.mu.Lock()
 	defer br.mu.Unlock()
 	var out []string
-	if cur := br.current; cur != nil {
-		out = append(out, cur.msg.Media...)
-	}
-	for _, p := range br.pending {
-		out = append(out, p.Media...)
+	for _, q := range br.eachLane() {
+		if cur := q.current; cur != nil {
+			out = append(out, cur.msg.Media...)
+		}
+		for _, p := range q.pending {
+			out = append(out, p.Media...)
+		}
 	}
 	return out
 }
@@ -1353,12 +1319,12 @@ func (br *Brain) openRunStream(m Inbound, heading string, onResult func(claudecl
 	return sink, closeStream
 }
 
-func (br *Brain) finishRun(run *brainRun) {
+func (br *Brain) finishRun(q *lane, run *brainRun) {
 	run.cancel()
 
 	br.mu.Lock()
-	if br.current == run {
-		br.current = nil
+	if q.current == run {
+		q.current = nil
 	}
 	br.mu.Unlock()
 
@@ -1661,6 +1627,7 @@ func (bm *Manager) Apply(specs []manifest.Spec, globals Globals, options ApplyOp
 				claimMedia:  bm.options.ClaimMedia,
 				sink:        bm.sink,
 				slots:       bm.slots,
+				lanes:       newLanes(),
 			}
 			created = append(created, br)
 		}
@@ -1879,15 +1846,15 @@ func (bm *Manager) KillRuns() {
 	var runs []*brainRun
 	for _, br := range brains {
 		br.mu.Lock()
-		// Freeze admission and the worker's next turn before capturing
+		// Freeze admission and the workers' next turn before capturing
 		// current. Keep pending intact for concurrent graceful shutdown.
 		br.freezeQueueLocked()
-		cur := br.current
+		cur := br.runWhereLocked(func(Inbound) bool { return true })
 		br.mu.Unlock()
-		if cur != nil {
-			br.interruptRun(cur)
-			runs = append(runs, cur)
+		for _, run := range cur {
+			br.interruptRun(run)
 		}
+		runs = append(runs, cur...)
 	}
 	for _, run := range runs {
 		run.awaitProcessStop()

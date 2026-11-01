@@ -791,8 +791,8 @@ stays pending. A bridge from before `.brain` does not see the files: it
 runs the agents you approved, from `config.json`, and shows the brain's
 `brain.json` as changed on disk.
 
-**How a run goes.** A brain run of an agent goes through the brain's
-queue like a message: the same sandbox, prompt, memory, risk level and
+**How a run goes.** A brain run of an agent is a message to the brain
+like any other: the same sandbox, prompt, memory, risk level and
 irreversible-step approvals, which ask in your DM. It runs in a chat of
 its own, `schedule:<name>`, whose history its next run sees, so it knows
 what it reported before. Its message says the agent's name and schedule,
@@ -805,6 +805,27 @@ history and log, and the chat is told of the failure only. An
 agent never runs twice at once: a time that comes while its run goes on
 is left out. A lockdown runs an agent at `read`, and refuses one whose
 `risk` says more; it refuses every program on a node.
+
+**Agents run beside the chats.** A brain has two queues, each with at
+most one run at a time: its chats' (every WhatsApp chat, the live
+session's turns, delegated tasks, files handed in), and its scheduled
+agents' in the background. Everything in an agent's chat,
+`schedule:<name>`, goes to the background queue: the scheduled run, and
+the runs FrIDE's news starts for the work the agent handed over. Those
+run one at a time, in the order they came in, while the brain goes on
+answering its chats: an agent that works for hours keeps no DM waiting,
+and an agent no longer waits for a chat's run to end either. Each queue
+has [`max_pending`](CONFIGURATION.md#queue) places of its own. Since the
+two runs work at the same time in the same folder, an agent may write a
+memory file while a chat's run reads or writes the same one: give an
+agent its own files to keep (`memories/agents/<name>.md`, say), and
+have it add to a shared file rather than rewrite it. With
+[`max_concurrent_runs`](CONFIGURATION.md#max_concurrent_runs) at 2 or
+more, the agents of all brains together take at most one run fewer than
+the limit, so one is always left for the chats; at 1, a chat waits for an
+agent's run as for any other. `!stop` in a chat stops that chat's run,
+never an agent's; the Stop on the brain's dashboard page stops both, and
+its brain card shows the agent's run beside the chat's.
 
 **FrIDE and workstation sessions from an agent.** A run of an agent
 may hand work to FrIDE (`fride_task`). That work's news never goes to

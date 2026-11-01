@@ -3,6 +3,7 @@
 
 import { h } from '../lib/dom.js';
 import { issueLabel } from '../lib/brain.js';
+import { agentOfChat } from '../lib/schedules.js';
 import { icon } from './icons.js';
 import { btn } from './buttons.js';
 import { pill, badge, timeAgo } from './common.js';
@@ -32,14 +33,18 @@ export function brainStatusPill(status) {
 }
 
 /**
- * What a running brain is doing, from its runtime ({running, queue, last}):
- * working or idle, how many messages wait, and how the last run ended.
- * @param {Pick<BrainRuntime, 'running' | 'queue' | 'last'>} rt
+ * What a running brain is doing, from its runtime ({running, queue,
+ * background, background_queue, last}): working or idle, whether a
+ * scheduled agent runs beside its chats, how many messages wait in
+ * either, and how the last run ended.
+ * @param {Pick<BrainRuntime, 'running' | 'queue' | 'last'> & Partial<Pick<BrainRuntime, 'background' | 'background_queue'>>} rt
  */
 export function runtimeSummary(rt) {
-  const queued = (rt.queue || []).length;
+  const queued = (rt.queue || []).length + (rt.background_queue || []).length;
+  const agent = rt.background ? agentOfChat(rt.background.chat) : '';
   return [
-    rt.running ? pill('Working', 'info', { pulse: true, title: rt.running.preview || '' }) : pill('Idle', 'neutral'),
+    rt.running ? pill('Working', 'info', { pulse: true, title: rt.running.preview || '' }) : rt.background ? null : pill('Idle', 'neutral'),
+    rt.background ? pill('Agent running', 'info', { pulse: true, title: agent ? `Scheduled agent ${agent}` : '' }) : null,
     queued ? badge(`${queued} queued`, 'warn') : null,
     h('span.run-last', outcomePill(rt.last), rt.last ? h('span.muted.small', timeAgo(rt.last.finished)) : null),
   ];

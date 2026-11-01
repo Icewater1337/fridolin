@@ -54,6 +54,22 @@ for compatibility.
 
 ### Changed
 
+- **Scheduled agents run beside a brain's chats, not in their queue.**
+  A brain now has two queues: its chats', and its scheduled agents' in
+  the background (everything in an agent's own chat, `schedule:<name>`,
+  the runs FrIDE's news starts included). Each runs one message at a
+  time, so an agent that works for hours no longer keeps your direct
+  messages waiting, and an agent no longer waits for a chat's run. The
+  two runs may now work in the brain's folder at the same time, on the
+  same memory files too. Each queue has `max_pending` places of its own;
+  with `max_concurrent_runs` at 2 or more, the agents of all brains
+  together take at most one run fewer than the limit, so one is left for
+  the chats. `!stop` in a chat still stops only that chat's run; the Stop
+  on a brain's dashboard page stops both. `/api/status` and
+  `/api/brains` show the agent's run as `background`, and what waits for
+  it as `background_queue`.
+  [docs/BRAINS.md](docs/BRAINS.md#scheduled-agents)
+
 - **The core's and FrIDE's images run Node.js 26** (was 22), the LTS
   line, which brains' scripts and the Claude, Codex and Plaud CLIs in
   the container now run on.
