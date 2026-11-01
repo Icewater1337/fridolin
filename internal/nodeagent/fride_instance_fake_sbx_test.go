@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -20,7 +21,7 @@ import (
 // rule by its resource; secret keeps the github service's value in
 // github-secret and each custom secret in custom/<placeholder> (its
 // hosts and value). fail-cp fails cp with its text, fail-ls fails ls, and
-// fail-ls-after-cp has a failed cp make sbx stop listing, as an expired
+// fail-ls-after (a count) fails the ls calls past it, and fail-ls-after-cp has a failed cp make sbx stop listing, as an expired
 // context does.
 func fakeFrideSbx(dir string, args []string) (int, bool) {
 	if _, err := os.Stat(filepath.Join(dir, "fride-fake")); err != nil || len(args) == 0 {
@@ -43,6 +44,13 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 		record()
 		if _, err := os.Stat(filepath.Join(dir, "fail-ls")); err == nil {
 			return 1, true
+		}
+		// fail-ls-after holds a number of ls calls: the ones past it fail.
+		if b, err := os.ReadFile(filepath.Join(dir, "fail-ls-after")); err == nil {
+			calls, _ := os.ReadFile(filepath.Join(dir, "calls.log"))
+			if n, _ := strconv.Atoi(strings.TrimSpace(string(b))); strings.Count(string(calls), `{"args":["ls"`) > n {
+				return 1, true
+			}
 		}
 		rows := []map[string]string{}
 		for _, n := range fakeSandboxes(dir) {

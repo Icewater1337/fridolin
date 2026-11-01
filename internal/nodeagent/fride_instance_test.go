@@ -481,6 +481,40 @@ func TestFrideInstanceStartFails(t *testing.T) {
 	}
 }
 
+// An update_only start that fails only reports it: the instance runs on,
+// its VM is not stopped (that would kill the agent's work). Both steps
+// are tried: ensureInstance (sbx does not list it) and readyInstance (FrIDE
+// does not answer).
+func TestFrideInstanceUpdateFailsKeepsRunning(t *testing.T) {
+	t.Parallel()
+	for _, step := range []string{"ensureInstance", "readyInstance"} {
+		t.Run(step, func(t *testing.T) {
+			t.Parallel()
+			f := newInstFix(t)
+			fr := f.fride("work")
+			f.start(workParams())
+			if step == "ensureInstance" {
+				// The host's check (one ls) passes; the instance's own fails.
+				calls, _ := os.ReadFile(filepath.Join(f.fake, "calls.log"))
+				writeTestFile(t, filepath.Join(f.fake, "fail-ls-after"), itoa(strings.Count(string(calls), `{"args":["ls"`)+1))
+			} else {
+				fr.Stop()
+			}
+			up := workParams()
+			up.UpdateOnly = true
+			if _, perr := f.a.frideInstanceStart(context.Background(), up); perr == nil || !strings.Contains(perr.Message, "updating the FrIDE instance") {
+				t.Fatalf("the update: %v", perr)
+			}
+			if st, _ := loadFrideInstance(f.a.Dir, "work"); st == nil || !st.Run || st.Problem != "" {
+				t.Errorf("the failed update changed the state: %+v", st)
+			}
+			if called(fakeCalls(t, f.fake), "stop", "fride-work") {
+				t.Error("the failed update stopped the VM")
+			}
+		})
+	}
+}
+
 // The agent keeps a running instance's FrIDE running: it holds the
 // serve script's exec with the instance's ports, starts it again when it
 // ends, and lets go of it once run is cleared.
