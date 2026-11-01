@@ -10,6 +10,25 @@ for compatibility.
 
 ### Added
 
+- **Ops tools for the core brain.** Its runs that answer you, and those
+  of its own scheduled agents (a maintenance agent, say), get
+  `system_status` (one compact JSON snapshot: both lanes of every brain,
+  the scheduled agents with their last and next runs and failures in a
+  row, housekeeping, backups and the vault, the nodes, FrIDE, the Plaud
+  phones, and the core's version, uptime and free disk; chats named by
+  kind, no numbers, no message text, no secrets), and three write tools
+  that reach the core brain and the brains it holds a grant on:
+  `schedule_run(brain, name)` (Run now; not for an agent that is paused,
+  off, waiting for your approval, or riskier than the calling run),
+  `run_stop(brain, lane, started)` (stops exactly the run `system_status`
+  showed, never another that started since, never the calling run), and
+  `housekeeping_run(dry_run)`, a live run like `fridolin housekeeping
+  run` that may stop processes, remove locks and records and ask you in a
+  poll, within `housekeeping.dry_run`. Runs for groups, other people and
+  files handed in, sub-brains and delegated runs get none of them.
+  `/api/status` and `/api/brains` show a run's `source` and
+  `timeout_seconds` too.
+  [docs/BRAINS.md](docs/BRAINS.md#the-core-brains-ops-tools)
 - **GitHub in your chats.** A brain's `github` in brain.json (`{"repos":
   ["you/project"], "permissions": {"issues": "write"}}`) logs the runs
   that answer you, your direct messages and Plaud voice questions, in to

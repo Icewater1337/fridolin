@@ -175,6 +175,8 @@ type brainRun struct {
 	msg     Inbound
 	started time.Time
 	lane    Lane
+	// timeout is how long the run may take, 0 for no limit.
+	timeout time.Duration
 }
 
 var (
@@ -443,7 +445,7 @@ func (br *Brain) worker(q *lane) {
 			timeout = m.RunTimeout
 		}
 		ctx, cancel := runContext(timeout)
-		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now(), lane: q.which}
+		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now(), lane: q.which, timeout: timeout}
 		q.current = run
 		br.mu.Unlock()
 
@@ -634,6 +636,37 @@ func (br *Brain) StopLane(l Lane) bool {
 	cur := br.lane(l).current
 	br.mu.Unlock()
 	return br.stopRun(cur)
+}
+
+// ErrNoRun and ErrOtherRun are StopLaneRun's refusals: nothing runs in the
+// lane, or another run than the one asked for.
+var (
+	ErrNoRun    = errors.New("nothing runs in that lane")
+	ErrOtherRun = errors.New("another run runs in that lane now")
+)
+
+// StopLaneRun stops the run in flight in lane l only if it is the one
+// that started at started, and returns it. It compares and stops under
+// the brain's lock, so a run that started meanwhile, after the one asked
+// for ended, is never the one stopped: that is ErrOtherRun, with the run
+// that goes now. Nothing in the lane is ErrNoRun. What waits in the lane
+// runs next once the run has stopped.
+func (br *Brain) StopLaneRun(l Lane, started time.Time) (RunView, error) {
+	br.mu.Lock()
+	cur := br.lane(l).current
+	if cur == nil {
+		br.mu.Unlock()
+		return RunView{}, ErrNoRun
+	}
+	v := *cur.view()
+	if !cur.started.Equal(started) {
+		br.mu.Unlock()
+		return v, ErrOtherRun
+	}
+	br.interruptRun(cur)
+	br.mu.Unlock()
+	br.stopRun(cur)
+	return v, nil
 }
 
 // StopChat stops what the brain does for one chat: the run in flight if it
@@ -870,6 +903,10 @@ type RunView struct {
 	Silent  bool      `json:"silent"`
 	Started time.Time `json:"started"`
 	PID     int       `json:"pid"`
+	// Source is how its message came in (chat.Inbound.Source), and
+	// TimeoutSeconds how long it may take, 0 for no limit.
+	Source         string `json:"source"`
+	TimeoutSeconds int64  `json:"timeout_seconds"`
 }
 
 // QueuedView describes a waiting message.
@@ -906,8 +943,7 @@ func (br *Brain) Snapshot() Runtime {
 func (q *lane) view() (*RunView, []QueuedView) {
 	var run *RunView
 	if cur := q.current; cur != nil {
-		run = &RunView{Chat: cur.msg.JID, Sender: cur.msg.Sender, Preview: textx.Truncate(cur.msg.TextWithQuote(), 160),
-			Silent: cur.msg.Silent, Started: cur.started, PID: cur.pid}
+		run = cur.view()
 	}
 	queue := []QueuedView{}
 	for _, i := range q.order() {
@@ -915,6 +951,13 @@ func (q *lane) view() (*RunView, []QueuedView) {
 		queue = append(queue, QueuedView{Chat: p.JID, Sender: p.Sender, Preview: textx.Truncate(p.TextWithQuote(), 160), Silent: p.Silent, Queued: p.At})
 	}
 	return run, queue
+}
+
+// view describes the run, for the dashboard. Brain.mu is held, which
+// guards its pid.
+func (run *brainRun) view() *RunView {
+	return &RunView{Chat: run.msg.JID, Sender: run.msg.Sender, Preview: textx.Truncate(run.msg.TextWithQuote(), 160),
+		Silent: run.msg.Silent, Started: run.started, PID: run.pid, Source: run.msg.Source, TimeoutSeconds: int64(run.timeout / time.Second)}
 }
 
 // OpenMedia lists the files of the messages the brain is working on or has

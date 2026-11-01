@@ -152,6 +152,10 @@ export interface RunView {
   silent: boolean;
   started: string;
   pid: number;
+  /** How its message came in: whatsapp, scheduled, ingest, … */
+  source: string;
+  /** How long it may take; 0 for no limit. */
+  timeout_seconds: number;
 }
 
 /** A message waiting for its brain. */

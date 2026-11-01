@@ -280,6 +280,7 @@ what the model says:
 | `node_update(node)` | with nodes on: updates a node's fridolin to the core's version, a write action ([NODES.md](NODES.md#updates)) | absent |
 | `node_exec(argv, node, dir, timeout_seconds, approval_id, wait_seconds)`, `node_exec_rules(node)` | while a node whose `exec` you approved is online: runs one command its allowlist allows, a write action; a command whose rule has `approve` asks you in a poll each time ([NODES.md](NODES.md#the-core-brain-runs-commands)) | absent |
 | `plaud_app_update()`, `plaud_app_status()` | while the Plaud Sync app uploads through the site (`plaud.phone_upload`): builds the app as the Plaud card does, which the paired phones then install, a write action; and says what each phone runs and how its last update went ([PLAUD.md](PLAUD.md#updates)) | absent |
+| `system_status()`, `schedule_run(brain, name)`, `run_stop(brain, lane, started)`, `housekeeping_run(dry_run)` | in a run that answers you, or of one of its scheduled agents: the ops tools, see [below](#the-core-brains-ops-tools) | absent |
 
 Any brain, core or not, also gets the tools of Fridolin's
 [connections](CONNECTIONS.md#brains) while the connection has a key and
@@ -335,6 +336,30 @@ its `.md` files) or `skills/`. The bridge reads it outside the sandbox,
 so it follows no symlink on the way, not even one inside the folder.
 What the core learns about a sub-brain goes into its own notes, never the
 sub-brain's files.
+
+### The core brain's ops tools
+
+The core brain can see how the system stands and act on it, so that a
+maintenance agent (hourly, say) can look after things. Only two kinds of
+its runs get these tools: one that answers you (your own message in a
+direct chat, as for its [GitHub grant](#github-in-your-chats)), and one
+of its own scheduled agents (in a chat `schedule:<name>`, the runs
+FrIDE's news starts there included). A run for anyone else, in a group
+(your own message there too), for a file handed in through `/ingest` or
+Plaud, a sub-brain's run and a delegated one get none of them.
+
+| Tool | What |
+| --- | --- |
+| `system_status()` | one JSON snapshot: each brain's runs in both lanes (the kind of chat, source, start, age, timeout; see [Agents run beside the chats](#scheduled-agents)), what waits, whether its live session is up, how its last run ended; each scheduled agent's state, pause, run in progress, last run, next run, failures in a row and a change waiting for your approval; housekeeping and its last report; the Drive backup, the vault (sync, snapshots, Litestream) and each node target, with the last success and error; the nodes (online, last seen, version, what they offer, with problems such as `fride-host (not ready)`); FrIDE's instances and open threads; the Plaud phones' last upload and check-in; the core's version, uptime and the data folder's free disk. A chat is named by its kind, `dm`, `group`, `schedule:<name>`, `delegate` (with the brain that delegated) or `internal`, never by a number or JID. It holds no message text, token or secret |
+| `schedule_run(brain, name)` | starts a scheduled agent now, as the Schedules page's **Run now** does (its run history says "by hand (core brain)"). It refuses an agent that is paused, switched off, or has a change waiting for your approval, and one whose `risk` is above the calling run's own (an agent that sets none counts as `write`): a run starts nothing that may do more than itself. A write action |
+| `run_stop(brain, lane, started)` | stops one run: the one in the brain's `chat` or `background` lane that started at `started`, as `system_status` reported it. When another run goes there by then, or none, it stops nothing and says what runs; the bridge compares and stops under the brain's lock, so a run that started in between is never the one stopped. What waits runs next. It refuses the run that calls it: a run in its own brain's lane is itself. A write action |
+| `housekeeping_run(dry_run)` | runs [housekeeping](CONFIGURATION.md#housekeeping) now, as `fridolin housekeeping run` does: a live run, not the dashboard's dry **Check now**. It may stop processes, remove stale locks and run records, and put a process to you as an approval poll. It follows `housekeeping.dry_run` (on by default: then it only reports), and `dry_run: true` makes it report only whatever the setting says. It answers its report, without the command lines it found. A write action |
+
+`schedule_run` and `run_stop` reach the core brain itself and the brains
+it holds a grant on (those `list_brains` lists); any other brain is
+refused. Like every write tool, the three that act are refused in a
+lockdown and to a run whose risk is `read`: give a maintenance agent
+`"risk": "write"`.
 
 ## Skills, risk and approvals
 
