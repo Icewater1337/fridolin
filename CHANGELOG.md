@@ -77,6 +77,11 @@ for compatibility.
 
 ### Fixed
 
+- **Moving a scheduled agent to an earlier time today is no missed run.**
+  After an edit that changes `when`, a scheduled agent counts from the
+  edit: it no longer runs at once (or logs a skipped run "while the bridge
+  was down") for a time that already passed today, and `schedules list`
+  no longer shows a negative next (#417).
 - **A node whose FrIDE instances run on the core's Claude login no
   longer says it has no login after an update.** The node agent kept in
   memory only that the core lent its token, so once an update restarted

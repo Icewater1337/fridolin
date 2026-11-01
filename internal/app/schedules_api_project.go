@@ -228,7 +228,7 @@ func (a *agents) list(context.Context) (any, error) {
 			a.mu.Unlock()
 			v.State = stateOf(v)
 			if sc, err := s.Parsed(now.Location()); err == nil && v.Enabled && !v.Paused && out.Enabled {
-				last := st.Last
+				last := st.Anchor(s.When)
 				if last.IsZero() {
 					last = now
 				}

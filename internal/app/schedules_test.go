@@ -334,6 +334,35 @@ func TestScheduledAgentsOnTheirSchedule(t *testing.T) {
 	}
 }
 
+// TestEditingWhenToEarlierTodayIsNoMissedRun: moving an agent to a time
+// earlier today starts counting from the edit; it neither runs at once
+// nor logs a skipped run (#417).
+func TestEditingWhenToEarlierTodayIsNoMissedRun(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, "")
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
+		{Name: "often", When: "daily 21:00", Prompt: "Look around.", Report: manifest.ReportSilent, JitterMinutes: new(0)},
+		{Name: "skipper", When: "daily 21:00", Prompt: "Look around.", Report: manifest.ReportSilent, Missed: manifest.MissedSkip, JitterMinutes: new(0)},
+	}})
+	a := h.b.agents
+	a.tick(time.Date(2026, 10, 30, 21, 1, 0, 0, h.b.zone()))
+	for _, name := range []string{"often", "skipper"} {
+		body := map[string]any{"when": "daily 06:00", "prompt": "Look around.", "report": "silent", "jitter_minutes": 0}
+		if name == "skipper" {
+			body["missed"] = "skip"
+		}
+		if w := h.Do("PUT", "/api/schedules/main/"+name, body); w.Code != http.StatusOK {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	a.tick(time.Date(2026, 10, 31, 14, 2, 0, 0, h.b.zone()))
+	for _, name := range []string{"often", "skipper"} {
+		if runs := h.agentRuns("main", name); len(runs) != 0 {
+			t.Errorf("%s: a time moved earlier today counted as missed: %+v", name, runs)
+		}
+	}
+}
+
 // TestSchedulesSwitchedOff: with schedules.enabled off nothing runs on
 // its schedule, and Run now still does.
 func TestSchedulesSwitchedOff(t *testing.T) {
