@@ -102,11 +102,25 @@ type AgentState struct {
 	// Last is the scheduled time of the last slot the agent took or
 	// skipped, from which its next is counted (Decide).
 	Last time.Time `json:"last,omitzero"`
+	// When is the schedule's `when` that Last was counted under; Last is
+	// void once the owner changes it (Anchor).
+	When string `json:"when,omitempty"`
 	// Paused keeps it from running on its schedule until it is resumed.
 	Paused   bool      `json:"paused,omitempty"`
 	PausedAt time.Time `json:"paused_at,omitzero"`
 	// LastRun is its latest run, a running one included.
 	LastRun *Run `json:"last_run,omitempty"`
+}
+
+// Anchor is the time to count from for an agent whose schedule reads
+// when: the zero time (start counting from now) when the owner changed
+// `when` since Last, so a new time earlier today is no missed run.
+// State from before When was kept (empty) is trusted.
+func (st AgentState) Anchor(when string) time.Time {
+	if st.When != "" && st.When != when {
+		return time.Time{}
+	}
+	return st.Last
 }
 
 type stateFile struct {

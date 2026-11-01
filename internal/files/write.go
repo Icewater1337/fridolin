@@ -369,31 +369,38 @@ func (r Root) Create(dir, name string, body io.Reader, max int64, s Scope) (stri
 		return "", 0, err
 	}
 	defer root.Close()
-	defer lockRoot(r.Path)()
-	if err := r.folder(root, dir, s); err != nil {
+	name = SafeName(name)
+	f, rel, err := r.reserve(root, dir, name, s)
+	if err != nil {
 		return "", 0, err
 	}
-	name = SafeName(name)
+	// The body streams in without the lock: O_EXCL already made the name ours.
+	size, err := copyAtMost(f, body, max)
+	if err != nil {
+		_ = root.Remove(rel)
+		return "", 0, err
+	}
+	return rel, size, nil
+}
+
+// reserve creates the empty file for Create under the root's lock.
+func (r Root) reserve(root *os.Root, dir, name string, s Scope) (*os.File, string, error) {
+	defer lockRoot(r.Path)()
+	if err := r.folder(root, dir, s); err != nil {
+		return nil, "", err
+	}
 	for n := 1; n <= 1000; n++ {
 		rel := path.Join(dir, numbered(name, n))
 		if r.Hidden(rel, s) || r.Kind == KindBrain && slices.Contains(noWrite, rel) {
-			return "", 0, fmt.Errorf("%s: %w", name, errUnshown)
+			return nil, "", fmt.Errorf("%s: %w", name, errUnshown)
 		}
 		f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
-		if err != nil {
-			return "", 0, err
-		}
-		size, err := copyAtMost(f, body, max)
-		if err != nil {
-			_ = root.Remove(rel)
-			return "", 0, err
-		}
-		return rel, size, nil
+		return f, rel, err
 	}
-	return "", 0, ErrExists
+	return nil, "", ErrExists
 }
 
 var errUnshown = errors.New("a file of this name is never shown (a secret, or what the brain's backup leaves out), so it cannot be uploaded here")
