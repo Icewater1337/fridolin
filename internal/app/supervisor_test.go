@@ -78,3 +78,29 @@ func TestSupervisorJoinsWatcherBeforeReturningOnCancellation(t *testing.T) {
 		t.Fatal("connection did not stop")
 	}
 }
+
+func TestSupervisorRunsEveryLoopWhileRunning(t *testing.T) {
+	t.Parallel()
+	var s app.Supervisor
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ran := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Run(ctx, app.RunOptions{
+			Resume:  func(context.Context) {},
+			Connect: func(ctx context.Context) { <-ctx.Done() },
+			Watch:   func(ctx context.Context) { <-ctx.Done() },
+			Loops:   []func(context.Context){func(ctx context.Context) { <-ctx.Done() }, func(context.Context) { close(ran) }},
+		})
+	}()
+	select {
+	case <-ran:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a loop behind a blocking one never started")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

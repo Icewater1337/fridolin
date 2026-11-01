@@ -491,7 +491,8 @@ func (b *App) Start(ctx context.Context) error {
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
 		// The tailnet first: the node port listens on it.
-		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.targets.Start, b.watchApprovals, b.housekeeping.Start, b.watchCalendarGrants, b.gitIDs.Start},
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.targets.Start},
+		Loops:      []func(context.Context){b.watchApprovals, b.housekeeping.Start, b.watchCalendarGrants, b.gitIDs.Start},
 	})
 }
 

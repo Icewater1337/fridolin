@@ -26,7 +26,8 @@ type RunOptions struct {
 	Resume           func(context.Context)
 	Connect          func(context.Context)
 	Watch            func(context.Context)
-	Background       []func(context.Context)
+	Background       []func(context.Context) // start in order and return
+	Loops            []func(context.Context) // run until ctx ends, each in its own goroutine
 }
 
 // Supervisor owns the HTTP server and connection/watch goroutines. Its zero
@@ -66,6 +67,9 @@ func (s *Supervisor) Run(ctx context.Context, o RunOptions) error {
 	watchers.Go(func() { o.Watch(run) })
 	for _, start := range o.Background {
 		start(run)
+	}
+	for _, loop := range o.Loops {
+		watchers.Go(func() { loop(run) })
 	}
 	logx.Printf(s.logger, "Bridge started. Waiting for messages…")
 	<-run.Done()
