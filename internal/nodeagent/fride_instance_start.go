@@ -65,11 +65,11 @@ func (a *Agent) frideInstanceStart(ctx context.Context, p nodeproto.FrideInstanc
 	a.logf("node: starting the FrIDE instance %s (%d MB)", p.Name, p.MemoryMB)
 	st, err := a.ensureInstance(ctx, o, host, p)
 	if err != nil {
-		return none, a.instanceFailed(o, p.Name, st, err)
+		return none, a.updateOrFail(o, p, st, err)
 	}
 	out, err := a.readyInstance(ctx, o, st, p)
 	if err != nil {
-		return none, a.instanceFailed(o, p.Name, st, err)
+		return none, a.updateOrFail(o, p, st, err)
 	}
 	a.logf("node: the FrIDE instance %s runs at %s (repositories: %s)%s", p.Name, out.URL, orNoneList(out.Repos), problemSuffix(out.Problem))
 	return out, nil
@@ -276,6 +276,16 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 		out.Repos = nil
 	}
 	return out, nil
+}
+
+// updateOrFail answers a failed start. A failed update of an instance
+// that runs is only reported: stopping it would kill the agent's work.
+func (a *Agent) updateOrFail(o instanceOps, p nodeproto.FrideInstanceStartParams, st *FrideInstanceState, err error) *nodeproto.Error {
+	if p.UpdateOnly {
+		a.logf("node: updating the FrIDE instance %s: %v (it runs on)", p.Name, err)
+		return nodeproto.Errorf(nodeproto.CodeFailed, "updating the FrIDE instance %s: %v", p.Name, problemText(err.Error()))
+	}
+	return a.instanceFailed(o, p.Name, st, err)
 }
 
 // instanceFailed records why a start failed, has the agent let go of
