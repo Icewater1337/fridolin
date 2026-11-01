@@ -175,10 +175,13 @@ test-py: ## byte-compile the Python tools and run their tests
 # dashboard blank. Unit tests are web/**/*.test.js (or .mjs) for node --test.
 # Installed packages (node_modules) are not ours to check.
 WEB_FIND = find web -name node_modules -prune -o -type f
+# --no-experimental-webstorage: Node 25 and later have a localStorage of
+# their own, which warns on every use without --localstorage-file; the
+# tests stub the browser's storage where they need it, as before.
 test-web: ## syntax-check the dashboard JS and run its unit tests
 	@set -e; for f in $$($(WEB_FIND) \( -name '*.js' -o -name '*.mjs' \) -print | sort); do $(NODE) --check "$$f"; done
 	@tests="$$($(WEB_FIND) \( -name '*.test.js' -o -name '*.test.mjs' \) -print | sort)"; \
-	if [ -n "$$tests" ]; then $(NODE) --test $$tests; else echo "no web unit tests (web/**/*.test.js)"; fi
+	if [ -n "$$tests" ]; then $(NODE) --no-experimental-webstorage --test $$tests; else echo "no web unit tests (web/**/*.test.js)"; fi
 
 # ESLint on the dashboard's JS, with web/eslint.config.js. npx fetches the
 # pinned version into its own cache the first time (that needs the
