@@ -417,3 +417,47 @@ func TestAWaitingAgentIsNotStarvedByChats(t *testing.T) {
 	waitDelivered(t, d, "c's agent")
 	waitDelivered(t, d, "hello")
 }
+
+// StopLaneRun stops a lane's run only when it is the one that started at
+// the time given: once that one has ended and the next started, a stop
+// aimed at the first leaves the next running.
+func TestStopLaneRunStopsOnlyTheRunAskedFor(t *testing.T) {
+	mgr, d := limitTestManager(t, 0, 0)
+	newGatedRunner("first agent", "second agent").gate(mgr)
+	a := mgr.Get("a")
+	if _, err := a.StopLaneRun(LaneBackground, time.Now()); !errors.Is(err, ErrNoRun) {
+		t.Errorf("an idle lane: %v, want ErrNoRun", err)
+	}
+	for _, m := range []Inbound{agentMsg("a", "one", "first agent"), agentMsg("a", "two", "second agent")} {
+		if _, _, _, err := mgr.Submit(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitRunning(t, a, LaneBackground, "first agent")
+	first := a.Snapshot().Background.Started
+
+	// The first one ends some other way, and the second starts.
+	if !a.StopLane(LaneBackground) {
+		t.Fatal("StopLane stopped nothing")
+	}
+	waitRunning(t, a, LaneBackground, "second agent")
+	now, err := a.StopLaneRun(LaneBackground, first)
+	if !errors.Is(err, ErrOtherRun) || now.Chat != chat.ScheduleChatPrefix+"two" {
+		t.Fatalf("a stop aimed at the first run: %+v, %v; want ErrOtherRun naming the second", now, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := runningIn(a, LaneBackground); got != "second agent" {
+		t.Fatalf("the second run is %q after a stop aimed at the first", got)
+	}
+	if _, err := a.StopLaneRun(LaneChat, now.Started); !errors.Is(err, ErrNoRun) {
+		t.Errorf("the chat lane: %v, want ErrNoRun", err)
+	}
+
+	stopped, err := a.StopLaneRun(LaneBackground, now.Started)
+	if err != nil || stopped.Chat != chat.ScheduleChatPrefix+"two" {
+		t.Fatalf("a stop aimed at the second run: %+v, %v", stopped, err)
+	}
+	if res := waitDelivered(t, d, "second agent"); !errors.Is(res.Err, claudecli.ErrInterrupted) {
+		t.Errorf("the second run: %v, want it stopped", res.Err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/backup"
@@ -43,10 +44,13 @@ type opsCore struct {
 	Lockdown         bool   `json:"lockdown"`
 }
 
-// opsRun is a run in flight in a brain's lane.
+// opsRun is a run in flight in a brain's lane. Chat is the kind of chat
+// it answers (chatKind), never its JID; Agent the scheduled agent whose
+// chat it is, and From the brain that delegated it.
 type opsRun struct {
 	Chat     string    `json:"chat"`
 	Agent    string    `json:"agent,omitempty"`
+	From     string    `json:"from,omitempty"`
 	Source   string    `json:"source,omitempty"`
 	Started  time.Time `json:"started"`
 	AgeS     int64     `json:"age_s"`
@@ -66,6 +70,7 @@ type opsBrain struct {
 }
 
 type opsLast struct {
+	// Chat is the kind of chat it answered (chatKind).
 	Chat     string    `json:"chat"`
 	Finished time.Time `json:"finished"`
 	Seconds  float64   `json:"seconds"`
@@ -238,12 +243,20 @@ func (b *App) systemStatus(ctx context.Context) systemStatus {
 		st.Problems = append(st.Problems, what+": "+err.Error())
 	}
 
-	for _, br := range b.brainMgr.Brains() {
+	brains := b.brainMgr.Brains()
+	// Only the core brain delegates.
+	core := ""
+	for _, br := range brains {
+		if br.Manifest().IsCore() {
+			core = br.ID()
+		}
+	}
+	for _, br := range brains {
 		rt := br.Snapshot()
-		ob := opsBrain{ID: rt.ID, ChatRun: opsRunOf(rt.Running, now), Background: opsRunOf(rt.Background, now),
+		ob := opsBrain{ID: rt.ID, ChatRun: opsRunOf(rt.Running, core, now), Background: opsRunOf(rt.Background, core, now),
 			ChatWaiting: len(rt.Queue), BackgroundWaiting: len(rt.BackgroundQueue), LiveSession: b.live.up(rt.ID)}
 		if l := rt.Last; l != nil {
-			ob.Last = &opsLast{Chat: l.Chat, Finished: l.Finished.UTC(), Seconds: l.Seconds, Outcome: l.Outcome}
+			ob.Last = &opsLast{Chat: chatKind(l.Chat), Finished: l.Finished.UTC(), Seconds: l.Seconds, Outcome: l.Outcome}
 		}
 		st.Brains = append(st.Brains, ob)
 	}
@@ -296,16 +309,38 @@ func (b *App) systemStatus(ctx context.Context) systemStatus {
 	return st
 }
 
-// opsRunOf is a lane's run as system_status shows it, without its text.
-func opsRunOf(v *brain.RunView, now time.Time) *opsRun {
+// opsRunOf is a lane's run as system_status shows it, without its text
+// or its chat's JID; core is the core brain, which delegates.
+func opsRunOf(v *brain.RunView, core string, now time.Time) *opsRun {
 	if v == nil {
 		return nil
 	}
-	r := &opsRun{Chat: v.Chat, Source: v.Source, Started: v.Started.UTC(), AgeS: int64(now.Sub(v.Started).Seconds()), TimeoutS: v.TimeoutSeconds}
-	if chat.IsScheduleChat(v.Chat) {
-		r.Agent = v.Chat[len(chat.ScheduleChatPrefix):]
+	r := &opsRun{Chat: chatKind(v.Chat), Source: v.Source, Started: v.Started.UTC(), AgeS: int64(now.Sub(v.Started).Seconds()), TimeoutS: v.TimeoutSeconds}
+	switch {
+	case chat.IsScheduleChat(v.Chat):
+		r.Agent = strings.TrimPrefix(v.Chat, chat.ScheduleChatPrefix)
+	case chat.IsDelegateChat(v.Chat):
+		r.From = core
 	}
 	return r
+}
+
+// chatKind names the chat jid without its JID, for what a run is told:
+// dm, group, schedule:<name> for a scheduled agent's own chat, delegate
+// for a delegated task's, and internal for any other of the bridge's own
+// (a site build's, say).
+func chatKind(jid string) string {
+	switch {
+	case chat.IsScheduleChat(jid):
+		return jid
+	case chat.IsDelegateChat(jid):
+		return "delegate"
+	case chat.IsGroupJID(jid):
+		return "group"
+	case chat.IsDirectJID(jid):
+		return "dm"
+	}
+	return "internal"
 }
 
 // opsAgentOf is a scheduled agent as the Schedules page lists it (v),
@@ -435,7 +470,7 @@ func (b *App) opsFride(ctx context.Context, now time.Time) (*opsFride, error) {
 			ot.Node = b.fride.nodeName(t.Node)
 		}
 		if chat.IsScheduleChat(t.Chat) {
-			ot.Agent = t.Chat[len(chat.ScheduleChatPrefix):]
+			ot.Agent = strings.TrimPrefix(t.Chat, chat.ScheduleChatPrefix)
 		}
 		out.Threads = append(out.Threads, ot)
 	}
