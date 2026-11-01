@@ -650,7 +650,9 @@ func (b *App) errandClaude(ctx context.Context, e store.Errand, cfg *config.Sett
 	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
 		sbBin, sbArgs, err := sp.Command(e.Brain, bin, args)
 		if err != nil {
-			return "", fmt.Errorf("the brain's sandbox: %w", err)
+			// Not err itself: it names the sandbox's files, which the
+			// brain's own runs log when its sandbox cannot be set up.
+			return "", errors.New("the brain's sandbox could not be set up")
 		}
 		bin, args = sbBin, sbArgs
 	}
