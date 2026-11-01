@@ -24,6 +24,25 @@ for compatibility.
   told, and they are ignored until `!unblock <number>`. Every step is an
   `errand` line in the audit log. Off unless you set it.
   [docs/BRAINS.md](docs/BRAINS.md#errands)
+- **Ops tools for the core brain.** Its runs that answer you, and those
+  of its own scheduled agents (a maintenance agent, say), get
+  `system_status` (one compact JSON snapshot: both lanes of every brain,
+  the scheduled agents with their last and next runs and failures in a
+  row, housekeeping, backups and the vault, the nodes, FrIDE, the Plaud
+  phones, and the core's version, uptime and free disk; chats named by
+  kind, no numbers, no message text, no secrets), and three write tools
+  that reach the core brain and the brains it holds a grant on:
+  `schedule_run(brain, name)` (Run now; not for an agent that is paused,
+  off, waiting for your approval, or riskier than the calling run),
+  `run_stop(brain, lane, started)` (stops exactly the run `system_status`
+  showed, never another that started since, never the calling run), and
+  `housekeeping_run(dry_run)`, a live run like `fridolin housekeeping
+  run` that may stop processes, remove locks and records and ask you in a
+  poll, within `housekeeping.dry_run`. Runs for groups, other people and
+  files handed in, sub-brains and delegated runs get none of them.
+  `/api/status` and `/api/brains` show a run's `source` and
+  `timeout_seconds` too.
+  [docs/BRAINS.md](docs/BRAINS.md#the-core-brains-ops-tools)
 - **GitHub in your chats.** A brain's `github` in brain.json (`{"repos":
   ["you/project"], "permissions": {"issues": "write"}}`) logs the runs
   that answer you, your direct messages and Plaud voice questions, in to
@@ -47,7 +66,8 @@ for compatibility.
   still run `claude -p`, which is also the fallback whenever the session is
   not up, was refused channels, or died. A brain's own `github` grant
   goes with it: each turn gets a token of its own, revoked when the turn
-  ends. Off by default.
+  ends. What a session says after its answer (a background task it
+  started ends) reaches the chat too. Off by default.
   [docs/BRAINS.md](docs/BRAINS.md#live-session)
 - **The Plaud Sync phone app updates itself.** Each build on the Plaud
   card (**Build and update phones**), or one the core brain starts with
@@ -67,6 +87,22 @@ for compatibility.
   [docs/PLAUD.md](docs/PLAUD.md#updates)
 
 ### Changed
+
+- **Scheduled agents run beside a brain's chats, not in their queue.**
+  A brain now has two queues: its chats', and its scheduled agents' in
+  the background (everything in an agent's own chat, `schedule:<name>`,
+  the runs FrIDE's news starts included). Each runs one message at a
+  time, so an agent that works for hours no longer keeps your direct
+  messages waiting, and an agent no longer waits for a chat's run. The
+  two runs may now work in the brain's folder at the same time, on the
+  same memory files too. Each queue has `max_pending` places of its own;
+  with `max_concurrent_runs` at 2 or more, the agents of all brains
+  together take at most one run fewer than the limit, so one is left for
+  the chats. `!stop` in a chat still stops only that chat's run; the Stop
+  on a brain's dashboard page stops both. `/api/status` and
+  `/api/brains` show the agent's run as `background`, and what waits for
+  it as `background_queue`.
+  [docs/BRAINS.md](docs/BRAINS.md#scheduled-agents)
 
 - **The core's and FrIDE's images run Node.js 26** (was 22), the LTS
   line, which brains' scripts and the Claude, Codex and Plaud CLIs in

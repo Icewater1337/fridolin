@@ -26,6 +26,7 @@ import { liveForm } from '../components/live-form.js';
 import { grantsEditor } from '../components/grants-editor.js';
 import { skillsCard } from '../components/skills-card.js';
 import { errorMessage } from '../lib/errors.js';
+import { agentOfChat } from '../lib/schedules.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { ActivityEntry, Brain, BrainIssue, BrainManifest, BrainRuntime, ConfigFile, ConfigResponse, Intent, IntentSchedule } from '../../types/api.js' */
@@ -241,12 +242,17 @@ export default /** @satisfies {PageModule} */ ({
       }
       const run = rt.running;
       const queue = rt.queue || [];
+      // A scheduled agent's run, which goes beside the chats'.
+      const bg = rt.background || null;
+      const bgQueue = rt.background_queue || [];
+      const waiting = queue.length + bgQueue.length;
       const last = rt.last;
       const stop = (/** @type {boolean} */ clear) => btn(clear ? 'Stop & clear queue' : 'Stop', {
         kind: clear ? 'danger' : '', icon: 'stop', small: true,
+        title: 'Stops every run of this brain: its chats\' and its scheduled agent\'s',
         onClick: async () => {
-          if (clear && queue.length) {
-            const ok = await confirmDialog({ title: 'Stop and clear the queue?', message: `The current run stops and ${plural(queue.length, 'waiting message')} will not be answered.`, confirm: 'Stop & clear', danger: true });
+          if (clear && waiting) {
+            const ok = await confirmDialog({ title: 'Stop and clear the queue?', message: `The current runs stop and ${plural(waiting, 'waiting message')} will not be answered.`, confirm: 'Stop & clear', danger: true });
             if (!ok) return;
           }
           const r = await post(`/api/brains/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
@@ -256,18 +262,25 @@ export default /** @satisfies {PageModule} */ ({
       });
       return h('div.grid.two',
         h('div.card',
-          h('div.card-head', h('div.card-title', h('h3', 'Current run')), run ? pill('Working', 'info', { pulse: true }) : pill('Idle', 'neutral')),
+          h('div.card-head', h('div.card-title', h('h3', 'Current run')), run || bg ? pill('Working', 'info', { pulse: true }) : pill('Idle', 'neutral')),
           run ? h('div.card-body',
             h('div.run-meta', h('span', 'From ', h('strong', run.sender ? phoneish(run.sender) : 'someone')), isGroupJid(run.chat) ? [h('span', 'in'), chatEl(run.chat)] : h('span.muted', '(direct message)'), run.silent ? badge('silent', 'neutral', 'Untagged group message: an observe-only run, which sends nothing') : null),
             run.preview ? h('blockquote.preview', run.preview) : null,
-            h('div.muted.small', timeAgo(run.started, 'Started '), run.pid ? ` · pid ${run.pid}` : ''),
-            h('div.actions', stop(false), stop(true)))
-            : h('div.card-body', h('p.muted', 'Waiting for messages.'), queue.length ? h('div.actions', stop(true)) : null)),
+            h('div.muted.small', timeAgo(run.started, 'Started '), run.pid ? ` · pid ${run.pid}` : ''))
+            : h('div.card-body', h('p.muted', 'Waiting for messages.')),
+          bg ? h('div.card-body',
+            h('div.run-meta', h('span', 'Scheduled agent ', h('strong', agentOfChat(bg.chat) || bg.chat)), h('span.muted', 'beside the chats')),
+            h('div.muted.small', timeAgo(bg.started, 'Started '), bg.pid ? ` · pid ${bg.pid}` : '')) : null,
+          run || bg ? h('div.card-body', h('div.actions', stop(false), stop(true)))
+            : waiting ? h('div.card-body', h('div.actions', stop(true))) : null),
         h('div.card',
-          h('div.card-head', h('div.card-title', h('h3', 'Queue')), queue.length ? badge(`${queue.length} waiting`, 'warn') : badge('empty', 'neutral')),
-          queue.length ? h('ol.queue-list', queue.map((q) => h('li',
-            h('div.run-meta', h('strong', q.sender ? phoneish(q.sender) : 'someone'), isGroupJid(q.chat) ? [h('span.muted', 'in'), chatEl(q.chat)] : h('span.muted', '(direct message)'), q.silent ? badge('silent', 'neutral') : null, h('span.muted.small', timeAgo(q.queued))),
-            q.preview ? h('div.preview-line', q.preview) : null)))
+          h('div.card-head', h('div.card-title', h('h3', 'Queue')), waiting ? badge(`${waiting} waiting`, 'warn') : badge('empty', 'neutral')),
+          queue.length || bgQueue.length ? h('ol.queue-list',
+            queue.map((q) => h('li',
+              h('div.run-meta', h('strong', q.sender ? phoneish(q.sender) : 'someone'), isGroupJid(q.chat) ? [h('span.muted', 'in'), chatEl(q.chat)] : h('span.muted', '(direct message)'), q.silent ? badge('silent', 'neutral') : null, h('span.muted.small', timeAgo(q.queued))),
+              q.preview ? h('div.preview-line', q.preview) : null)),
+            bgQueue.map((q) => h('li',
+              h('div.run-meta', h('span', 'Scheduled agent ', h('strong', agentOfChat(q.chat) || q.chat)), h('span.muted.small', timeAgo(q.queued))))))
             : h('p.muted', 'No messages waiting.'),
           h('div.last-run',
             h('h4', 'Last run'),

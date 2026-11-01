@@ -23,8 +23,14 @@ func targetsOn(env *doctor.Env) bool { return env.Config != nil && len(env.Confi
 
 // lastSnapshot is the newest snapshot of st that was made.
 func (st targetStatus) lastSnapshot() *snapshotRecord {
+	return newestSnapshot(st.LastNightly, st.LastHourly)
+}
+
+// newestSnapshot is the newest of tries that made a snapshot, nil for
+// none.
+func newestSnapshot(tries ...*snapshotRecord) *snapshotRecord {
 	var last *snapshotRecord
-	for _, r := range []*snapshotRecord{st.LastNightly, st.LastHourly} {
+	for _, r := range tries {
 		if r != nil && r.ID != "" && (last == nil || r.At.After(last.At)) {
 			last = r
 		}

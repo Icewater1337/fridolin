@@ -63,7 +63,7 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 	original := br.runner
 	br.runner = brainRunnerFunc(func(ctx context.Context, spec RunSpec, callbacks claudecli.Callbacks) claudecli.Result {
 		br.mu.Lock()
-		cur := br.current
+		cur := br.lane(LaneChat).current
 		br.mu.Unlock()
 		br.interruptRun(cur)
 		return original.Run(ctx, spec, callbacks)
@@ -257,7 +257,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 			testutil.WaitFor(t, 5*time.Second, "the worker to finish without another turn", func() bool {
 				br.mu.Lock()
 				defer br.mu.Unlock()
-				return !br.working
+				return !br.lane(LaneChat).working
 			})
 			data, _ := os.ReadFile(pidLog)
 			if len(strings.Fields(string(data))) != 1 {

@@ -70,7 +70,7 @@ func TestCapacityDisplacementCompletesAcceptedMessage(t *testing.T) {
 					}
 					br.mu.Lock()
 					var pending []string
-					for _, m := range br.pending {
+					for _, m := range br.lane(LaneChat).pending {
 						pending = append(pending, m.ID)
 					}
 					br.mu.Unlock()

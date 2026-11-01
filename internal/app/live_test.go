@@ -483,6 +483,26 @@ func TestLiveSessionLogsInToGitHubPerTurn(t *testing.T) {
 	}
 }
 
+// TestLiveSessionSendsWhatItSaysAfterATurn: a session that goes on after
+// its answer (a background task it started ends) and says more has that
+// sent to its chat, not dropped; its next turn is not taken for it.
+func TestLiveSessionSendsWhatItSaysAfterATurn(t *testing.T) {
+	t.Parallel()
+	setenv(t, "FRIDOLIN_FAKE_LIVE_LATE_ON", "#bg")
+	h, _ := liveHarness(t, manifest.LiveSessionOwnerDM, nil)
+	h.Answer(inbound{JID: harnessDM, Text: "one"})
+	h.waitLive("main")
+	if got := h.Answer(inbound{JID: harnessDM, Text: "start it #bg"}); !strings.HasPrefix(got, "live1:") {
+		t.Fatalf("the turn's own answer: %q", got)
+	}
+	if got := h.WaitSent(harnessDM, "later:"); !strings.Contains(got, "start it #bg") {
+		t.Errorf("what the session said after its turn: %q", got)
+	}
+	if got := h.Answer(inbound{JID: harnessDM, Text: "three"}); !strings.HasPrefix(got, "live2:") || !strings.HasSuffix(got, "says: three") {
+		t.Errorf("the next turn gets its own answer: %q", got)
+	}
+}
+
 // TestLiveSessionReady: a session takes a message only while it is up, for
 // the chat it serves, and as long as the brain's settings are those it was
 // started with; one that ended, or was started with other settings, makes

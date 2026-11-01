@@ -41,6 +41,15 @@
  */
 
 /**
+ * The name of the scheduled agent whose own chat (schedule:<name>) jid is,
+ * '' for any other chat.
+ * @param {string | null | undefined} jid
+ */
+export function agentOfChat(jid) {
+  return jid && jid.startsWith('schedule:') ? jid.slice('schedule:'.length) : '';
+}
+
+/**
  * The kind of task an agent has, as the form's select names it.
  * @param {Partial<Schedule>} s
  */

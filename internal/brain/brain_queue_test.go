@@ -43,30 +43,36 @@ func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
 // Each chat's messages wait in a lane of their own, which runs in order,
 // and the chats take turns: the chat whose last run started longest ago
 // goes next, one that never had a run first. Work addressed to the brain
-// goes before untagged chatter whatever the turns.
+// goes before untagged chatter whatever the turns. The background lane,
+// scheduled agents' work, runs in the order it came in.
 func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 	const x, y, z = "x@s.whatsapp.net", "y@s.whatsapp.net", "z@g.us"
+	const sa, sb = chat.ScheduleChatPrefix + "a", chat.ScheduleChatPrefix + "b"
 	msg := func(chatJID, text string) Inbound { return Inbound{Inbound: chat.Inbound{JID: chatJID, Text: text}} }
 	chatter := func(chatJID, text string) Inbound {
 		return Inbound{Inbound: chat.Inbound{JID: chatJID, Text: text, Silent: true}}
 	}
 	cases := []struct {
 		name    string
+		lane    Lane
 		turns   map[string]uint64
 		pending []Inbound
 		want    string
 	}{
-		{"one chat runs in order", nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(x, "x3")}, "x1 x2 x3"},
-		{"chats alternate", nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(y, "y1"), msg(y, "y2")}, "x1 y1 x2 y2"},
-		{"the chat that just ran goes last", map[string]uint64{x: 3}, []Inbound{msg(x, "x2"), msg(y, "y1"), msg(z, "z1")}, "y1 z1 x2"},
-		{"the longest ago goes first", map[string]uint64{x: 3, y: 1, z: 2}, []Inbound{msg(x, "x1"), msg(z, "z1"), msg(y, "y1")}, "y1 z1 x1"},
-		{"requests before chatter", nil, []Inbound{chatter(z, "z1"), msg(x, "x1"), msg(x, "x2"), msg(y, "y1")}, "x1 y1 x2 z1"},
+		{"one chat runs in order", LaneChat, nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(x, "x3")}, "x1 x2 x3"},
+		{"chats alternate", LaneChat, nil, []Inbound{msg(x, "x1"), msg(x, "x2"), msg(y, "y1"), msg(y, "y2")}, "x1 y1 x2 y2"},
+		{"the chat that just ran goes last", LaneChat, map[string]uint64{x: 3}, []Inbound{msg(x, "x2"), msg(y, "y1"), msg(z, "z1")}, "y1 z1 x2"},
+		{"the longest ago goes first", LaneChat, map[string]uint64{x: 3, y: 1, z: 2}, []Inbound{msg(x, "x1"), msg(z, "z1"), msg(y, "y1")}, "y1 z1 x1"},
+		{"requests before chatter", LaneChat, nil, []Inbound{chatter(z, "z1"), msg(x, "x1"), msg(x, "x2"), msg(y, "y1")}, "x1 y1 x2 z1"},
+		{"the background lane in the order they came", LaneBackground, map[string]uint64{sa: 3}, []Inbound{msg(sa, "a1"), msg(sa, "a2"), msg(sb, "b1")}, "a1 a2 b1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			br := &Brain{pending: c.pending, turns: maps.Clone(c.turns), turn: 10}
+			br := &Brain{lanes: newLanes()}
+			q := br.lane(c.lane)
+			q.pending, q.turns, q.turn = slices.Clone(c.pending), maps.Clone(c.turns), 10
 			var got []string
-			for _, i := range br.queueOrderLocked() {
+			for _, i := range q.order() {
 				got = append(got, c.pending[i].Text)
 			}
 			if strings.Join(got, " ") != c.want {
@@ -74,19 +80,43 @@ func TestQueueOrderGivesEachChatItsTurn(t *testing.T) {
 			}
 			// The worker takes them in that order.
 			got = nil
-			for len(br.pending) > 0 {
-				i := nextIn(br.pending, br.turns)
-				got = append(got, br.pending[i].Text)
-				chatJID := br.pending[i].JID
-				br.pending = slices.Delete(br.pending, i, i+1)
-				br.takeTurnLocked(chatJID)
+			for len(q.pending) > 0 {
+				i := q.next()
+				got = append(got, q.pending[i].Text)
+				chatJID := q.pending[i].JID
+				q.pending = slices.Delete(q.pending, i, i+1)
+				q.takeTurn(chatJID)
 			}
 			if strings.Join(got, " ") != c.want {
 				t.Errorf("ran %q, want %q", got, c.want)
 			}
-			if len(br.turns) != 1 {
-				t.Errorf("turns = %v once all ran, want only the last chat's", br.turns)
+			if len(q.turns) != 1 {
+				t.Errorf("turns = %v once all ran, want only the last chat's", q.turns)
 			}
 		})
+	}
+}
+
+// LaneOf puts a scheduled agent's own chat in the background lane, and
+// every other chat, WhatsApp's and the bridge's own, in the chat lane.
+func TestLaneOf(t *testing.T) {
+	for jid, want := range map[string]Lane{
+		chat.ScheduleChatPrefix + "upkeep": LaneBackground,
+		testDMChat:                         LaneChat,
+		testGroup:                          LaneChat,
+		chat.DelegateChatPrefix + "r1":     LaneChat,
+		"build:a:1":                        LaneChat,
+	} {
+		if got := LaneOf(jid); got != want {
+			t.Errorf("LaneOf(%q) = %s, want %s", jid, got, want)
+		}
+	}
+	for _, l := range []Lane{LaneChat, LaneBackground} {
+		if got, ok := ParseLane(l.String()); !ok || got != l {
+			t.Errorf("ParseLane(%q) = %s, %v", l, got, ok)
+		}
+	}
+	if _, ok := ParseLane("both"); ok {
+		t.Error(`ParseLane("both") is a lane`)
 	}
 }

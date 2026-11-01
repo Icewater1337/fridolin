@@ -154,6 +154,12 @@ func (m Inbound) IsGroup() bool { return IsGroupJID(m.JID) }
 // IsGroupJID reports whether jid is a group chat's, …@g.us.
 func IsGroupJID(jid string) bool { return strings.HasSuffix(jid, "@g.us") }
 
+// IsDirectJID reports whether jid is a one-to-one chat's: a phone number
+// (…@s.whatsapp.net) or a LID (…@lid).
+func IsDirectJID(jid string) bool {
+	return strings.HasSuffix(jid, "@s.whatsapp.net") || strings.HasSuffix(jid, "@lid")
+}
+
 // DMJID is the JID of the direct chat with a phone number, given as
 // allowed_numbers has it (country code, no +).
 func DMJID(number string) string { return number + "@s.whatsapp.net" }

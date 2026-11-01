@@ -106,7 +106,9 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 			}
 		}
 	}
-	if path := os.Getenv("FRIDOLIN_FAKE_WAIT_FILE"); path != "" && (os.Getenv("FRIDOLIN_FAKE_WAIT_BRAIN") == "" || os.Getenv("FRIDOLIN_FAKE_WAIT_BRAIN") == os.Getenv("FRIDOLIN_BRAIN_ID")) {
+	waitOn := os.Getenv("FRIDOLIN_FAKE_WAIT_ON")
+	if path := os.Getenv("FRIDOLIN_FAKE_WAIT_FILE"); path != "" && (os.Getenv("FRIDOLIN_FAKE_WAIT_BRAIN") == "" || os.Getenv("FRIDOLIN_FAKE_WAIT_BRAIN") == os.Getenv("FRIDOLIN_BRAIN_ID")) &&
+		(waitOn == "" || strings.Contains(NewMessage(prompt), waitOn)) {
 		for {
 			if _, err := os.Stat(path); err == nil {
 				break

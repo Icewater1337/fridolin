@@ -102,6 +102,8 @@ test('runtimeSummary', async (t) => {
     ['idle, never ran', runtime({}), 'IdleNo runs yet'],
     ['working with a queue', runtime({ running: { preview: 'hi' }, queue: [{}, {}], last: { outcome: 'ok', finished: '' } }), 'Working2 queuedRepliednever'],
     ['the last run failed', runtime({ last: { outcome: 'error', error: 'exit 1' } }), 'IdleFailednever'],
+    ['a scheduled agent beside the chats', runtime({ background: { chat: 'schedule:upkeep' }, background_queue: [{}] }), 'Agent running1 queuedNo runs yet'],
+    ['a chat and an agent', runtime({ running: { preview: 'hi' }, queue: [{}], background: { chat: 'schedule:upkeep' }, background_queue: [] }), 'WorkingAgent running1 queuedNo runs yet'],
   ];
   for (const [name, rt, want] of cases) {
     await t.test(name, () => assert.equal(h('div', runtimeSummary(rt)).textContent, want));

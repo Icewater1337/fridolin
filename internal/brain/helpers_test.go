@@ -48,7 +48,7 @@ func bareBrain(t testing.TB) *Brain {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { root.Close() })
-	return &Brain{id: "a", workDir: dir, root: root, input: inputRules()}
+	return &Brain{id: "a", workDir: dir, root: root, input: inputRules(), lanes: newLanes()}
 }
 
 // testSink records runtime protocol events; user-facing formatting stays in

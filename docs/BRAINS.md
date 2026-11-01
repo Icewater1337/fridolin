@@ -151,6 +151,11 @@ a Claude Code *channel*.
   next message runs as a one-off while a new session starts. A session that
   dies in the middle of a turn ends that message in an error, as a failed run
   would, and is not run again: it may have done something already.
+- **After its answer.** A session can go on after it answered: a
+  background task it started ends, and it says how it went. What it says
+  then is sent to its chat as a message of its own, not dropped. What a
+  session says while it is on its way out (stopped, timed out) goes
+  nowhere.
 - **GitHub.** A brain with a [`github`](#github-in-your-chats) grant of
   its own keeps its session: `gh` in it is logged in for each turn with a
   token of the grant minted for that turn, and logged out, the token
@@ -276,6 +281,7 @@ what the model says:
 | `node_exec(argv, node, dir, timeout_seconds, approval_id, wait_seconds)`, `node_exec_rules(node)` | while a node whose `exec` you approved is online: runs one command its allowlist allows, a write action; a command whose rule has `approve` asks you in a poll each time ([NODES.md](NODES.md#the-core-brain-runs-commands)) | absent |
 | `contact_person(number, name, goal, brief, message, days)`, `errands(id)`, `errand_answer(id, text)`, `errand_stop(id)` | with brain.json's `errands` set, in a run that may ask you: has Fridolin write to someone for you and carry the conversation, see [Errands](#errands) | absent |
 | `plaud_app_update()`, `plaud_app_status()` | while the Plaud Sync app uploads through the site (`plaud.phone_upload`): builds the app as the Plaud card does, which the paired phones then install, a write action; and says what each phone runs and how its last update went ([PLAUD.md](PLAUD.md#updates)) | absent |
+| `system_status()`, `schedule_run(brain, name)`, `run_stop(brain, lane, started)`, `housekeeping_run(dry_run)` | in a run that answers you, or of one of its scheduled agents: the ops tools, see [below](#the-core-brains-ops-tools) | absent |
 
 Any brain, core or not, also gets the tools of Fridolin's
 [connections](CONNECTIONS.md#brains) while the connection has a key and
@@ -331,6 +337,30 @@ its `.md` files) or `skills/`. The bridge reads it outside the sandbox,
 so it follows no symlink on the way, not even one inside the folder.
 What the core learns about a sub-brain goes into its own notes, never the
 sub-brain's files.
+
+### The core brain's ops tools
+
+The core brain can see how the system stands and act on it, so that a
+maintenance agent (hourly, say) can look after things. Only two kinds of
+its runs get these tools: one that answers you (your own message in a
+direct chat, as for its [GitHub grant](#github-in-your-chats)), and one
+of its own scheduled agents (in a chat `schedule:<name>`, the runs
+FrIDE's news starts there included). A run for anyone else, in a group
+(your own message there too), for a file handed in through `/ingest` or
+Plaud, a sub-brain's run and a delegated one get none of them.
+
+| Tool | What |
+| --- | --- |
+| `system_status()` | one JSON snapshot: each brain's runs in both lanes (the kind of chat, source, start, age, timeout; see [Agents run beside the chats](#scheduled-agents)), what waits, whether its live session is up, how its last run ended; each scheduled agent's state, pause, run in progress, last run, next run, failures in a row and a change waiting for your approval; housekeeping and its last report; the Drive backup, the vault (sync, snapshots, Litestream) and each node target, with the last success and error; the nodes (online, last seen, version, what they offer, with problems such as `fride-host (not ready)`); FrIDE's instances and open threads; the Plaud phones' last upload and check-in; the core's version, uptime and the data folder's free disk. A chat is named by its kind, `dm`, `group`, `schedule:<name>`, `delegate` (with the brain that delegated) or `internal`, never by a number or JID. It holds no message text, token or secret |
+| `schedule_run(brain, name)` | starts a scheduled agent now, as the Schedules page's **Run now** does (its run history says "by hand (core brain)"). It refuses an agent that is paused, switched off, or has a change waiting for your approval, and one whose `risk` is above the calling run's own (an agent that sets none counts as `write`): a run starts nothing that may do more than itself. A write action |
+| `run_stop(brain, lane, started)` | stops one run: the one in the brain's `chat` or `background` lane that started at `started`, as `system_status` reported it. When another run goes there by then, or none, it stops nothing and says what runs; the bridge compares and stops under the brain's lock, so a run that started in between is never the one stopped. What waits runs next. It refuses the run that calls it: a run in its own brain's lane is itself. A write action |
+| `housekeeping_run(dry_run)` | runs [housekeeping](CONFIGURATION.md#housekeeping) now, as `fridolin housekeeping run` does: a live run, not the dashboard's dry **Check now**. It may stop processes, remove stale locks and run records, and put a process to you as an approval poll. It follows `housekeeping.dry_run` (on by default: then it only reports), and `dry_run: true` makes it report only whatever the setting says. It answers its report, without the command lines it found. A write action |
+
+`schedule_run` and `run_stop` reach the core brain itself and the brains
+it holds a grant on (those `list_brains` lists); any other brain is
+refused. Like every write tool, the three that act are refused in a
+lockdown and to a run whose risk is `read`: give a maintenance agent
+`"risk": "write"`.
 
 ## Errands
 
@@ -895,8 +925,8 @@ stays pending. A bridge from before `.brain` does not see the files: it
 runs the agents you approved, from `config.json`, and shows the brain's
 `brain.json` as changed on disk.
 
-**How a run goes.** A brain run of an agent goes through the brain's
-queue like a message: the same sandbox, prompt, memory, risk level and
+**How a run goes.** A brain run of an agent is a message to the brain
+like any other: the same sandbox, prompt, memory, risk level and
 irreversible-step approvals, which ask in your DM. It runs in a chat of
 its own, `schedule:<name>`, whose history its next run sees, so it knows
 what it reported before. Its message says the agent's name and schedule,
@@ -909,6 +939,27 @@ history and log, and the chat is told of the failure only. An
 agent never runs twice at once: a time that comes while its run goes on
 is left out. A lockdown runs an agent at `read`, and refuses one whose
 `risk` says more; it refuses every program on a node.
+
+**Agents run beside the chats.** A brain has two queues, each with at
+most one run at a time: its chats' (every WhatsApp chat, the live
+session's turns, delegated tasks, files handed in), and its scheduled
+agents' in the background. Everything in an agent's chat,
+`schedule:<name>`, goes to the background queue: the scheduled run, and
+the runs FrIDE's news starts for the work the agent handed over. Those
+run one at a time, in the order they came in, while the brain goes on
+answering its chats: an agent that works for hours keeps no DM waiting,
+and an agent no longer waits for a chat's run to end either. Each queue
+has [`max_pending`](CONFIGURATION.md#queue) places of its own. Since the
+two runs work at the same time in the same folder, an agent may write a
+memory file while a chat's run reads or writes the same one: give an
+agent its own files to keep (`memories/agents/<name>.md`, say), and
+have it add to a shared file rather than rewrite it. With
+[`max_concurrent_runs`](CONFIGURATION.md#max_concurrent_runs) at 2 or
+more, the agents of all brains together take at most one run fewer than
+the limit, so one is always left for the chats; at 1, a chat waits for an
+agent's run as for any other. `!stop` in a chat stops that chat's run,
+never an agent's; the Stop on the brain's dashboard page stops both, and
+its brain card shows the agent's run beside the chat's.
 
 **FrIDE and workstation sessions from an agent.** A run of an agent
 may hand work to FrIDE (`fride_task`). That work's news never goes to

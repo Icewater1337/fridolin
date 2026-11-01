@@ -95,6 +95,7 @@ func (b *App) newMCPTools() *tools.Set[mcpCaller] {
 	b.registerPlaudTools(r)
 	b.registerLiveTools(r)
 	b.registerErrandTools(r)
+	b.registerOpsTools(r)
 	return r
 }
 

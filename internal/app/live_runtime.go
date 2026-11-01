@@ -133,6 +133,18 @@ func (h *liveHost) Stop() {
 	h.wg.Wait()
 }
 
+// up reports whether the brain's live session runs and is ready for a
+// turn, for the core brain's system_status.
+func (h *liveHost) up(brainID string) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sess[brainID]
+	return s != nil && s.ready && !s.stopped
+}
+
 // eligible reports whether spec's message is one a live session takes:
 // the brain has one, and it is its owner's direct message to it, from
 // WhatsApp, in a brain that runs the CLI as the session needs it (without
@@ -541,14 +553,29 @@ func (h *liveHost) next(ctx context.Context, token string, wait time.Duration) (
 }
 
 // end is POST /brain/live/turn-end: the Stop hook of the session whose
-// token it is.
-func (h *liveHost) end(_ context.Context, token, text string) error {
+// token it is. A Stop with no turn waiting is the session going on after
+// its answer, as when a background task it started ends: what it says then
+// goes to its chat, as a later message of the run would. One of a session
+// on its way out, or of its check, goes nowhere.
+func (h *liveHost) end(ctx context.Context, token, text string) error {
 	s := h.byToken(token)
 	if s == nil {
 		return apperr.New(apperr.NotFound, "this token is no live session's")
 	}
-	if !s.hub.End(text) {
+	if s.hub.End(text) {
+		return nil
+	}
+	h.mu.Lock()
+	gone := s.stopped || !s.ready
+	h.mu.Unlock()
+	text = strings.TrimSpace(text)
+	if gone || text == "" || h.b.pipeline == nil {
 		log.Printf("brain %s: the live session stopped with no turn waiting (%d characters not sent)", s.brain, len(text))
+		return nil
+	}
+	log.Printf("brain %s: the live session went on after its turn: sending what it said (%d chars) to %s", s.brain, len(text), s.chat)
+	if err := h.b.pipeline.Reply(context.WithoutCancel(ctx), s.brain, s.chat, text, h.b.pipeline.Settings().MaxChunkSize); err != nil {
+		log.Printf("brain %s: %v", s.brain, err)
 	}
 	return nil
 }
