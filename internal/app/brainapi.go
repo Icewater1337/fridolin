@@ -301,16 +301,15 @@ func writeRunToken(dir, tok string) (string, error) {
 // are left.
 func pruneRunTokens(dataDir string) {
 	var files []string
+	// And the gh logins of runs and live sessions (newGitHubConfigDir),
+	// whose tokens GitHub ends within the hour.
 	for _, dir := range []string{runTokensDirName, liveTokensDirName} {
-		for _, pattern := range []string{"run-*.token", "run-*.mcp.json"} {
+		for _, pattern := range []string{"run-*.token", "run-*.mcp.json", "run-*.gh"} {
 			found, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), dir, "*", pattern))
 			files = append(files, found...)
 		}
 	}
-	// And the runs' gh logins (withGitHubToken), whose tokens GitHub ends
-	// within the hour.
-	gh, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), runTokensDirName, "*", "run-*.gh"))
-	for _, f := range append(files, gh...) {
+	for _, f := range files {
 		if err := os.RemoveAll(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Printf("warning: removing a stale brain API token: %v", err)
 		}

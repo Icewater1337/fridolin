@@ -151,11 +151,15 @@ a Claude Code *channel*.
   next message runs as a one-off while a new session starts. A session that
   dies in the middle of a turn ends that message in an error, as a failed run
   would, and is not run again: it may have done something already.
+- **GitHub.** A brain with a [`github`](#github-in-your-chats) grant of
+  its own keeps its session: `gh` in it is logged in for each turn with a
+  token of the grant minted for that turn, and logged out, the token
+  revoked, once the turn is over, as a one-off run's would be. Between
+  turns the session has no GitHub login: a background task that outlives
+  its turn finds `gh` logged out. The login is in `live-tokens/<brain>`
+  with the session's token (below).
 - **What it does not do.** `AskUserQuestion` is off in a session (use
-  `ask_user`). A brain with a [`github`](#github-in-your-chats) grant of its own answers
-  your messages with one-off runs, each logged in to `gh` with a token of
-  its own, since a session would outlive GitHub's tokens, which last an
-  hour. Activity shows in the brain's activity log as one line a turn,
+  `ask_user`). Activity shows in the brain's activity log as one line a turn,
   not as the tool calls of a run. Without the sandbox (macOS and Linux with
   `sandbox.enabled` off) the brain's folder must have been trusted once in an
   interactive `claude` for the session to start. A session holds the brain's

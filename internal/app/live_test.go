@@ -2,7 +2,11 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/ghapp/ghapptest"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
@@ -23,18 +28,29 @@ type liveLine struct {
 	Turn    string `json:"turn"`
 	Content string `json:"content"`
 	PID     int    `json:"pid"`
+	// GH is the token of the gh login the CLI saw with a message, and
+	// GHConfigDir its GH_CONFIG_DIR as it started.
+	GH          string `json:"gh"`
+	GHStatus    int    `json:"gh_status"`
+	GHConfigDir string `json:"gh_config_dir"`
 }
 
 // liveHarness is a served bridge whose brain "main" keeps a live session
 // for its owner's direct messages, with the fake live CLI's log in log.
 func liveHarness(t *testing.T, mode string, extra func(h *harness)) (h *harness, log func() []liveLine) {
 	t.Helper()
+	return liveHarnessOf(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, LiveSession: mode}, extra)
+}
+
+// liveHarnessOf is liveHarness with brain m.
+func liveHarnessOf(t *testing.T, m manifest.Manifest, extra func(h *harness)) (h *harness, log func() []liveLine) {
+	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "live.log")
 	setenv(t, "FRIDOLIN_FAKE_LIVE_LOG", logPath)
 	optionsOf(t).waits.liveReady = 5 * time.Second
 	optionsOf(t).waits.liveSettle = 0
 	h = newServedHarness(t, `{"dangerously_skip_permissions": true}`)
-	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, LiveSession: mode})
+	h.AddBrain(m)
 	if extra != nil {
 		extra(h)
 	}
@@ -171,7 +187,8 @@ func TestLiveSessionOnlyForTheOwnersDMs(t *testing.T) {
 		{"a brain that asks for permissions", nil, func(s *brain.Settings) { s.Dangerously = false }, false},
 		{"a brain on the user's own Claude config", nil, func(s *brain.Settings) { s.InheritUser = true }, false},
 		{"a brain with the setting off", nil, func(s *brain.Settings) { s.Manifest.LiveSession = "" }, false},
-		{"a brain with a GitHub grant", nil, func(s *brain.Settings) { s.Manifest.GitHub = &chat.GitHubGrant{Repos: []string{"you/a"}} }, false},
+		{"a brain with a GitHub grant", nil, func(s *brain.Settings) { s.Manifest.GitHub = &chat.GitHubGrant{Repos: []string{"you/a"}} }, true},
+		{"a message with a GitHub grant of its own", func(m *chat.Inbound) { m.GitHub = &chat.GitHubGrant{Repos: []string{"you/a"}} }, nil, false},
 	} {
 		if got := with(c.f, c.g); got != c.want {
 			t.Errorf("%s: eligible = %v, want %v", c.name, got, c.want)
@@ -394,6 +411,75 @@ func TestLiveSessionTokenIsItsOwn(t *testing.T) {
 	}
 	if !held {
 		t.Errorf("no file in %s holds the session's token: %v", access.TokenDir, files)
+	}
+}
+
+// TestLiveSessionLogsInToGitHubPerTurn: a brain with a github grant of its
+// own keeps its live session, whose gh has a login only while a turn is
+// under way: a token of the grant minted for that turn, live as the turn
+// uses it, and revoked once the turn is over, as a one-off run's. The
+// session's gh folder is in its own token folder, and goes with it, also
+// when it dies in a turn.
+func TestLiveSessionLogsInToGitHubPerTurn(t *testing.T) {
+	t.Parallel()
+	fake := ghapptest.New()
+	t.Cleanup(fake.Close)
+	setenv(t, "FRIDOLIN_FAKE_GH_API", fake.URL)
+	setenv(t, "FRIDOLIN_FAKE_LIVE_EXIT_ON", "boom")
+	grant := &chat.GitHubGrant{Repos: []string{"you/fridolin"}, Permissions: map[string]string{"issues": "write"}}
+	h, log := liveHarnessOf(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, LiveSession: manifest.LiveSessionOwnerDM, GitHub: grant}, func(h *harness) {
+		h.b.github.client.API, h.b.github.web = fake.URL, fake.URL
+		creds, err := h.b.github.client.Convert(context.Background(), ghapptest.Code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.b.github.secrets.save(creds); err != nil {
+			t.Fatal(err)
+		}
+	})
+	h.Answer(inbound{JID: harnessDM, Text: "one"})
+	h.waitLive("main")
+	for _, text := range []string{"two", "three"} {
+		if got := h.Answer(inbound{JID: harnessDM, Text: text}); !strings.HasPrefix(got, "live") {
+			t.Fatalf("the session did not answer %q: %q", text, got)
+		}
+	}
+	var dir string
+	for _, l := range log() {
+		if l.Event == "start" {
+			dir = l.GHConfigDir
+		}
+	}
+	if filepath.Dir(dir) != liveTokenDir(h.b.cfgs.Boot().DataDir, "main") {
+		t.Fatalf("the session's GH_CONFIG_DIR: %q", dir)
+	}
+	testutil.WaitFor(t, 5*time.Second, "every token revoked", func() bool { return len(fake.Live()) == 0 })
+	if _, err := os.Stat(filepath.Join(dir, "hosts.yml")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("between turns the session's gh has a login: %v", err)
+	}
+
+	// It dies in a turn: that turn's token is revoked all the same, and
+	// the folder goes.
+	h.Answer(inbound{JID: harnessDM, Text: "boom"})
+	testutil.WaitFor(t, 5*time.Second, "the token of the turn it died in revoked", func() bool { return len(fake.Live()) == 0 })
+	testutil.WaitFor(t, 5*time.Second, "the session's gh folder removed", func() bool { _, err := os.Stat(dir); return errors.Is(err, fs.ErrNotExist) })
+
+	all := fake.AllMinted()
+	minted := map[string]bool{}
+	for _, m := range all {
+		minted[m.Token] = fmt.Sprint(m.Repos, m.Permissions) == "[fridolin] map[issues:write]"
+	}
+	msgs := messagesOf(log())
+	seen := map[string]bool{}
+	for _, m := range msgs {
+		if m.GH == "" || seen[m.GH] || !minted[m.GH] || m.GHStatus != 200 {
+			t.Errorf("each turn is logged in with a live token of the grant minted for it; the turns saw %+v, minted %+v", msgs, all)
+			break
+		}
+		seen[m.GH] = true
+	}
+	if len(msgs) != 3 {
+		t.Errorf("turns: %d, want 3", len(msgs))
 	}
 }
 
