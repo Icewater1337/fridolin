@@ -22,7 +22,7 @@
 # old when they were chosen.
 
 ARG GO_IMAGE=golang:1.27.2-bookworm
-ARG NODE_IMAGE=node:22.23.2-bookworm-slim
+ARG NODE_IMAGE=node:22.23.3-bookworm-slim
 
 # ── FrIDE and ponytail ────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS fride
@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 FROM ${GO_IMAGE} AS tools
 ARG TARGETARCH
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.102.0
+ARG GH_VERSION=2.103.2
 WORKDIR /dl
 RUN set -eu; \
     case "${TARGETARCH}" in \
@@ -62,7 +62,7 @@ RUN set -eu; \
 FROM ${NODE_IMAGE} AS node
 # The version the core's image has (container/Dockerfile).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.303
+ARG CLAUDE_CODE_VERSION=2.1.310
 RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
 

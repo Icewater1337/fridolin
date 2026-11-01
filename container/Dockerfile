@@ -14,8 +14,8 @@
 # against the SHA-256 their release publishes.
 
 ARG GO_IMAGE=golang:1.26.8-bookworm
-ARG NODE_IMAGE=node:22.23.2-bookworm-slim
-ARG RUNTIME_IMAGE=debian:bookworm-20261005-slim
+ARG NODE_IMAGE=node:22.23.3-bookworm-slim
+ARG RUNTIME_IMAGE=debian:bookworm-20261020-slim
 
 # ── the bridge ────────────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS build
@@ -55,15 +55,15 @@ ARG TARGETARCH
 # renovate: datasource=github-releases depName=restic/restic
 ARG RESTIC_VERSION=0.19.1
 # renovate: datasource=github-releases depName=rclone/rclone
-ARG RCLONE_VERSION=1.75.1
+ARG RCLONE_VERSION=1.75.2
 # renovate: datasource=github-releases depName=benbjohnson/litestream
 ARG LITESTREAM_VERSION=0.5.17
 # What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
 # (quick tunnels to a dev server).
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.102.0
+ARG GH_VERSION=2.103.2
 # renovate: datasource=github-releases depName=cloudflare/cloudflared
-ARG CLOUDFLARED_VERSION=2026.10.0
+ARG CLOUDFLARED_VERSION=2026.10.3
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
@@ -126,13 +126,13 @@ RUN python3 -m venv /opt/fridolin/venv \
 FROM ${NODE_IMAGE} AS node
 # At least the version internal/claudecli tests against (TestedClaudeVersion).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.303
+ARG CLAUDE_CODE_VERSION=2.1.310
 # Codex (agent_provider "codex"), at least the version the bridge is tested
 # against; its package installs the native build for the image's platform.
 # Each brain signs in to it with a file of its own (brains/<id>/codex/
 # auth.json in the data dir), so a sign-in moves with an export.
 # renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.163.0
+ARG CODEX_VERSION=0.164.0
 # The Plaud CLI (plaud.enabled), as docs/PLAUD.md installs it.
 # renovate: datasource=npm depName=@plaud-ai/cli
 ARG PLAUD_CLI_VERSION=0.3.15
