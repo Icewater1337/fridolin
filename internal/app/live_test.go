@@ -463,3 +463,31 @@ func TestLiveSessionReady(t *testing.T) {
 		t.Error("the reaper left an idle session")
 	}
 }
+
+// TestOneOffRunInTheSessionsChatEndsIt: a scheduled agent's run, or any
+// other one-off, that answers in the chat a session serves ends the session,
+// as its later turns would never see that exchange; another chat's does not.
+func TestOneOffRunInTheSessionsChatEndsIt(t *testing.T) {
+	t.Parallel()
+	b := &App{waits: defaultWaits()}
+	h := newLiveHost(b)
+	t.Cleanup(h.Stop)
+	s := &liveSession{brain: "main", chat: harnessDM, hub: claudecli.NewLiveHub(), ready: true}
+	h.mu.Lock()
+	h.sess["main"] = s
+	h.mu.Unlock()
+	stopped := func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return s.stopped
+	}
+	spec := brain.RunSpec{ID: "main", Settings: &brain.Settings{}, Message: chat.Inbound{JID: "15557654321@s.whatsapp.net", Source: chat.SourceScheduled}} // personal-data:ignore (a placeholder number)
+	h.run(&commandRunner{}, t.Context(), spec, claudecli.Callbacks{}, nil)
+	if stopped() {
+		t.Fatal("a one-off run in another chat ended the session")
+	}
+	spec.Message.JID = harnessDM
+	if _, ok := h.run(&commandRunner{}, t.Context(), spec, claudecli.Callbacks{}, nil); ok || !stopped() {
+		t.Errorf("a one-off run in the session's chat: taken = %v, stopped = %v", ok, stopped())
+	}
+}
