@@ -756,10 +756,27 @@ func (s *Service) Call(ctx context.Context, id, method string, params, out any) 
 	if err := ss.send(nodeproto.TypeRequest, reqID, nodeproto.Request{Method: method, Params: raw}); err != nil {
 		return nodeproto.Errorf(nodeproto.CodeUnavailable, "sending to node %s: %v", id, err)
 	}
+	return awaitAnswer(ctx, ch, id, method, timeout, out)
+}
+
+// awaitAnswer waits for the node's answer to a call, up to timeout. A
+// caller that stops waiting first, as a run does when the core stops, is
+// told so, not that the node took too long: a brain that read "did not
+// answer within 15m" after 13 seconds told its owner the node hung.
+func awaitAnswer(ctx context.Context, ch <-chan nodeproto.Response, id, method string, timeout time.Duration, out any) error {
+	start := time.Now()
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	select {
 	case <-ctx.Done():
+		after := time.Since(start).Round(time.Second)
+		switch err := parent.Err(); {
+		case errors.Is(err, context.DeadlineExceeded):
+			return nodeproto.Errorf(nodeproto.CodeTimeout, "node %s did not answer %s within the caller's %v", id, method, after)
+		case err != nil:
+			return nodeproto.Errorf(nodeproto.CodeUnavailable, "the call of %s on node %s was cancelled after %v, before the node answered (the core may be restarting); a command it ran may have stopped with it", method, id, after)
+		}
 		return nodeproto.Errorf(nodeproto.CodeTimeout, "node %s did not answer %s within %v", id, method, timeout)
 	case resp := <-ch:
 		if resp.Error != nil {
