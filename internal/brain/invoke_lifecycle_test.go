@@ -25,7 +25,7 @@ func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), process: &fakeProcessStop{stopped: make(chan struct{})}}
 		runs = append(runs, run)
 		contexts = append(contexts, ctx)
-		mgr.order = append(mgr.order, &Brain{current: run})
+		mgr.order = append(mgr.order, &Brain{lanes: [laneCount]lane{{current: run}}})
 		// Both cancellations must be requested before either supervisor
 		// acknowledges stopping; otherwise one delayed run blocks another.
 		t.Cleanup(func() {
@@ -74,7 +74,7 @@ func TestKillRunsPreventsALateProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	mgr := &Manager{order: []*Brain{{current: run}}}
+	mgr := &Manager{order: []*Brain{{lanes: [laneCount]lane{{current: run}}}}}
 	mgr.KillRuns()
 	// An independent context deliberately tests the startup barrier,
 	// rather than relying on os/exec noticing the cancelled run context.
@@ -108,7 +108,7 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 	if err := proc.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	mgr := &Manager{order: []*Brain{{current: run}}}
+	mgr := &Manager{order: []*Brain{{lanes: [laneCount]lane{{current: run}}}}}
 	stopped := make(chan struct{})
 	go func() { mgr.KillRuns(); close(stopped) }()
 	select {
@@ -123,7 +123,7 @@ func TestKillRunsIncludesRetiringBrains(t *testing.T) {
 	defer cancel()
 	proc := &fakeProcessStop{stopped: make(chan struct{})}
 	proc.acknowledgeStop()
-	old := &Brain{current: &brainRun{cancel: cancel, process: proc}}
+	old := &Brain{lanes: [laneCount]lane{{current: &brainRun{cancel: cancel, process: proc}}}}
 	mgr := &Manager{retired: map[*Brain]struct{}{old: {}}}
 	mgr.KillRuns()
 	if ctx.Err() == nil {

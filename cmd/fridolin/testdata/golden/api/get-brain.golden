@@ -40,6 +40,8 @@ Content-Type: application/json
   "name": "Main",
   "path": "<HOME>/main",
   "runtime": {
+    "background": null,
+    "background_queue": [],
     "backup": {
       "enabled": true,
       "exclude": [

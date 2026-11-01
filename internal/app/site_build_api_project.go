@@ -39,7 +39,8 @@ func (b *App) buildAPI(mux *http.ServeMux) {
 			if rt.Running == nil || rt.Running.Chat != buildChatJID(br.ID(), ch.Thread) {
 				return false
 			}
-			br.StopCurrent(false)
+			// The chat lane's run only: the brain's scheduled agents go on.
+			br.StopLane(brain.LaneChat)
 			return true
 		},
 	}).Register(mux)

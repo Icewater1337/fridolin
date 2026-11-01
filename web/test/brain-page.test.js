@@ -77,6 +77,21 @@ test('typed settings survive a refresh, and a change elsewhere is flagged', asyn
   assert.equal(bar().hidden, true);
 });
 
+test('a scheduled agent\'s run shows beside the chat\'s', async (t) => {
+  const { root, poll } = await openPage(t);
+  await poll([view('Work', {
+    running: null, queue: [],
+    background: { chat: 'schedule:upkeep', sender: 'schedule', preview: '', silent: false, started: '2026-10-18T10:00:00Z', pid: 0 },
+    background_queue: [{ chat: 'schedule:digest', sender: 'schedule', preview: '', silent: false, queued: '2026-10-18T10:05:00Z' }],
+  })]);
+  const text = root.textContent;
+  assert.match(text, /Waiting for messages\./, 'no chat runs');
+  assert.match(text, /Scheduled agent upkeep/, 'the agent that runs');
+  assert.match(text, /Scheduled agent digest/, 'the agent that waits');
+  assert.match(text, /1 waiting/);
+  assert.ok(root.querySelectorAll('button').some((b) => b.textContent === 'Stop'), 'the agent\'s run can be stopped');
+});
+
 test('a setting typed back to what it was is no unsaved change', async (t) => {
   const { ctx, nameIn, bar } = await openPage(t);
   type(nameIn(), 'Home');

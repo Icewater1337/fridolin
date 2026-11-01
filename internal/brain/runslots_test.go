@@ -22,17 +22,18 @@ func newSlotScript(t *testing.T, limit int) *slotScript {
 }
 
 // do runs one step: "+name" waits for a request, "~name" for chatter,
-// "-name" releases name's slot, "^name" upgrades name's wait, "xname"
-// gives name's wait up and "=n" sets the limit to n. A slot that is ready
-// is taken at once.
+// "*name" for a background lane's run (a scheduled agent's), "-name"
+// releases name's slot, "^name" upgrades name's wait, "xname" gives
+// name's wait up and "=n" sets the limit to n. A slot that is ready is
+// taken at once.
 func (s *slotScript) do(step string) {
 	s.t.Helper()
 	name := step[1:]
 	var stopOther func()
 	switch step[0] {
-	case '+', '~':
+	case '+', '~', '*':
 		stop := func() { s.stopped = append(s.stopped, name) }
-		s.waits[name], stopOther = s.rs.wait(step[0] == '+', stop)
+		s.waits[name], stopOther = s.rs.wait(step[0] != '~', step[0] == '*', stop)
 	case '-':
 		s.slots[name].release()
 		delete(s.slots, name)
@@ -99,6 +100,20 @@ func TestRunSlots(t *testing.T) {
 		{"a wait given up leaves the queue", 1, []string{"+a", "+b", "+c", "xb", "-a"}, "c", ""},
 		{"a raised limit lets those waiting in", 1, []string{"+a", "+b", "+c", "=3"}, "a b c", ""},
 		{"a lowered limit holds the next back", 3, []string{"+a", "+b", "=1", "+c", "-a"}, "b", ""},
+		// Scheduled agents' runs (background lanes) leave a slot for the
+		// chats: they hold at most limit-1 together.
+		{"agents leave a slot for the chats", 2, []string{"*a", "*b", "+c"}, "a c", ""},
+		{"agents take up to limit-1", 3, []string{"*a", "*b", "*c"}, "a b", ""},
+		{"no limit, no cap", 0, []string{"*a", "*b", "*c"}, "a b c", ""},
+		{"a limit of one has nothing to keep free", 1, []string{"*a", "+b"}, "a", ""},
+		{"an agent at its cap waits for an agent's slot", 2, []string{"*a", "*b", "+c", "-c"}, "a", ""},
+		{"a chat's request passes an agent at its cap", 2, []string{"*a", "+c", "*b", "+d", "-c"}, "a d", ""},
+		{"the agent goes once an agent's slot is free", 2, []string{"*a", "+c", "*b", "+d", "-c", "-a"}, "b d", ""},
+		{"an agent below its cap in the order asked", 2, []string{"+a", "+b", "*c", "+d", "-a"}, "b c", ""},
+		{"agents before chatter", 2, []string{"+a", "+b", "~c", "*d", "-a"}, "b d", ""},
+		{"an agent stops chatter for a slot", 1, []string{"~a", "*b"}, "a", "a"},
+		{"an agent at its cap stops no chatter", 2, []string{"*a", "~b", "*c"}, "a b", ""},
+		{"a raised limit lets agents in", 2, []string{"*a", "*b", "*c", "=4"}, "a b c", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -139,17 +154,49 @@ func TestRunSlotsBusy(t *testing.T) {
 			for _, step := range c.steps {
 				s.do(step)
 			}
-			if got := s.rs.busy(true); got != c.request {
+			if got := s.rs.busy(true, false); got != c.request {
 				t.Errorf("a request waits: %v, want %v", got, c.request)
 			}
-			if got := s.rs.busy(false); got != c.chatter {
+			if got := s.rs.busy(false, false); got != c.chatter {
 				t.Errorf("chatter waits: %v, want %v", got, c.chatter)
 			}
 		})
 	}
 	var none *runSlots
-	if none.busy(true) {
+	if none.busy(true, false) {
 		t.Error("no slots at all keep a request waiting")
+	}
+}
+
+// A scheduled agent's run waits once the agents' runs hold limit-1
+// slots, while a chat's request finds the slot they leave.
+func TestRunSlotsBusyForAgents(t *testing.T) {
+	cases := []struct {
+		name        string
+		limit       int
+		steps       []string
+		agent, chat bool // whether an agent's run or a chat's request would wait
+	}{
+		{"nothing runs", 2, nil, false, false},
+		{"an agent holds its share", 2, []string{"*a"}, true, false},
+		{"a chat holds one", 2, []string{"+a"}, false, false},
+		{"all taken", 2, []string{"*a", "+b"}, true, true},
+		{"a limit of one", 1, []string{"+a"}, true, true},
+		{"no limit", 0, []string{"*a", "*b"}, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := newSlotScript(t, c.limit)
+			for _, step := range c.steps {
+				s.do(step)
+			}
+			if got := s.rs.busy(true, true); got != c.agent {
+				t.Errorf("an agent's run waits: %v, want %v", got, c.agent)
+			}
+			if got := s.rs.busy(true, false); got != c.chat {
+				t.Errorf("a chat's request waits: %v, want %v", got, c.chat)
+			}
+		})
 	}
 }
 
@@ -158,10 +205,10 @@ func TestRunSlotsBusy(t *testing.T) {
 // began does not start.
 func TestRunSlotsHandOverWhatIsNotUsed(t *testing.T) {
 	rs := newRunSlots(1)
-	a, _ := rs.wait(true, nil)
+	a, _ := rs.wait(true, false, nil)
 	sa, _ := rs.take(a)
-	b, _ := rs.wait(true, nil)
-	c, _ := rs.wait(true, nil)
+	b, _ := rs.wait(true, false, nil)
+	c, _ := rs.wait(true, false, nil)
 	sa.release()
 	<-b.ready
 	rs.giveUp(b)
@@ -175,13 +222,13 @@ func TestRunSlotsHandOverWhatIsNotUsed(t *testing.T) {
 	}
 	sc, _ := rs.take(c)
 
-	d, _ := rs.wait(false, func() {})
+	d, _ := rs.wait(false, false, func() {})
 	sc.release()
 	sd, ok := rs.take(d)
 	if !ok {
 		t.Fatal("d got no slot")
 	}
-	if _, stopOther := rs.wait(true, nil); stopOther == nil {
+	if _, stopOther := rs.wait(true, false, nil); stopOther == nil {
 		t.Fatal("a request did not ask d's slot to give way")
 	}
 	if sd.running(false) {

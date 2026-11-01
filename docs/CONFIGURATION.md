@@ -490,8 +490,10 @@ error. Later output is drained without replacing that result.
 
 How many Claude runs may go at once, all brains together. Default 2, at
 most 64; `0` lets every brain run whenever it has work, as before this
-setting. A brain runs one message at a time anyway, so this matters once
-more than two brains are busy at the same time: each run is a full Claude
+setting. A brain runs one message of its chats at a time anyway, and one
+of its scheduled agents beside it (see [BRAINS.md](BRAINS.md#scheduled-agents),
+"Agents run beside the chats"), so this matters once more than two runs
+want to go at the same time: each run is a full Claude
 Code agent with tools, on your CPU and on your account's rate limits, and
 the next request needs them as much. A brain whose turn it is waits for
 a free run, and the log says so; the sender of a request that has to
@@ -502,7 +504,11 @@ observe-only run, see [`observe`](BRAINS.md)), and among them the brain
 that asked first, so a brain that just had a run asks again behind the
 others. A request that finds every run taken by observe-only runs stops
 one of them, as it would in its own brain: the chatter is already in the
-history. A change applies at once; with a lower limit, runs going on
+history. Scheduled agents' runs, which can take hours, hold at most one
+run fewer than the limit, all brains' together, so that with a limit of
+2 or more one run is always left for the chats; an agent's run otherwise
+gets its turn in the order it asked, so the chats do not hold it back
+either. A change applies at once; with a lower limit, runs going on
 finish and the next waits.
 
 ### `inherit_claude_user_config`
@@ -1285,7 +1291,10 @@ and never replace one another, each being a job of its own, though like any
 other message they stop an observe-only run (see below).
 `max_pending` applies in both modes. [Plaud](PLAUD.md) recordings take at
 most five places, and half of a smaller queue (at least one), so your own
-messages still get in.
+messages still get in. A brain's [scheduled agents](BRAINS.md#scheduled-agents)
+have a queue of their own beside this one, with `max_pending` places of
+its own, which runs one agent at a time beside the chats; nothing here
+replaces, interrupts or waits for an agent's run.
 
 Untagged group chatter waiting in the queue (in a brain whose `observe` is
 `run`) is dropped when a newer message from that chat arrives — it is already

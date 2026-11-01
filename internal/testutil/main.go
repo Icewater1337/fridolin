@@ -26,7 +26,8 @@ import (
 // it leaves a grandchild in a session of its own holding its output, and
 // with FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. With
 // FRIDOLIN_FAKE_WAIT_BRAIN only that brain's runs wait for
-// FRIDOLIN_FAKE_WAIT_FILE, and with FRIDOLIN_FAKE_MCP a message holding
+// FRIDOLIN_FAKE_WAIT_FILE, with FRIDOLIN_FAKE_WAIT_ON only the runs whose
+// message holds that text, and with FRIDOLIN_FAKE_MCP a message holding
 // #mcp plays those steps against the run's fridolin MCP server (fakeMCP).
 // Asked for
 // --version, it answers testedClaudeVersion, or FRIDOLIN_FAKE_VERSION as

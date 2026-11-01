@@ -21,7 +21,7 @@ func TestStopAfterTheRunWasReapedSendsNoSignal(t *testing.T) {
 	ctx, cancel := runContext(0)
 	run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
 	br.mu.Lock()
-	br.current = run
+	br.lane(LaneChat).current = run
 	br.mu.Unlock()
 	if res := br.invoke(run, ctx, br.settings.Load(), m); res.Err != nil {
 		t.Fatal(res.Err)
@@ -54,7 +54,7 @@ func TestStopAfterTheRunWasReapedSendsNoSignal(t *testing.T) {
 	stopped := make(chan bool, 1)
 	go func() { stopped <- br.StopCurrent(false) }()
 	<-ctx.Done() // the stop cancelled the run, and waits for it to finish
-	br.finishRun(run)
+	br.finishRun(br.lane(LaneChat), run)
 	if !<-stopped {
 		t.Error("StopCurrent found no run")
 	}

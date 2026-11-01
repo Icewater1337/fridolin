@@ -13,6 +13,8 @@ Content-Type: application/json
   },
   "brains": [
     {
+      "background": null,
+      "background_queue": [],
       "backup": {
         "enabled": true,
         "exclude": [

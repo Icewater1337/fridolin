@@ -26,13 +26,14 @@ import (
 func (br *Brain) Change(c chat.Change) (waiting bool, edited *Inbound) {
 	br.mu.Lock()
 	var gone []Inbound
-	for i, p := range br.pending {
+	q := br.laneFor(c.Chat)
+	for i, p := range q.pending {
 		if !p.Changes(c) {
 			continue
 		}
 		waiting = true
 		if next, _, keep := p.ApplyChange(c); keep {
-			br.pending[i] = next
+			q.pending[i] = next
 			if c.Kind == chat.ChangeEdit {
 				if j := slices.IndexFunc(next.ownParts(), func(p Inbound) bool { return c.Names(p.Inbound) }); j >= 0 {
 					part := next.ownParts()[j]
@@ -41,12 +42,12 @@ func (br *Brain) Change(c chat.Change) (waiting bool, edited *Inbound) {
 			}
 		} else {
 			gone = append(gone, p)
-			br.pending = append(br.pending[:i], br.pending[i+1:]...)
+			q.pending = append(q.pending[:i], q.pending[i+1:]...)
 		}
 		break
 	}
 	var stop *brainRun
-	if cur := br.current; !waiting && cur != nil && cur.msg.Changes(c) {
+	if cur := q.current; !waiting && cur != nil && cur.msg.Changes(c) {
 		// A run cannot take back what it read; one whose whole message
 		// was deleted is stopped. Part of an album deleted, it goes on.
 		if _, _, keep := cur.msg.ApplyChange(c); c.Kind == chat.ChangeRevoke && !keep {

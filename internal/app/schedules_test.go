@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/ghapp/ghapptest"
 	"github.com/Icewater1337/fridolin/internal/intent"
@@ -477,6 +478,88 @@ func TestScheduledAgentSecretsAndFailures(t *testing.T) {
 		t.Errorf("the program's run: %+v", r)
 	}
 	h.WaitSent(harnessDM, "Scheduled agent *scrape* (brain main) failed")
+}
+
+// lanes returns brain id's chat run and background run, as GET
+// /api/status lists them.
+func (h *harness) lanes(id string) (chatRun, background *brain.RunView) {
+	h.t.Helper()
+	var st struct {
+		Brains []struct {
+			ID         string         `json:"id"`
+			Running    *brain.RunView `json:"running"`
+			Background *brain.RunView `json:"background"`
+		} `json:"brains"`
+	}
+	if w := h.Do("GET", "/api/status", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil {
+		h.t.Fatalf("GET /api/status: %d %s", w.Code, w.Body.String())
+	}
+	for _, b := range st.Brains {
+		if b.ID == id {
+			return b.Running, b.Background
+		}
+	}
+	h.t.Fatalf("GET /api/status lists no brain %q", id)
+	return nil, nil
+}
+
+// TestAScheduledAgentKeepsNoDMWaiting: a scheduled agent's run goes in
+// its brain's background lane, so the owner's DM is answered while it is
+// still at work, with the default max_concurrent_runs; /api/status shows
+// both, and the dashboard's stop ends the agent's run too.
+func TestAScheduledAgentKeepsNoDMWaiting(t *testing.T) {
+	t.Parallel()
+	release := filepath.Join(t.TempDir(), "release")
+	setenv(t, "FRIDOLIN_FAKE_WAIT_FILE", release)
+	setenv(t, "FRIDOLIN_FAKE_WAIT_ON", "the long upkeep")
+	h := newHarness(t, "")
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
+	for _, name := range []string{"upkeep", "tidy"} {
+		if w := h.Do("PUT", "/api/schedules/main/"+name, map[string]any{"when": "every 6h", "prompt": "Do the long upkeep (" + name + ").", "report": "silent"}); w.Code != http.StatusOK {
+			t.Fatalf("PUT %s: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+	h.WaitFor("the brain to reload", func() bool { return len(h.schedules().Agents) == 2 })
+	if w := h.Do("POST", "/api/schedules/main/upkeep/run", nil); w.Code != http.StatusOK {
+		t.Fatalf("run now: %d %s", w.Code, w.Body.String())
+	}
+	h.WaitFor("the agent's run", func() bool { _, bg := h.lanes("main"); return bg != nil && bg.PID > 0 })
+
+	reply := h.Answer(inbound{JID: harnessDM, Text: "are you there?"})
+	if !strings.Contains(reply, "are you there?") {
+		t.Errorf("the DM's answer: %q", reply)
+	}
+	chatRun, bg := h.lanes("main")
+	if chatRun != nil || bg == nil || bg.Chat != chat.ScheduleChatPrefix+"upkeep" {
+		t.Errorf("after the DM: chat lane %+v, background %+v; want the agent's run still going", chatRun, bg)
+	}
+
+	// A second agent waits for the first, in the background lane.
+	if w := h.Do("POST", "/api/schedules/main/tidy/run", nil); w.Code != http.StatusOK {
+		t.Fatalf("run now: %d %s", w.Code, w.Body.String())
+	}
+	h.WaitFor("tidy to wait behind upkeep", func() bool { return h.agent("main", "tidy").Running })
+	if _, bg := h.lanes("main"); bg == nil || bg.Chat != chat.ScheduleChatPrefix+"upkeep" {
+		t.Errorf("background %+v, want upkeep's run still the one going", bg)
+	}
+
+	// The dashboard's stop stops the agent's run; tidy goes next.
+	var stopped struct {
+		Stopped bool `json:"stopped"`
+	}
+	if w := h.Do("POST", "/api/brains/main/stop", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &stopped) != nil || !stopped.Stopped {
+		t.Fatalf("stop: %d %s", w.Code, w.Body.String())
+	}
+	if r := h.waitRunEnded("main", "upkeep", 1); r.Status != sched.StatusStopped {
+		t.Errorf("upkeep's run: %+v, want it stopped", r)
+	}
+	h.WaitFor("tidy's run", func() bool { _, bg := h.lanes("main"); return bg != nil && bg.Chat == chat.ScheduleChatPrefix+"tidy" })
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.waitRunEnded("main", "tidy", 1); r.Status != sched.StatusOK {
+		t.Errorf("tidy's run: %+v", r)
+	}
 }
 
 // TestScheduledAgentsOwnEffortAndTimeout: an agent's effort replaces the
