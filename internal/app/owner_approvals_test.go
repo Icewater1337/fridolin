@@ -492,3 +492,27 @@ func TestApprovedMeansApprove(t *testing.T) {
 		t.Errorf("after !Approved: %s", d)
 	}
 }
+
+// TestDenySurvivesItemLeavingTheList: a !deny is kept when its item is
+// missing from a tick's pending list (a brain restarting), and only
+// forgotten after dismissedKeptFor.
+func TestDenySurvivesItemLeavingTheList(t *testing.T) {
+	t.Parallel()
+	fakeRuns(t)
+	h := newHarness(t, "")
+	h.b.approvals.mu.Lock()
+	h.b.approvals.load(h.b.ownerApprovalsPath())
+	h.b.approvals.state.Dismissed["recent"] = time.Now().Add(-time.Hour)
+	h.b.approvals.state.Dismissed["old"] = time.Now().Add(-dismissedKeptFor - time.Hour)
+	h.b.approvals.mu.Unlock()
+	h.b.alertPendingApprovals(context.Background())
+	h.b.approvals.mu.Lock()
+	defer h.b.approvals.mu.Unlock()
+	d := h.b.approvals.state.Dismissed
+	if _, ok := d["recent"]; !ok {
+		t.Error("a recent deny was forgotten when its item left the list")
+	}
+	if _, ok := d["old"]; ok {
+		t.Error("a deny older than dismissedKeptFor was kept")
+	}
+}

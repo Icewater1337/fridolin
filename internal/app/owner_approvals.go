@@ -55,6 +55,8 @@ const (
 	// approvalFreshFor is how long something waits before !approve alone
 	// no longer approves it without asking again.
 	approvalFreshFor = 24 * time.Hour
+	// dismissedKeptFor is how long a !deny is remembered for an item no longer listed.
+	dismissedKeptFor = 30 * 24 * time.Hour
 	// ownerPickPrefix is the ref of the poll that picks; the token after
 	// it names the pick.
 	ownerPickPrefix = "owner-pick:"
@@ -791,12 +793,18 @@ func (b *App) alertPendingApprovals(ctx context.Context) {
 		}
 	}
 	changed := len(tell) > 0
-	for _, m := range []map[string]time.Time{st.Alerted, st.Dismissed} {
-		for k := range m {
-			if !current[k] {
-				delete(m, k)
-				changed = true
-			}
+	for k := range st.Alerted {
+		if !current[k] {
+			delete(st.Alerted, k)
+			changed = true
+		}
+	}
+	// A deny outlives the item leaving the list (a brain restarting hides
+	// its files for a tick); a real change has a new key anyway.
+	for k, at := range st.Dismissed {
+		if !current[k] && now.Sub(at) > dismissedKeptFor {
+			delete(st.Dismissed, k)
+			changed = true
 		}
 	}
 	if changed {
