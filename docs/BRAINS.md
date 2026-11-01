@@ -274,6 +274,7 @@ what the model says:
 | `request_approval(action, details, risk, step)`, `ask_user(question, options)`, `check_approval(id)` | ask you in WhatsApp and wait for the answer, see [Skills, risk and approvals](#skills-risk-and-approvals) | the same, in the core run's chat; not in an observe-only run |
 | `node_update(node)` | with nodes on: updates a node's fridolin to the core's version, a write action ([NODES.md](NODES.md#updates)) | absent |
 | `node_exec(argv, node, dir, timeout_seconds, approval_id, wait_seconds)`, `node_exec_rules(node)` | while a node whose `exec` you approved is online: runs one command its allowlist allows, a write action; a command whose rule has `approve` asks you in a poll each time ([NODES.md](NODES.md#the-core-brain-runs-commands)) | absent |
+| `contact_person(number, name, goal, brief, message, days)`, `errands(id)`, `errand_answer(id, text)`, `errand_stop(id)` | with brain.json's `errands` set, in a run that may ask you: has Fridolin write to someone for you and carry the conversation, see [Errands](#errands) | absent |
 | `plaud_app_update()`, `plaud_app_status()` | while the Plaud Sync app uploads through the site (`plaud.phone_upload`): builds the app as the Plaud card does, which the paired phones then install, a write action; and says what each phone runs and how its last update went ([PLAUD.md](PLAUD.md#updates)) | absent |
 
 Any brain, core or not, also gets the tools of Fridolin's
@@ -330,6 +331,109 @@ its `.md` files) or `skills/`. The bridge reads it outside the sandbox,
 so it follows no symlink on the way, not even one inside the folder.
 What the core learns about a sub-brain goes into its own notes, never the
 sub-brain's files.
+
+## Errands
+
+The core brain can have Fridolin write to people who are not in
+`allowed_numbers`, for you, and carry the conversation with them until
+it comes to an end: "Ask Alex when dinner next week suits them", "Tell
+the plumber Tuesday works and agree on a time". Each is an *errand*.
+Fridolin writes from its own number and introduces itself as your
+assistant the first time it writes to someone. It is off until the core
+brain's brain.json turns it on:
+
+```json
+"errands": {
+  "owner_name": "Sam",
+  "intro": "Hallo, hier ist Fridolin, der Assistent von Sam.",
+  "model": "gpt-5"
+}
+```
+
+| Field | What |
+| --- | --- |
+| `owner_name` | How Fridolin names you, to the people it writes to and to its errands' runs. Required. |
+| `intro` | What Fridolin's first message to someone opens with, as the bridge sends it. Default: `Hi, this is Fridolin, <owner_name>'s assistant.` Write it in the language your contacts speak. |
+| `model` | In Codex mode, the OpenAI model the errands' runs use. Default `gpt-5`. In Claude mode they run on the brain's model. |
+
+**How one goes.** You ask the core brain; it calls `contact_person` with
+the number, the name, the goal, a *brief* (everything Fridolin may tell
+them and agree to) and the first message.
+
+- **The first time** Fridolin writes to someone, you get the message as
+  it will go out, the introduction ahead of it, with the goal and the
+  brief, and a poll: ✅ Yes or ❌ No (a 👍 or `!approve` does it too).
+  Nothing goes out before your yes.
+- **Someone Fridolin wrote to before** gets the message at once, without
+  the introduction, but only when you asked for it in your own direct
+  chat (the first number in `allowed_numbers`, a message you typed). An
+  errand that any other run opens, a scheduled agent's or one that
+  answers a group, a file or another brain, asks you first as the first
+  time does. The bridge tells which run it is from the message that
+  started it, not from anything the model says, and what an errand
+  reports to you never starts a run.
+- **Their answers** never reach the brain. Each goes to the errand's own
+  run, which reads the rules, the goal, the brief and the conversation,
+  and nothing else, and answers with one of four things: write back,
+  done (with a summary for you), ask you (with a question), or abort. A
+  few messages that come close together are answered at once.
+- **What the brief does not cover** (another date, money, a promise,
+  details about you) goes to you: Fridolin tells them it will check, and
+  you get the question in your chat. Tell the core brain the answer; it
+  passes it on with `errand_answer`, which only a run that answers your
+  own message may call.
+- **The end.** When the goal is reached, or clearly cannot be, you get
+  the summary. If they ask not to be written to again, Fridolin forgets
+  them: the next errand with them asks you first. An errand also ends
+  after its days (`days`, 1 to 14, default 3) or 20 messages of
+  Fridolin's, and the brain's `errand_stop` ends one at once. What they
+  write after the end is passed on to you, up to five messages a day,
+  and not answered.
+
+**Why a person cannot turn Fridolin against you.** The protection is the
+bridge's, not a model's judgement:
+
+- The errand's run has no tools at all: no shell, no files, no MCP
+  server, no web, no memory. In Codex mode it is a request to OpenAI's
+  Responses API through Fridolin's [OpenAI connection](CONNECTIONS.md),
+  with no tools and its answer held to a schema, counted against the
+  brain's `brain_monthly_usd`; Codex mode needs the connection's key for
+  errands, since Codex's CLI cannot run without tools. In Claude mode it
+  is `claude -p --tools ""` with no MCP server, the rules as its system
+  prompt, in an empty folder of its own, under the brain's sandbox.
+- It reads the conversation as JSON, so what they write stays their line
+  and cannot pass for a rule or for you.
+- The bridge sends what it writes to that one person only. A run they
+  talked into anything can do no more than write back to them, and give
+  away no more than the brief.
+- **Abort.** When they try to make Fridolin do what it must not (ignore
+  its rules or brief, tell more than the brief allows, write to someone
+  else, run something, speak as you), the run answers abort. They get
+  the bridge's own message, `🚫 I won't go along with that, so I'm
+  ending our conversation here. <owner_name> has been told.`, never a
+  text of the run's; you get why, with their last message; and Fridolin
+  ignores them from then on: what they send is not read, not passed on
+  and not answered. Only you lift that, with `!unblock <number>` in your
+  own chat, after which writing to them asks you first again. Telling an
+  attempt from an odd message is a model's judgement, so it can miss one
+  or see one where there is none; the points above hold either way.
+- Their voice notes, photos and files are not downloaded: the run reads
+  a line that says what came instead.
+
+The brain's tools:
+
+| Tool | What |
+| --- | --- |
+| `contact_person(number, name, goal, brief, message, days)` | Opens an errand, or asks you for it. Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. A write action. |
+| `errands(id)` | This brain's errands: those that have not ended, then the last ten others. With `id`, one errand with its conversation. |
+| `errand_answer(id, text)` | Passes on what you said to an open errand. Only in a run that answers your own message in your direct chat. A write action. |
+| `errand_stop(id)` | Ends an errand without a word to them. A write action. |
+
+The conversations are in bridge.db (`errands`, `errand_lines`,
+`errand_contacts`), never in a brain's folder or history. The audit log
+has one `errand` line for each step (asked, opened, sent, answered,
+asked the owner, ended, blocked), with the number masked and without
+the messages' text.
 
 ## Skills, risk and approvals
 

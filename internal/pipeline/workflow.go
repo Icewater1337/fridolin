@@ -59,7 +59,7 @@ type Workflow struct {
 // direct chat (Workflow.Owner): a join code for a new node, a dashboard
 // sign-in link, approving or turning down what waits for the owner,
 // shutting a node out, and moving the core to another core host (#187).
-var OwnerCommands = []string{"!join", "!dashboard", "!approve", "!deny", "!revoke", "!movecore"}
+var OwnerCommands = []string{"!join", "!dashboard", "!approve", "!deny", "!revoke", "!movecore", "!unblock"}
 
 // ownerCommandAliases are the past tense the owner types now and then
 // ("!approved"), each the command it means: sent to the brain instead,

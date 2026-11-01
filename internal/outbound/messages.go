@@ -60,7 +60,8 @@ func HelpReply(groupTrigger string) string {
 		"• `!join` — owner only, direct chat: a join code for a new node\n" +
 		"• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard\n" +
 		"• `!approve`, `!deny` — owner only, direct chat: approve, or turn down, what waits for you (a poll asks which when several wait)\n" +
-		"• `!revoke <ref>` — owner only, direct chat: shut a node out"
+		"• `!revoke <ref>` — owner only, direct chat: shut a node out\n" +
+		"• `!unblock <number>` — owner only, direct chat: let me hear someone again whom I stopped listening to in an errand"
 	if groupTrigger != "" {
 		help += "\n\nIn this group, start your message with `" + groupTrigger + "` or reply to one of mine to address me, commands included."
 	}
@@ -1082,3 +1083,93 @@ func NodeRevokedCoreSecretsNote(r CoreForgetReport) string {
 	}
 	return msg + r.dataNote()
 }
+
+// ── Errands (docs/BRAINS.md, "Errands") ──────────────────────────────────
+
+// ErrandDraft goes ahead of the approval poll for an errand: the message
+// Fridolin would send name at number (digits), word for word, first for
+// the first time Fridolin writes to them, with the errand's goal and
+// brief.
+func ErrandDraft(name, number, text, goal, brief string, first bool) string {
+	when := "again"
+	if first {
+		when = "for the first time"
+	}
+	return fmt.Sprintf("✉️ Fridolin would write to %s (+%s) %s:\n\n%s\n\n*Goal:* %s\n*What it may tell them and agree to:* %s",
+		name, number, when, text, textx.Truncate(goal, 1000), textx.Truncate(brief, 2000))
+}
+
+// ErrandOpenedNotice says the first message of errand id went to name.
+func ErrandOpenedNotice(name, id string) string {
+	return fmt.Sprintf("✉️ Wrote to %s (errand %s). I'll tell you how it goes.", name, id)
+}
+
+// ErrandExpiredApprovalNotice says Fridolin did not write to name: nobody
+// approved errand id in time.
+func ErrandExpiredApprovalNotice(name, id string) string {
+	return fmt.Sprintf("⌛ I did not write to %s (errand %s): nobody approved it in time.", name, id)
+}
+
+// ErrandQuestionNotice hands the owner what errand id's run asks them
+// about the conversation with name. The question is the run's, which the
+// person's words shaped: it is shown as that, never as the bridge's.
+func ErrandQuestionNotice(name, id, question string) string {
+	return fmt.Sprintf("❓ In the errand with %s (%s), I need your answer to:\n«%s»\nTell me, and I'll pass it on.", name, id, textx.Truncate(question, 2000))
+}
+
+// ErrandDoneNotice says errand id with name came to its end, with what
+// came of it; stopped, they asked not to be written to again.
+func ErrandDoneNotice(name, id, summary string, stopped bool) string {
+	msg := fmt.Sprintf("✅ The errand with %s is done (%s): %s", name, id, textx.Truncate(summary, 2000))
+	if stopped {
+		msg += "\nThey asked not to be written to again: I'll ask you before I write to them again."
+	}
+	return msg
+}
+
+// ErrandAbortedNotice says Fridolin ended errand id with name, at number,
+// because they tried to make it do what it must not (reason), with their
+// last message, and stopped listening to them.
+func ErrandAbortedNotice(name, number, id, reason, last string) string {
+	return fmt.Sprintf("🚫 I ended the conversation with %s (errand %s): %s\nTheir last message: «%s»\nI ignore them from now on. `!unblock %s` lifts that.",
+		name, id, textx.Truncate(reason, 1000), textx.Truncate(last, 1000), number)
+}
+
+// ErrandAbortMessage is what the person gets when Fridolin ends the
+// conversation for that: the bridge's own words, never the run's.
+func ErrandAbortMessage(owner string) string {
+	return fmt.Sprintf("🚫 I won't go along with that, so I'm ending our conversation here. %s has been told.", owner)
+}
+
+// ErrandExpiredNotice says errand id with name ended without coming to an
+// end of its own: why (its time or its messages ran out).
+func ErrandExpiredNotice(name, id, why string) string {
+	return fmt.Sprintf("⌛ The errand with %s ended (%s): %s", name, id, why)
+}
+
+// ErrandFailedNotice says errand id's run gave no answer the bridge can
+// act on (why), so Fridolin did not answer name; the next message of
+// theirs tries again.
+func ErrandFailedNotice(name, id, why string) string {
+	return fmt.Sprintf("⚠️ I could not answer %s's last message in errand %s: %s. Their next message tries again; `errand_stop` ends it.", name, id, textx.Truncate(why, 300))
+}
+
+// ErrandForwardNotice passes on what name, at number, wrote to Fridolin
+// while no errand with them is open.
+func ErrandForwardNotice(name, number, text string) string {
+	return fmt.Sprintf("💬 %s (+%s) wrote to me, with no errand open:\n«%s»\nTell me if I should answer.", name, number, textx.Truncate(text, 2000))
+}
+
+// UnblockedReply answers !unblock of number: Fridolin listens to them
+// again, and asks before it writes to them.
+func UnblockedReply(number string) string {
+	return fmt.Sprintf("✅ +%s is unblocked. Writing to them again needs your approval.", number)
+}
+
+// NotBlockedReply answers !unblock of a number nobody blocked.
+func NotBlockedReply(number string) string {
+	return fmt.Sprintf("❓ +%s is not blocked, so nothing changed.", number)
+}
+
+// UnblockUsage answers !unblock without a number.
+const UnblockUsage = "🔓 `!unblock <number>`, with the country code, lets Fridolin hear someone it stopped listening to in an errand."

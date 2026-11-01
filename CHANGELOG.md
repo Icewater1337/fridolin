@@ -10,6 +10,20 @@ for compatibility.
 
 ### Added
 
+- **Errands: Fridolin writes to people for you.** With `errands` in the
+  core brain's brain.json (`{"owner_name": "Sam"}`), the core brain can
+  have Fridolin write to someone who is not in `allowed_numbers` and
+  carry the conversation until it comes to an end (`contact_person`).
+  The first message to someone, introduced as from your assistant, waits
+  for your approval in a poll; later ones go out at once only when you
+  asked in your own chat. Their answers go to a run with no tools, which
+  sees only the errand's goal, brief and conversation: in Codex mode
+  through the OpenAI connection (its key is needed), in Claude mode
+  `claude -p --tools ""`. What the brief does not cover comes to you; a
+  person who tries to make it misbehave gets a fixed message, you are
+  told, and they are ignored until `!unblock <number>`. Every step is an
+  `errand` line in the audit log. Off unless you set it.
+  [docs/BRAINS.md](docs/BRAINS.md#errands)
 - **GitHub in your chats.** A brain's `github` in brain.json (`{"repos":
   ["you/project"], "permissions": {"issues": "write"}}`) logs the runs
   that answer you, your direct messages and Plaud voice questions, in to

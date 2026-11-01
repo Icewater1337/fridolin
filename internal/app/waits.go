@@ -7,6 +7,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/connections"
+	"github.com/Icewater1337/fridolin/internal/errand"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 )
 
@@ -77,6 +78,10 @@ type waits struct {
 	liveAge   time.Duration
 	// coreMove are a move's timings (the defaults of nodes when zero).
 	coreMove nodes.MoveOptions
+	// errandGather is how long an errand waits after the person's
+	// message for the next one before its run answers them all, and
+	// errandSweep how often errands are looked at for their deadline.
+	errandGather, errandSweep time.Duration
 }
 
 // defaultWaits are the waits of the binary's bridge.
@@ -106,6 +111,8 @@ func defaultWaits() waits {
 		liveSettle:          3 * time.Second,
 		liveTurns:           50,
 		liveAge:             12 * time.Hour,
+		errandGather:        20 * time.Second,
+		errandSweep:         time.Minute,
 	}
 }
 
@@ -137,4 +144,7 @@ type testHooks struct {
 	// gitlab is the client the GitLab check goes out with: tests hand in
 	// one that trusts their fake GitLab's certificate.
 	gitlab *http.Client
+	// errandRun answers an errand's run in place of the model: tests
+	// hand in what it says.
+	errandRun func(errand.Errand) (string, error)
 }
