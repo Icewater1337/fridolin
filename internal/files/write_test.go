@@ -2,6 +2,7 @@ package files
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,5 +207,45 @@ func TestSafeName(t *testing.T) {
 		if got := SafeName(in); got != want {
 			t.Errorf("SafeName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// blockedBody stalls its first Read until released, like a slow client.
+type blockedBody struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b blockedBody) Read(p []byte) (int, error) {
+	close(b.started)
+	<-b.release
+	return 0, io.EOF
+}
+
+func TestCreateDoesNotHoldTheLockWhileTheBodyStreams(t *testing.T) {
+	r, _, _ := testRoot(t)
+	body := blockedBody{make(chan struct{}), make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := r.Create("docs", "slow.bin", body, 10, editor)
+		done <- err
+	}()
+	<-body.started
+	saved := make(chan error, 1)
+	go func() {
+		_, err := r.WriteFile("wiki/other.md", []byte("x"), "", editor)
+		saved <- err
+	}()
+	select {
+	case err := <-saved:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a save waited for the upload's body")
+	}
+	close(body.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
