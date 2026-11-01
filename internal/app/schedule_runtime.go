@@ -162,15 +162,15 @@ func (a *agents) consider(br *brainruntime.Brain, s manifest.Schedule, st sched.
 	if err != nil {
 		return // Validate refused it already
 	}
-	last := st.Last
-	if last.IsZero() && s.Name == manifest.ConsolidationSchedule {
+	last := st.Anchor(s.When)
+	if last.IsZero() && st.When == "" && s.Name == manifest.ConsolidationSchedule {
 		// compat: the consolidation's last run, as the bridge kept it
 		// before scheduled agents.
 		last, _ = a.b.intents.JobLast(id, manifest.ConsolidationSchedule)
 	}
 	d := sched.Decide(sc, last, sched.Offset(id, s.Name, jitterOf(s, cfg)), s.MissedMode() == manifest.MissedSkip, now)
-	if !d.Last.Equal(st.Last) {
-		if err := a.store.Update(id, s.Name, func(as *sched.AgentState) bool { as.Last = d.Last; return true }); err != nil {
+	if !d.Last.Equal(st.Last) || st.When != s.When {
+		if err := a.store.Update(id, s.Name, func(as *sched.AgentState) bool { as.Last, as.When = d.Last, s.When; return true }); err != nil {
 			log.Printf("brain %s: scheduled agent %s: %v", id, s.Name, err)
 			return
 		}
