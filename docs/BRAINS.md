@@ -279,7 +279,7 @@ what the model says:
 | `request_approval(action, details, risk, step)`, `ask_user(question, options)`, `check_approval(id)` | ask you in WhatsApp and wait for the answer, see [Skills, risk and approvals](#skills-risk-and-approvals) | the same, in the core run's chat; not in an observe-only run |
 | `node_update(node)` | with nodes on: updates a node's fridolin to the core's version, a write action ([NODES.md](NODES.md#updates)) | absent |
 | `node_exec(argv, node, dir, timeout_seconds, approval_id, wait_seconds)`, `node_exec_rules(node)` | while a node whose `exec` you approved is online: runs one command its allowlist allows, a write action; a command whose rule has `approve` asks you in a poll each time ([NODES.md](NODES.md#the-core-brain-runs-commands)) | absent |
-| `contact_person(number, name, goal, brief, message, days)`, `errands(id)`, `errand_answer(id, text)`, `errand_stop(id)` | with brain.json's `errands` set, in a run that may ask you: has Fridolin write to someone for you and carry the conversation, see [Errands](#errands) | absent |
+| `contact_person(number, name, goal, brief, message, days, call)`, `errands(id)`, `errand_answer(id, text)`, `errand_stop(id)` | with brain.json's `errands` set, in a run that may ask you: has Fridolin write to someone for you and carry the conversation, see [Errands](#errands) | absent |
 | `plaud_app_update()`, `plaud_app_status()` | while the Plaud Sync app uploads through the site (`plaud.phone_upload`): builds the app as the Plaud card does, which the paired phones then install, a write action; and says what each phone runs and how its last update went ([PLAUD.md](PLAUD.md#updates)) | absent |
 | `system_status()`, `schedule_run(brain, name)`, `run_stop(brain, lane, started)`, `housekeeping_run(dry_run)` | in a run that answers you, or of one of its scheduled agents: the ops tools, see [below](#the-core-brains-ops-tools) | absent |
 
@@ -454,7 +454,7 @@ The brain's tools:
 
 | Tool | What |
 | --- | --- |
-| `contact_person(number, name, goal, brief, message, days)` | Opens an errand, or asks you for it. Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. A write action. |
+| `contact_person(number, name, goal, brief, message, days, call)` | Opens an errand, or asks you for it. Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. With `call: true` (and [calls](CALLS.md) on) Fridolin calls them instead of writing: only someone it wrote to before, at most five errand calls a day; see [CALLS.md](CALLS.md#errand-calls). A write action. |
 | `errands(id)` | This brain's errands: those that have not ended, then the last ten others. With `id`, one errand with its conversation. |
 | `errand_answer(id, text)` | Passes on what you said to an open errand. Only in a run that answers your own message in your direct chat. A write action. |
 | `errand_stop(id)` | Ends an errand without a word to them. A write action. |

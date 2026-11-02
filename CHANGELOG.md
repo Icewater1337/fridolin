@@ -10,6 +10,15 @@ for compatibility.
 
 ### Added
 
+- **Voice calls.** With `"calls": {"enabled": true}` in config.json (and
+  a restart), call Fridolin's number from an allowed number and talk to
+  the brain that gets your direct messages: what you say is transcribed
+  (OpenAI, else ElevenLabs), answered as your own words, and read aloud
+  by ElevenLabs (a key and a voice needed). Errands can call someone
+  Fridolin wrote to before (`contact_person` with `call: true`, at most
+  five a day), with the errand's approvals and rules. Calls from anyone
+  else ring on as before. The call stack is meowcaller, pinned; see
+  [docs/CALLS.md](docs/CALLS.md) for what that risks.
 - **Errands: Fridolin writes to people for you.** With `errands` in the
   core brain's brain.json (`{"owner_name": "Sam"}`), the core brain can
   have Fridolin write to someone who is not in `allowed_numbers` and

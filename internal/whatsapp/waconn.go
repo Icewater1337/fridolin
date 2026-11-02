@@ -11,6 +11,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/mdp/qrterminal/v4"
+	"github.com/purpshell/meowcaller"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -253,9 +254,13 @@ func pairingState(item whatsmeow.QRChannelItem) (mode, detail string, ok bool) {
 func (wa *Client) newSession() *whatsmeow.Client {
 	cli := whatsmeow.NewClient(wa.container.NewDevice(), wa.log)
 	cli.AddEventHandler(wa.HandleEvent)
+	var calls *meowcaller.Client
+	if wa.withCalls {
+		calls = wa.attachCalls(cli)
+	}
 	wa.mu.Lock()
 	old := wa.client
-	wa.client = cli
+	wa.client, wa.calls = cli, calls
 	wa.own, wa.ownLID = types.EmptyJID, types.EmptyJID
 	wa.state.OwnNumber = ""
 	wa.mu.Unlock()

@@ -108,6 +108,10 @@ const (
 	// "Scheduled agents"), on a chat of its own (ScheduleChatPrefix):
 	// its answer goes where the agent's report setting says.
 	SourceScheduled = "scheduled"
+	// SourceCall is what the owner said on a voice call to the bridge,
+	// transcribed (docs/CALLS.md): their own words, from a number in
+	// allowed_numbers, whose answer is read aloud on the call.
+	SourceCall = "call"
 )
 
 // DelegateChatPrefix starts the JID of a delegated task's chat,
@@ -132,11 +136,12 @@ func IsInternalChat(jid string) bool { return IsDelegateChat(jid) || IsScheduleC
 // HandedIn reports whether a program handed m to a brain rather than
 // someone writing it in a chat: files through /ingest or Plaud, a task
 // the core brain delegated or its late result, a schedule or standing
-// intent that fell due, a scheduled agent's run. Such a message is never a
+// intent that fell due, a scheduled agent's run, what the owner said on a
+// call. Such a message is never a
 // command, and neither interrupts a run nor is replaced by a later one.
 func (m Inbound) HandedIn() bool {
 	switch m.Source {
-	case SourceIngest, SourceDelegate, SourceDelegateResult, SourceSchedule, SourceApprovalResult, SourceScheduled:
+	case SourceIngest, SourceDelegate, SourceDelegateResult, SourceSchedule, SourceApprovalResult, SourceScheduled, SourceCall:
 		return true
 	}
 	return false

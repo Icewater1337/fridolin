@@ -48,6 +48,11 @@
   "brain_effort": "high",
   "brain_mode": true,
   "brain_model": "sonnet",
+  "calls": {
+    "enabled": true,
+    "greeting": "Fridolin here. What can I do for you?",
+    "notice": "I'm an AI assistant, and I keep notes of this call."
+  },
   "child_env_passthrough": [
     "GROQ_API_KEY"
   ],

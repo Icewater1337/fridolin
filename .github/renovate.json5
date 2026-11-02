@@ -67,6 +67,14 @@
       matchUpdateTypes: ["minor", "patch"],
       groupName: "Plaud Android app",
     },
+    // meowcaller, the voice calls' stack (docs/CALLS.md), is pinned to its
+    // last commit on upstream whatsmeow: its main follows a fork of
+    // whatsmeow since 2026-09-06, which the bridge does not use. Moving it
+    // is a change of its own, with internal/whatsapp's calls_test.go.
+    {
+      matchPackageNames: ["github.com/purpshell/meowcaller"],
+      enabled: false,
+    },
     // Guava comes in two builds of each release, -android and -jre; the
     // Plaud app wants the Android one. Maven's ordering puts -jre after
     // -android, so without this Renovate proposes the switch as an update.

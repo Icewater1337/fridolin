@@ -159,6 +159,9 @@ type App struct {
 	ownerAsks ownerCommandRate
 	// errands are the errands' turns in flight (errand_runtime.go).
 	errands errandTurns
+	// placeCall places a voice call through WhatsApp's call stack
+	// (call_runtime.go); nil without WhatsApp or with calls off.
+	placeCall func(ctx context.Context, number string) (whatsapp.Call, error)
 	// approvals is what the owner was told waits for them, and the !approve
 	// that waits to be confirmed (owner_approvals.go).
 	approvals ownerApprovals
@@ -387,6 +390,9 @@ func New(opts Options) (_ *App, err error) {
 		}
 		b.wa = wa
 		b.lids = wa.LIDStore
+		if cfgs.Boot().CallsEnabled {
+			b.placeCall = wa.PlaceCall
+		}
 	}
 	if b.core.lease != nil {
 		b.wa = leaseGate{Messenger: b.wa, lost: b.core.lost.Load}

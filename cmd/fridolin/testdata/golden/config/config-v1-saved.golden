@@ -257,5 +257,10 @@
       "brain_monthly_usd": 5,
       "voice": "21m00Tcm4TlvDq8ikWAM"
     }
+  },
+  "calls": {
+    "enabled": true,
+    "greeting": "Fridolin here. What can I do for you?",
+    "notice": "I'm an AI assistant, and I keep notes of this call."
   }
 }

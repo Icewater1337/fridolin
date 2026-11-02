@@ -524,5 +524,8 @@ func (c *File) validateFleet() error {
 	if err := c.Housekeeping.validate(); err != nil {
 		return err
 	}
+	if err := c.Calls.validate(); err != nil {
+		return err
+	}
 	return c.Schedules.validate()
 }

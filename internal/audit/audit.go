@@ -91,6 +91,12 @@ const (
 	// Outcome how it went. The messages themselves stay in bridge.db's
 	// errand_lines, never in the log.
 	Errand = "errand"
+	// VoiceCall is a step of a voice call the owner made to Fridolin
+	// (docs/CALLS.md): Brain the brain that took it, Run "call:<id>", ID
+	// the call, Chat the caller's number masked, Detail answered or
+	// ended, Outcome how many turns it had. What was said is in no log.
+	// An errand's calls are errand lines.
+	VoiceCall = "voice_call"
 	// FileView is a file, folder or wiki page read on the Files page, the
 	// wiki or the site's /files and /wiki (docs/FILES.md): By is
 	// "dashboard" or "site:<account>", Brain the brain whose folder it is,

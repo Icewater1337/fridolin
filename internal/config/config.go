@@ -211,6 +211,8 @@ type File struct {
 	// Connections are the brains that may use Fridolin's OpenAI and
 	// ElevenLabs keys, and what they may spend (connections.go).
 	Connections ConnectionsConfig `json:"connections"`
+	// Calls are WhatsApp voice calls (calls.go).
+	Calls CallsConfig `json:"calls"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all

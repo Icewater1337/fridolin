@@ -64,7 +64,30 @@ type errandTurns struct {
 	running  map[string]bool
 	again    map[string]bool
 	forwards map[string][]time.Time
-	stopped  bool
+	// calls are the errands on a call now, whose turns the call takes.
+	calls   map[string]bool
+	stopped bool
+}
+
+// setCalling marks errand id as on a call, or no longer.
+func (t *errandTurns) setCalling(id string, on bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.calls == nil {
+		t.calls = map[string]bool{}
+	}
+	if on {
+		t.calls[id] = true
+	} else {
+		delete(t.calls, id)
+	}
+}
+
+// calling reports whether errand id is on a call.
+func (t *errandTurns) calling(id string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.calls[id]
 }
 
 // forward counts a message of contact's passed on to the owner at now,
@@ -179,6 +202,8 @@ func errandByOwner(c runInfo, cfg *config.Settings) bool {
 type errandRequest struct {
 	Number, Name, Goal, Brief, Message string
 	Days                               int
+	// Call reaches them by a voice call instead of a message.
+	Call bool
 }
 
 // openErrand starts an errand for run c: at once when the owner asked
@@ -226,6 +251,14 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		return "", err
 	}
 	known := err == nil
+	if r.Call {
+		if !known {
+			return "", errors.New("only someone Fridolin wrote to before is called: write to them first (call: false)")
+		}
+		if err := b.errandCallsReady(ctx, cfg); err != nil {
+			return "", err
+		}
+	}
 	if live, err := b.store.LiveErrandWith(ctx, number); err == nil {
 		return "", fmt.Errorf("errand %s with +%s has not ended (%s): one errand at a time per person; errand_answer adds to it, errand_stop ends it", live.ID, number, live.State)
 	}
@@ -236,10 +269,14 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 	byOwner := errandByOwner(c.run, cfg)
 	now := time.Now()
 	e := store.Errand{ID: "e" + randomToken(7), Brain: c.run.Brain, Contact: number, Name: name, Goal: goal, Brief: brief, Message: message,
-		State: store.ErrandAsking, ByOwner: byOwner, Run: c.run.ID, Chat: target, Days: days, CreatedAt: now, Deadline: now.Add(time.Duration(days) * 24 * time.Hour)}
+		State: store.ErrandAsking, ByOwner: byOwner, Run: c.run.ID, Chat: target, Days: days, CreatedAt: now, Deadline: now.Add(time.Duration(days) * 24 * time.Hour), Mode: store.ErrandByMessage}
 	text := message
 	if !known {
 		text = errand.Intro(s.OwnerName, s.Intro) + "\n\n" + message
+	}
+	if r.Call {
+		e.Mode = store.ErrandByCall
+		text = errand.Intro(s.OwnerName, s.Intro) + " " + cfg.Calls.NoticeOrDefault() + " " + message
 	}
 	if known && byOwner {
 		if err := b.store.AddErrand(ctx, e); err != nil {
@@ -249,10 +286,18 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		if err := b.startErrand(ctx, e); err != nil {
 			return "", err
 		}
+		if r.Call {
+			return fmt.Sprintf("Errand %s is open: Fridolin is calling %s now. What they say goes to the errand's own run, not to you; you hear how it ends, and errand_answer passes on what the owner says.", e.ID, name), nil
+		}
 		return fmt.Sprintf("Errand %s is open: the message went to %s. Their answers go to the errand's own run, not to you; you hear how it ends, and errand_answer passes on what the owner says.", e.ID, name), nil
 	}
 	a := store.Approval{Kind: approvalKind, ID: "a" + randomToken(9), Brain: c.run.Brain, Run: c.run.ID, Thread: target, Chat: target, Notify: errandNotify, Risk: "write",
 		Action: fmt.Sprintf("Write to %s (+%s): %s", name, number, textx.Truncate(goal, 150)), Details: text, CreatedAt: now, ExpiresAt: now.Add(b.approvalTimeout())}
+	draft := outboundmsg.ErrandDraft(name, number, text, goal, brief, !known)
+	if r.Call {
+		a.Action = fmt.Sprintf("Call %s (+%s): %s", name, number, textx.Truncate(goal, 150))
+		draft = outboundmsg.ErrandCallDraft(name, number, text, goal, brief)
+	}
 	e.Approval = a.ID
 	if err := b.store.AddErrand(ctx, e); err != nil {
 		return "", err
@@ -261,7 +306,7 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, "the approval could not be stored", now)
 		return "", err
 	}
-	err = b.outbox.Text(ctx, target, outboundmsg.ErrandDraft(name, number, text, goal, brief, !known), cfg.MaxChunkSize)
+	err = b.outbox.Text(ctx, target, draft, cfg.MaxChunkSize)
 	if err == nil {
 		err = b.outbox.Poll(ctx, target, outboundmsg.ApprovalQuestion(a.Action), []string{outboundmsg.ApprovalYes, outboundmsg.ApprovalNo}, approvalRefPrefix+a.ID)
 	}
@@ -276,7 +321,7 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		why = "the owner did not ask for it in their own chat"
 	}
 	b.auditErrand(e, "asked", "waits for the owner: "+why)
-	return fmt.Sprintf("Errand %s waits for the owner's approval (%s), which they give in the poll that just went to them. Nothing went to %s yet; once they approve, the message goes out and the errand runs by itself.", e.ID, why, name), nil
+	return fmt.Sprintf("Errand %s waits for the owner's approval (%s), which they give in the poll that just went to them. Nothing went to %s yet; once they approve, the %s goes out and the errand runs by itself.", e.ID, why, name, map[bool]string{false: "message", true: "call"}[r.Call]), nil
 }
 
 // errandDecided takes the owner's answer to an errand's approval.
@@ -293,7 +338,11 @@ func (b *App) errandDecided(a store.Approval) {
 			b.tellErrandOwner(ctx, e, outboundmsg.ErrandFailedNotice(e.Name, e.ID, err.Error()))
 			return
 		}
-		b.tellErrandOwner(ctx, e, outboundmsg.ErrandOpenedNotice(e.Name, e.ID))
+		if e.Mode == store.ErrandByCall {
+			b.tellErrandOwner(ctx, e, outboundmsg.ErrandCallingNotice(e.Name, e.ID))
+		} else {
+			b.tellErrandOwner(ctx, e, outboundmsg.ErrandOpenedNotice(e.Name, e.ID))
+		}
 		return
 	}
 	outcome := "the owner said no"
@@ -345,6 +394,22 @@ func (b *App) startErrand(ctx context.Context, e store.Errand) error {
 	if err := b.store.SaveErrandContact(ctx, store.ErrandContact{Contact: e.Contact, LID: lid, Name: e.Name, Brain: e.Brain, State: store.ContactKnown, UpdatedAt: now}); err != nil {
 		_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, "the bridge could not remember them: "+err.Error(), now)
 		return err
+	}
+	if e.Mode == store.ErrandByCall {
+		if first {
+			// contact_person calls only someone known; one forgotten
+			// meanwhile is asked for afresh.
+			_, _ = b.store.ForgetErrandContact(ctx, e.Contact)
+			_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, "Fridolin calls only someone it wrote to before", now)
+			return errors.New("only someone Fridolin wrote to before is called")
+		}
+		if err := b.errandCallsReady(ctx, b.cfgs.Get()); err != nil {
+			_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, err.Error(), now)
+			return err
+		}
+		b.auditErrand(e, "opened", "calling them")
+		go b.callErrand(e, s)
+		return nil
 	}
 	if err := b.sayInErrand(ctx, e, text); err != nil {
 		if first {
@@ -453,6 +518,11 @@ func (b *App) errandTurn(id string) {
 	}
 	defer b.intake.Leave()
 	ctx := context.Background()
+	if b.errands.calling(id) {
+		// A message they send during the call is a line of it; the call
+		// answers.
+		return
+	}
 	e, err := b.store.GetErrand(ctx, id)
 	if err != nil || e.State != store.ErrandOpen {
 		return
@@ -476,21 +546,41 @@ func (b *App) errandTurn(id string) {
 		}
 		return
 	}
-	ans, err := b.errandAsk(ctx, e, s, lines)
+	ans, err := b.errandAsk(ctx, e, s, lines, false)
 	if err != nil {
 		log.Printf("errand %s: %v", e.ID, err)
 		b.auditErrand(e, "answered", "no answer: "+textx.Truncate(err.Error(), 200))
 		b.tellErrandOwner(ctx, e, outboundmsg.ErrandFailedNotice(e.Name, e.ID, err.Error()))
 		return
 	}
+	b.errandAct(ctx, e, ans, lines, errandChannel{
+		say:   func(text string) error { return b.sayInErrand(ctx, e, text) },
+		abort: outboundmsg.ErrandAbortMessage(strings.TrimSpace(s.OwnerName)),
+	})
+}
+
+// errandChannel is how what an errand's run writes reaches its person:
+// by message, or read aloud on a call.
+type errandChannel struct {
+	// say sends text, and adds it to the conversation as Fridolin's.
+	say func(text string) error
+	// abort is the bridge's own last words when the run aborts.
+	abort string
+}
+
+// errandAct does what errand e's run answered over ch, and reports
+// whether the conversation goes on there: after a reply it does; after
+// a question for the owner, the end or an abort it does not.
+func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, lines []store.ErrandLine, ch errandChannel) bool {
 	switch ans.Action {
 	case errand.Reply:
-		if err := b.sayInErrand(ctx, e, ans.Text); err != nil {
+		if err := ch.say(ans.Text); err != nil {
 			log.Printf("errand %s: sending: %v", e.ID, err)
 		}
+		return true
 	case errand.AskOwner:
 		if ans.Text != "" {
-			if err := b.sayInErrand(ctx, e, ans.Text); err != nil {
+			if err := ch.say(ans.Text); err != nil {
 				log.Printf("errand %s: sending: %v", e.ID, err)
 			}
 		}
@@ -498,7 +588,7 @@ func (b *App) errandTurn(id string) {
 		b.tellErrandOwner(ctx, e, outboundmsg.ErrandQuestionNotice(e.Name, e.ID, ans.Question))
 	case errand.Done:
 		if ans.Text != "" {
-			if err := b.sayInErrand(ctx, e, ans.Text); err != nil {
+			if err := ch.say(ans.Text); err != nil {
 				log.Printf("errand %s: sending: %v", e.ID, err)
 			}
 		}
@@ -507,7 +597,7 @@ func (b *App) errandTurn(id string) {
 			summary = "it came to its end."
 		}
 		if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandDone, summary, time.Now()); !ended {
-			return
+			return false
 		}
 		b.auditErrand(e, "ended", store.ErrandDone)
 		if ans.Stop {
@@ -521,18 +611,19 @@ func (b *App) errandTurn(id string) {
 		}
 		b.tellErrandOwner(ctx, e, outboundmsg.ErrandDoneNotice(e.Name, e.ID, summary, ans.Stop))
 	case errand.Abort:
-		b.abortErrand(ctx, e, s, ans.Reason, lines)
+		b.abortErrand(ctx, e, ans.Reason, lines, ch)
 	}
+	return false
 }
 
 // abortErrand ends errand e because the person tried to make Fridolin do
-// what it must not: they get the bridge's own message, the owner hears
-// why, and Fridolin stops listening to them.
-func (b *App) abortErrand(ctx context.Context, e store.Errand, s manifest.Errands, reason string, lines []store.ErrandLine) {
+// what it must not: they get the bridge's own words (ch.abort), the
+// owner hears why, and Fridolin stops listening to them.
+func (b *App) abortErrand(ctx context.Context, e store.Errand, reason string, lines []store.ErrandLine, ch errandChannel) {
 	if reason == "" {
 		reason = "they tried to make me do what I must not."
 	}
-	if err := b.sayInErrand(ctx, e, outboundmsg.ErrandAbortMessage(strings.TrimSpace(s.OwnerName))); err != nil {
+	if err := ch.say(ch.abort); err != nil {
 		log.Printf("errand %s: sending the end: %v", e.ID, err)
 	}
 	if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandAborted, reason, time.Now()); !ended {
@@ -565,11 +656,12 @@ func (b *App) expireErrand(ctx context.Context, e store.Errand, why string) {
 	b.tellErrandOwner(ctx, e, outboundmsg.ErrandExpiredNotice(e.Name, e.ID, why))
 }
 
-// errandAsk has errand e's run answer: in Codex mode through the OpenAI
+// errandAsk has errand e's run answer, on a call (call) or by message:
+// in Codex mode through the OpenAI
 // connection, in Claude mode through `claude -p` with no tools at all.
-func (b *App) errandAsk(ctx context.Context, e store.Errand, s manifest.Errands, lines []store.ErrandLine) (errand.Answer, error) {
+func (b *App) errandAsk(ctx context.Context, e store.Errand, s manifest.Errands, lines []store.ErrandLine, call bool) (errand.Answer, error) {
 	cfg := RuntimeConfig(b.cfgs)
-	doc := errand.Errand{Owner: strings.TrimSpace(s.OwnerName), Name: e.Name, Goal: e.Goal, Brief: e.Brief, Now: time.Now().In(cfg.Location()), Deadline: e.Deadline}
+	doc := errand.Errand{Owner: strings.TrimSpace(s.OwnerName), Name: e.Name, Goal: e.Goal, Brief: e.Brief, Now: time.Now().In(cfg.Location()), Deadline: e.Deadline, Call: call}
 	for _, l := range lines {
 		doc.Lines = append(doc.Lines, errand.Line{From: l.Sender, Text: l.Text, At: l.At})
 	}

@@ -16,6 +16,7 @@
   },
   "brain_mode": true,
   "brain_model": "opus",
+  "calls": {},
   "claude_path": "claude",
   "codex_effort": "high",
   "codex_model": "gpt-6.1-sol",

@@ -9,6 +9,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/errand"
 	"github.com/Icewater1337/fridolin/internal/nodes"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 )
 
 // waits are how long a bridge and its brain manager wait for what may not
@@ -82,6 +83,9 @@ type waits struct {
 	// message for the next one before its run answers them all, and
 	// errandSweep how often errands are looked at for their deadline.
 	errandGather, errandSweep time.Duration
+	// callRing is how long an errand's call rings before it counts as not
+	// picked up (call_runtime.go).
+	callRing time.Duration
 }
 
 // defaultWaits are the waits of the binary's bridge.
@@ -113,6 +117,7 @@ func defaultWaits() waits {
 		liveAge:             12 * time.Hour,
 		errandGather:        20 * time.Second,
 		errandSweep:         time.Minute,
+		callRing:            45 * time.Second,
 	}
 }
 
@@ -147,4 +152,7 @@ type testHooks struct {
 	// errandRun answers an errand's run in place of the model: tests
 	// hand in what it says.
 	errandRun func(errand.Errand) (string, error)
+	// placeCall places an errand's calls in place of WhatsApp's call
+	// stack: tests hand in a fake call.
+	placeCall func(ctx context.Context, number string) (whatsapp.Call, error)
 }

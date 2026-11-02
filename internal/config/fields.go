@@ -38,6 +38,8 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "core.lease.renew_seconds", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Core.Lease.RenewSeconds) }},
 	{Field: Field{Name: "core.lease.stale_seconds", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Core.Lease.StaleSeconds) }},
 	{Field: Field{Name: "vault.bucket", Boot: true}, get: func(c *Settings) string { return c.Vault.Bucket }},
+	// The call stack goes onto the WhatsApp client before it connects.
+	{Field: Field{Name: "calls.enabled", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Calls.Enabled) }},
 	{Field: Field{Name: "_comment"}},
 	{Field: Field{Name: "version"}},
 	{Field: Field{Name: "allowed_numbers"}},
@@ -137,6 +139,8 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "connections.elevenlabs.brains"}},
 	{Field: Field{Name: "connections.elevenlabs.brain_monthly_usd"}},
 	{Field: Field{Name: "connections.elevenlabs.voice"}},
+	{Field: Field{Name: "calls.greeting"}},
+	{Field: Field{Name: "calls.notice"}},
 }
 
 // Fields returns an owned copy of the complete configuration field inventory.

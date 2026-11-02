@@ -1823,6 +1823,32 @@ The log names every change to the `brains` lists, as it does for the
 other settings that decide what brains may reach. Site modules declare
 their own use and limit in their `module.json`, not here.
 
+### `calls`
+
+WhatsApp voice calls ([CALLS.md](CALLS.md)): you call Fridolin's number
+and talk to the brain that gets your direct messages, and the core
+brain's [errands](BRAINS.md#errands) call people Fridolin wrote to
+before. Off by default. They speak through the ElevenLabs connection,
+which needs a key and `connections.elevenlabs.voice`, and listen through
+the OpenAI connection when it has a key, else ElevenLabs.
+
+```json
+"calls": {
+  "enabled": true,
+  "greeting": "Hallo, hier ist Fridolin. Was kann ich für dich tun?",
+  "notice": "Ich bin ein KI-Assistent und mache mir Notizen zu diesem Anruf."
+}
+```
+
+`calls.enabled` waits for a restart: the call stack goes onto the
+WhatsApp connection before it connects.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | take your calls and let errands call |
+| `greeting` | `Hi, Fridolin here. What can I do for you?` | what Fridolin says when it answers your call; at most 300 characters |
+| `notice` | `I'm an AI assistant, and I keep notes of this call.` | what Fridolin says after its introduction when it calls someone for an errand; at most 300 characters |
+
 ---
 
 ## Environment variables

@@ -1099,6 +1099,31 @@ func ErrandDraft(name, number, text, goal, brief string, first bool) string {
 		name, number, when, text, textx.Truncate(goal, 1000), textx.Truncate(brief, 2000))
 }
 
+// ErrandCallDraft goes ahead of the approval poll for an errand by call:
+// what Fridolin would say first when it calls name at number (digits),
+// with the errand's goal and brief.
+func ErrandCallDraft(name, number, opener, goal, brief string) string {
+	return fmt.Sprintf("📞 Fridolin would call %s (+%s) and open with:\n\n%s\n\n*Goal:* %s\n*What it may tell them and agree to:* %s",
+		name, number, opener, textx.Truncate(goal, 1000), textx.Truncate(brief, 2000))
+}
+
+// ErrandCallingNotice says Fridolin is calling name for errand id.
+func ErrandCallingNotice(name, id string) string {
+	return fmt.Sprintf("📞 Calling %s (errand %s). I'll tell you how it goes.", name, id)
+}
+
+// ErrandNoAnswerNotice says name did not pick up errand id's call, which
+// ended the errand.
+func ErrandNoAnswerNotice(name, id string) string {
+	return fmt.Sprintf("📞 %s did not pick up (errand %s). Ask me to write to them instead, or to call again later.", name, id)
+}
+
+// ErrandCallEndedNotice says errand id's call with name ended before the
+// errand did, which goes on by message.
+func ErrandCallEndedNotice(name, id string) string {
+	return fmt.Sprintf("📞 The call with %s ended before the errand did (%s). It goes on by message: what they write comes to it.", name, id)
+}
+
 // ErrandOpenedNotice says the first message of errand id went to name.
 func ErrandOpenedNotice(name, id string) string {
 	return fmt.Sprintf("✉️ Wrote to %s (errand %s). I'll tell you how it goes.", name, id)

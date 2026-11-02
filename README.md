@@ -576,6 +576,13 @@ someone who tries to turn it against you is cut off. Off until the core
 brain's brain.json sets `errands`. See
 [docs/BRAINS.md](docs/BRAINS.md#errands).
 
+### Voice calls
+
+With `calls.enabled`, call Fridolin's number and talk to your brain:
+what you say is transcribed, answered and read aloud. An errand can call
+someone Fridolin wrote to before instead of writing. Needs the
+ElevenLabs connection with a voice. See [docs/CALLS.md](docs/CALLS.md).
+
 ### OpenAI and ElevenLabs
 
 Dashboard → *Integrations → OpenAI* and *ElevenLabs* keep one key each.

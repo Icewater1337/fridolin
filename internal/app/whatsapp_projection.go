@@ -109,6 +109,7 @@ func (b *App) whatsAppOptions() whatsapp.Options {
 	opts.OnReaction = whatsAppReactionHandler(b.recordReaction)
 	opts.OnChange = b.handleChange
 	opts.Errands, opts.OnErrand = b.errandClaims, b.errandInbound
+	opts.Calls, opts.OnCall = b.cfgs.Boot().CallsEnabled, b.takeCall
 	opts.GroupRules = whatsAppGroupRules(b.groupRules)
 	return opts
 }

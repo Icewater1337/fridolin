@@ -8,6 +8,7 @@
   },
   "brain_mode": true,
   "brain_model": "",
+  "calls": {},
   "claude_path": "/opt/claude/bin/claude",
   "connections": {},
   "core": {

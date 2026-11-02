@@ -40,6 +40,7 @@ func (b *App) registerErrandTools(r *tools.Set[mcpCaller]) {
 					"brief":   map[string]any{"type": "string", "description": "Everything Fridolin may tell them and agree to, e.g. which evenings the owner is free. Nothing beyond it is shared or promised; what it does not cover goes to the owner."},
 					"message": map[string]any{"type": "string", "description": "The first message, in the language they speak, without an introduction."},
 					"days":    map[string]any{"type": "integer", "description": fmt.Sprintf("How long the errand stays open, 1 to %d (default %d).", errand.MaxDays, errand.DefaultDays)},
+					"call":    map[string]any{"type": "boolean", "description": "Reach them by a WhatsApp voice call instead of a message (with calls on): Fridolin introduces itself, says it is an AI, says the message and talks it through. Only for someone Fridolin wrote to before; an errand that does not end on the call goes on by message."},
 				}, "number", "name", "goal", "brief", "message"),
 			}
 		},
@@ -95,11 +96,12 @@ func (b *App) callContactPerson(ctx context.Context, c mcpCaller, raw json.RawMe
 		Brief   string `json:"brief"`
 		Message string `json:"message"`
 		Days    int    `json:"days"`
+		Call    bool   `json:"call"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return mcp.ErrorResult(`the arguments are {"number", "name", "goal", "brief", "message", "days"}: ` + err.Error()), nil
+		return mcp.ErrorResult(`the arguments are {"number", "name", "goal", "brief", "message", "days", "call"}: ` + err.Error()), nil
 	}
-	out, err := b.openErrand(ctx, c, errandRequest{Number: args.Number, Name: args.Name, Goal: args.Goal, Brief: args.Brief, Message: args.Message, Days: args.Days})
+	out, err := b.openErrand(ctx, c, errandRequest{Number: args.Number, Name: args.Name, Goal: args.Goal, Brief: args.Brief, Message: args.Message, Days: args.Days, Call: args.Call})
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}

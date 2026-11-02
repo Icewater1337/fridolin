@@ -34,6 +34,7 @@ func TestStoreBootSurvivesSavesAndIsAValueCopy(t *testing.T) {
 		c.Core.Tailnet = TailnetConfig{Enabled: true, Hostname: "other-core"}
 		c.Core.Lease = LeaseConfig{Enabled: true, RenewSeconds: 10, StaleSeconds: 40}
 		c.Vault.Bucket = "other-vault"
+		c.Calls.Enabled = true
 		c.AgentProvider = "codex"
 		c.CodexModel = "live-model"
 		return nil
