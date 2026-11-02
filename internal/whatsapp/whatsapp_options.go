@@ -65,6 +65,12 @@ type Options struct {
 	OnVote     func(Vote)
 	OnReaction func(Reaction)
 	OnChange   func(chat.Change)
+	// Errands reports whether a direct message from a sender that
+	// allowed_numbers does not let in is the errands' (someone the bridge
+	// wrote to for its owner), and OnErrand takes it: text only, nothing
+	// downloaded. Either nil: such a message is ignored as any other.
+	Errands    func(sender types.JID) bool
+	OnErrand   func(context.Context, chat.Inbound)
 	GroupRules func(string) GroupRules
 	Log        waLog.Logger
 	Chunks     func(string, int) []string

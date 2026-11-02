@@ -42,6 +42,11 @@ type Client struct {
 	onVote    func(Vote)        // a vote was recorded; may be nil
 	onReact   func(Reaction)    // a reaction on one of the bridge's polls; may be nil
 	onChange  func(chat.Change) // an edit or a deletion; may be nil
+	// errands and onErrand take the direct messages of people the bridge
+	// wrote to for its owner, whom allowed_numbers does not let in; nil:
+	// none.
+	errands  func(types.JID) bool
+	onErrand func(context.Context, chat.Inbound)
 	// groupRules is what addresses the bridge in a group, by its brain's
 	// routing; nil means defaultGroupRules.
 	groupRules func(groupJID string) GroupRules
@@ -115,6 +120,8 @@ func New(opts Options) (*Client, error) {
 		onVote:     opts.OnVote,
 		onReact:    opts.OnReaction,
 		onChange:   opts.OnChange,
+		errands:    opts.Errands,
+		onErrand:   opts.OnErrand,
 		groupRules: opts.GroupRules,
 		log:        logger,
 		media:      opts.Downloader,
@@ -424,6 +431,10 @@ func (wa *Client) handleMessage(msg *events.Message) {
 	policy := cfg.Policy
 	envelope := chat.Envelope{Sender: sender.User, SenderResolved: resolved}
 	allowed := access.Authorize(policy, envelope).Allowed
+	if !allowed && wa.errands != nil && wa.onErrand != nil && wa.errands(sender) {
+		wa.handleErrandMessage(msg, sender)
+		return
+	}
 	if !allowed {
 		log.Printf("DM from %s: ignored (not in allowed_numbers)", who)
 		if wa.onIgnored != nil {
@@ -495,6 +506,29 @@ func (wa *Client) handleDMMessage(msg *events.Message, sender types.JID, policy 
 	// On the chat's worker, so the chat's messages reach the bridge in
 	// the order they came.
 	wa.handler(wa.ctx, m)
+}
+
+// handleErrandMessage hands the errands a direct message from sender,
+// someone the bridge wrote to for its owner (Options.Errands): its text,
+// or a line that says what it held instead. Nothing is downloaded, and
+// edits, deletions and the rest are let go: an errand's run reads text.
+func (wa *Client) handleErrandMessage(msg *events.Message, sender types.JID) {
+	if kind, _, _ := classify(msg); kind != kindMessage {
+		wa.log.Debugf("DM %s from an errand's person: not a message the errand reads", msg.Info.ID)
+		return
+	}
+	text := extractText(msg.Message)
+	if a, ok := attachmentOf(msg.Message, msg.Info.ID); ok {
+		note := "[" + a.kind + " not shown: Fridolin reads only text here]"
+		if a.kind == "audio" {
+			note = "[a voice message, which Fridolin cannot listen to here]"
+		}
+		text = strings.TrimSpace(strings.TrimSpace(a.caption+"\n"+text) + "\n" + note)
+	}
+	if text == "" {
+		return
+	}
+	wa.onErrand(wa.ctx, chat.Inbound{JID: sender.String(), Sender: sender.User, Text: text, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)})
 }
 
 func mediaList(p string) []string {

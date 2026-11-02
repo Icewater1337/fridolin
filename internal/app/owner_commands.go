@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -72,7 +74,7 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 	if n, err := chat.PhoneNumber(m.Sender); err == nil {
 		by = n
 	}
-	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!deny": audit.NodeRevoked, "!revoke": audit.NodeRevoked, "!movecore": audit.CoreMoveRequested}[command]
+	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!deny": audit.NodeRevoked, "!revoke": audit.NodeRevoked, "!movecore": audit.CoreMoveRequested, "!unblock": audit.Errand}[command]
 	record := func(id, outcome string) {
 		b.audit.Append(audit.Entry{Kind: kind, Chat: m.JID, By: by, ID: id, Detail: command, Outcome: outcome})
 		log.Printf("owner command: %s from %s in %s: %s", command, by, m.JID, outcome)
@@ -92,6 +94,8 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 		return b.dashboardCommand(record)
 	case "!movecore":
 		return b.moveCoreCommand(args, record)
+	case "!unblock":
+		return b.unblockCommand(args, record)
 	}
 	ctx := context.Background()
 	approve := command == "!approve"
@@ -253,3 +257,26 @@ func (b *App) nodeCommand(command, id string, record func(id, outcome string)) s
 // nodeJoined tells the owner, in their direct chat, that a machine joined
 // with a join code and waits for approval.
 func (b *App) nodeJoined(*nodes.Node) { b.alertPendingApprovals(context.Background()) }
+
+// unblockCommand answers !unblock <number>: Fridolin hears again someone
+// it stopped listening to in an errand (errand_runtime.go), and asks the
+// owner before it writes to them.
+func (b *App) unblockCommand(args []string, record func(id, outcome string)) string {
+	number, err := chat.PhoneNumber(strings.Join(args, ""))
+	if len(args) == 0 || err != nil {
+		record("", "refused: no number")
+		return outboundmsg.UnblockUsage
+	}
+	masked := logx.MaskJID(number, "", "")
+	unblocked, err := b.unblockErrandContact(context.Background(), number)
+	switch {
+	case err != nil:
+		record(masked, "failed: "+err.Error())
+		return outboundmsg.UnblockUsage
+	case !unblocked:
+		record(masked, "nothing blocked")
+		return outboundmsg.NotBlockedReply(number)
+	}
+	record(masked, "unblocked")
+	return outboundmsg.UnblockedReply(number)
+}
