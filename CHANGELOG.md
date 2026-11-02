@@ -19,6 +19,18 @@ for compatibility.
   five a day), with the errand's approvals and rules. Calls from anyone
   else ring on as before. The call stack is meowcaller, pinned; see
   [docs/CALLS.md](docs/CALLS.md) for what that risks.
+- **Google Contacts for errands: `find_contact`.** The core brain's page
+  has a **Google Contacts** card, a sign-in of its own apart from the
+  calendar's (scope `contacts.readonly`, token
+  `google_contacts_token_<brain>.json` in the credentials folder, which
+  a core move carries). Once connected, and with errands on, the core
+  brain gets `find_contact(query)`: up to 10 people in your Google
+  Contacts who match, each number written with its country code given
+  as `contact_person` takes it, with whether it is on WhatsApp, and one
+  written without given as it is, for you to complete. Nothing is kept.
+  A calendar sign-in is unchanged. Once, in the Google Cloud project of
+  your OAuth client: enable the People API and add the scope on the
+  consent screen. [docs/CALENDAR.md](docs/CALENDAR.md#google-contacts)
 - **Errands: Fridolin writes to people for you.** With `errands` in the
   core brain's brain.json (`{"owner_name": "Sam"}`), the core brain can
   have Fridolin write to someone who is not in `allowed_numbers` and

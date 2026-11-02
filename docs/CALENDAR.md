@@ -287,6 +287,71 @@ the same account again keeps it, since the new token belongs to it. It
 revokes only once the new sign-in is saved: one that fails keeps the
 brain's old token.
 
+A brain's Google Contacts sign-in (below) is a token of the same client
+too, and it does not record its account. So while one is there, a
+calendar's Disconnect, or a **Switch account**, does not revoke the
+calendar's grant either: the contacts' sign-in may be of the same
+account and would lose its access with it.
+
+## Google Contacts
+
+The core brain can look people up in your Google Contacts for its
+[errands](BRAINS.md#errands): `find_contact("Alex")` answers up to 10
+people who match, with their phone numbers, so that you can say "ask Alex
+about dinner" rather than give a number. It is a sign-in of its own,
+apart from the calendar's, and optional: a brain's calendar sign-in stays
+as it is, with the calendar's scopes only.
+
+**Once, in Google Cloud Console**, in the project of the OAuth client
+under Settings → Google sign-in (with the build's built-in client, its
+publisher has done this, or not):
+
+1. Enable the **People API**:
+   [APIs & Services → Enable APIs](https://console.cloud.google.com/flows/enableapi?apiid=people.googleapis.com).
+2. Add the scope `https://www.googleapis.com/auth/contacts.readonly` on
+   the consent screen: Google Auth Platform → **Data access** → Add or
+   remove scopes → paste it into "Manually add scopes", Add to table,
+   Update, Save. Google counts it as a sensitive scope: an app you did not
+   have verified shows "Google hasn't verified this app" at sign-in, as
+   for the calendar (above).
+
+**Connect** on the core brain's page: the **Google Contacts** card (only
+the core brain has one) → **Connect Google Contacts**, and allow read
+access to your contacts. The card then asks Google whether a search works
+and says so; when the People API is not enabled it says that. The card
+shows while errands are off too, with a note: `find_contact` comes with
+the errands.
+
+**What the brain gets.** The sign-in is saved as
+`google_contacts_token_<brain>.json` next to the calendar's tokens, in
+`sandbox.credentials_dir` (or the bridge's data folder), which the sandbox
+denies every brain; a [core move](CORE.md) carries it with them. The
+bridge makes each lookup itself: `find_contact(query)` searches names,
+nicknames, addresses, numbers and organizations through the People API
+(after the warm-up request with an empty query that Google asks for, so
+the results are current) and reads only names and phone numbers. Nothing
+of it is kept: not in bridge.db, the brain's folder or its history,
+beyond what the brain itself writes down. For each number:
+
+- written with its country code (`+1 555 …`, `001 555 …`, `+49 (0)30 …`),
+  it is given as `contact_person` takes it, `+15551234567`, with whether
+  it is on WhatsApp (WhatsApp is asked, as its own app does for a contact;
+  in dev mode, or while WhatsApp is not connected, it is "unknown"), and
+  whether it is in `allowed_numbers` or blocked for errands;
+- written without (`555 0100`), it is given as written, marked "no country
+  code: ask the owner": the brain asks you rather than guess the country.
+
+When several people match, the brain asks you which one you mean.
+
+**Disconnect** on the card deletes the token and revokes the access at
+Google, unless another token of the same client may hold the same grant:
+a calendar's of any brain (the contacts' token does not record its
+account, so the bridge cannot tell whether it is the same), or another
+brain's contacts token. The card then says so; remove the access at
+myaccount.google.com/permissions once nothing needs it. **Switch account**
+signs in again and replaces the token without revoking the old one,
+which may be of the same grant.
+
 ## Troubleshooting
 
 - **The check says "Google does not accept this client ID and secret"** —

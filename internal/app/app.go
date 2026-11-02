@@ -169,6 +169,9 @@ type App struct {
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
 	lids func() wastore.LIDStore
+	// onWhatsApp tells which numbers have a WhatsApp account, for
+	// find_contact; nil in dev mode.
+	onWhatsApp func(ctx context.Context, numbers []string) (map[string]bool, error)
 
 	supervisor Supervisor
 	// intake is what comes in from WhatsApp, which Stop closes first.
@@ -393,6 +396,7 @@ func New(opts Options) (_ *App, err error) {
 		if cfgs.Boot().CallsEnabled {
 			b.placeCall = wa.PlaceCall
 		}
+		b.onWhatsApp = wa.OnWhatsApp
 	}
 	if b.core.lease != nil {
 		b.wa = leaseGate{Messenger: b.wa, lost: b.core.lost.Load}
@@ -456,6 +460,9 @@ func New(opts Options) (_ *App, err error) {
 	b.vault.targets = b.targets
 	googleOptions := googleOptionsFor(cfgs)
 	googleOptions.OnBroken = b.calendarGrantBroken
+	if opts.hooks.google != nil {
+		googleOptions = opts.hooks.google(googleOptions)
+	}
 	b.google = google.New(googleOptions)
 	b.backup = newProjectedBackup(cfgs, b.env, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
 	b.plaud = NewPlaudManager(cfgs, b.env, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {

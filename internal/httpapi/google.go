@@ -28,6 +28,9 @@ type GoogleService interface {
 	Select(string, manifest.Calendar) error
 	Disconnect(context.Context, string, bool) (bool, string, error)
 	Health(string) *google.GrantHealth
+	StartContactsSignIn(string) (string, error)
+	ContactsStatus(context.Context, string, bool) google.ContactsSnapshot
+	DisconnectContacts(context.Context, string, bool) (bool, string, error)
 }
 
 type GoogleAPI struct {
@@ -223,6 +226,59 @@ func (a *GoogleAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	revoked, note, err := a.Google().Disconnect(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
+	switch {
+	case errors.Is(err, google.ErrNotRevoked):
+		WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
+		return
+	case err != nil:
+		WriteErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, CalendarDisconnectedResponse{Status: "disconnected", Revoked: revoked, Note: note})
+}
+
+// ── Google Contacts (the core brain's find_contact) ─────────────────────
+
+// ContactsStatus answers GET /api/brains/{id}/contacts: whether the brain
+// connected its Google Contacts; ?check=1 asks Google whether it works.
+func (a *GoogleAPI) ContactsStatus(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
+	if br == nil {
+		return
+	}
+	WriteJSON(w, http.StatusOK, a.Google().ContactsStatus(r.Context(), br.ID(), r.URL.Query().Get("check") == "1"))
+}
+
+// ContactsConnect starts the core brain's Google Contacts sign-in. No
+// other brain has a use for it: find_contact is the core brain's.
+func (a *GoogleAPI) ContactsConnect(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
+	if br == nil {
+		return
+	}
+	if !br.Manifest().IsCore() {
+		WriteErr(w, http.StatusConflict, "Google Contacts is for the core brain's errands, and this is not the core brain")
+		return
+	}
+	u, err := a.Google().StartContactsSignIn(br.ID())
+	if err != nil {
+		WriteErr(w, http.StatusPreconditionFailed, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, AuthURLResponse{AuthURL: u})
+}
+
+// ContactsDisconnect ends a brain's Google Contacts access, as Disconnect
+// does its calendar's, and answers the same: ?local_only=1 deletes the
+// token without revoking it.
+func (a *GoogleAPI) ContactsDisconnect(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
+	if br == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	revoked, note, err := a.Google().DisconnectContacts(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
 	switch {
 	case errors.Is(err, google.ErrNotRevoked):
 		WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")

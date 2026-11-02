@@ -8,6 +8,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/errand"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 )
@@ -155,4 +156,7 @@ type testHooks struct {
 	// placeCall places an errand's calls in place of WhatsApp's call
 	// stack: tests hand in a fake call.
 	placeCall func(ctx context.Context, number string) (whatsapp.Call, error)
+	// google changes the Google sign-in's options before the bridge makes
+	// it: tests point it at a fake Google.
+	google func(google.Options) google.Options
 }

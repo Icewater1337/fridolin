@@ -6,7 +6,7 @@ import { store } from '../app/store.js';
 import { brainsResource, configResource, resource } from '../app/resources.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { showActivity } from '../components/activity-item.js';
-import { calendarCard } from '../components/calendar.js';
+import { calendarCard, contactsCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
@@ -68,12 +68,20 @@ export default /** @satisfies {PageModule} */ ({
     const actBox = h('div.activity-list.compact');
     const intentsBox = h('div');
     const dangerBox = h('div');
+    // The core brain's Google Contacts, for its errands: shown, and asked
+    // for, only once the brain turns out to be the core brain.
+    const contactsNote = h('div');
+    const contactsBox = h('div');
+    const contactsSection = h('section.section', { hidden: true }, h('h2.section-title', 'Google Contacts'), contactsNote, contactsBox);
+    /** @type {(HTMLElement & {refresh: () => Promise<void>}) | null} */
+    let contacts = null;
 
     // The brain's own sections, which a brain that does not exist lacks.
     const sections = [
       h('section.section', h('h2.section-title', 'Now'), liveBox),
       h('section.section', h('h2.section-title', 'Settings'), formBox),
       h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id, { signal: ctx.signal })),
+      contactsSection,
       h('section.section', h('h2.section-title', 'Standing intents'), intentsBox),
       h('section.section', h('h2.section-title', 'Skills'), skillsCard(id, { signal: ctx.signal })),
       h('section.section',
@@ -121,6 +129,7 @@ export default /** @satisfies {PageModule} */ ({
         return;
       }
       sections.forEach((s) => { s.hidden = false; });
+      paintContacts(brain);
       ctx.setTitle(brain.name || brain.id);
       paint(head, { name: brain.name, id: brain.id, status: brain.status, path: brain.path }, renderHead);
       paint(issuesBox, (brain.issues || []).filter((is) => is.kind !== 'drift'), renderIssues);
@@ -129,6 +138,20 @@ export default /** @satisfies {PageModule} */ ({
       paintForm(brain);
       paint(intentsBox, brain.intents || [], renderIntents);
       paint(dangerBox, 'shown', renderDanger);
+    }
+
+    // ── Google Contacts, the core brain's ──
+    /** @param {Brain} b */
+    function paintContacts(b) {
+      const m = b.manifest;
+      contactsSection.hidden = !m || m.role !== 'core';
+      if (!m || m.role !== 'core') return;
+      if (!contacts) {
+        contacts = contactsCard(id, { signal: ctx.signal });
+        mount(contactsBox, contacts);
+      }
+      paint(contactsNote, !!m.errands, (on) => (on ? null
+        : callout('info', 'Errands are off', 'find_contact comes with the errands, which brain.json’s ', mono('errands'), ' turns on (docs/BRAINS.md, “Errands”). You can connect the contacts before.')));
     }
 
     // ── recent messages ──

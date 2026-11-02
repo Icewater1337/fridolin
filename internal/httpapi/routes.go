@@ -210,6 +210,9 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/brains/{id}/calendar/connect", d.Google().Connect)
 	mux.HandleFunc("PUT /api/brains/{id}/calendar", d.Google().Select)
 	mux.HandleFunc("DELETE /api/brains/{id}/calendar", d.Google().Disconnect)
+	mux.HandleFunc("GET /api/brains/{id}/contacts", d.Google().ContactsStatus)
+	mux.HandleFunc("POST /api/brains/{id}/contacts/connect", d.Google().ContactsConnect)
+	mux.HandleFunc("DELETE /api/brains/{id}/contacts", d.Google().ContactsDisconnect)
 
 	mux.HandleFunc("GET /api/plaud/status", d.Plaud().Status)
 	mux.HandleFunc("POST /api/plaud/connect", d.Plaud().Connect)

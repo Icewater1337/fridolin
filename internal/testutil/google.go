@@ -7,7 +7,8 @@ import (
 	"testing"
 )
 
-// FakeGoogle is a token, calendar-list and revocation endpoint for OAuth tests.
+// FakeGoogle is a token, calendar-list, revocation and People search
+// endpoint for OAuth tests.
 func FakeGoogle(t *testing.T) (*httptest.Server, *map[string]string) {
 	t.Helper()
 	got := map[string]string{}
@@ -70,6 +71,25 @@ func FakeGoogle(t *testing.T) (*httptest.Server, *map[string]string) {
 			default:
 				got["revoked"] = tok
 			}
+		case "/v1/people:searchContacts":
+			// The People API's search, for Google Contacts: each query
+			// goes into people.queries, the warm-up's empty one too.
+			if r.Header.Get("Authorization") != "Bearer ACCESS-1" {
+				w.WriteHeader(401)
+				fmt.Fprint(w, `{"error":{"code":401,"message":"Request had invalid authentication credentials."}}`)
+				return
+			}
+			q := r.URL.Query().Get("query")
+			got["people.queries"] += q + "|"
+			if q != "Alex" {
+				fmt.Fprint(w, `{}`)
+				return
+			}
+			fmt.Fprint(w, `{"results":[
+				{"person":{"names":[{"displayName":"Alex Example","metadata":{"primary":true}}],
+					"phoneNumbers":[{"value":"+1 555-987-6543","type":"mobile","formattedType":"Mobile"},{"value":"555 0100","type":"work","formattedType":"Work"}]}},
+				{"person":{"names":[{"displayName":"Alex Other"}],"phoneNumbers":[{"value":"001 555 123 4567","type":"home","formattedType":"Home"}]}}
+			]}`)
 		default:
 			w.WriteHeader(404)
 		}

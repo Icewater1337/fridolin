@@ -805,8 +805,9 @@ blocks the move is listed under "It cannot run".
    **Secret files.** With the host secrets go the secret files of the
    core's credentials folder (`sandbox.credentials_dir`, a folder under
    `~`): `google_oauth_web_credentials.json`, `dashboard-users.json`,
-   `google_calendar_credentials_<brain>.json` and
-   `google_calendar_token_<brain>.json`, nothing else of the folder.
+   `google_calendar_credentials_<brain>.json`,
+   `google_calendar_token_<brain>.json` and
+   `google_contacts_token_<brain>.json`, nothing else of the folder.
    SRC reads them through its core's container (`fridolin core run core
    files export`), seals them and the folder's name under `~` beside the
    secrets to DST's one-time key, and DST writes them through its own

@@ -454,7 +454,8 @@ The brain's tools:
 
 | Tool | What |
 | --- | --- |
-| `contact_person(number, name, goal, brief, message, days, call)` | Opens an errand, or asks you for it. Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. With `call: true` (and [calls](CALLS.md) on) Fridolin calls them instead of writing: only someone it wrote to before, at most five errand calls a day; see [CALLS.md](CALLS.md#errand-calls). A write action. |
+| `contact_person(number, name, goal, brief, message, days, call)` | Opens an errand, or asks you for it. Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. With `call: true` (and [calls](CALLS.md) on) Fridolin calls them instead of writing: only someone it wrote to before, at most five errand calls a day; see [CALLS.md](CALLS.md#errand-calls). A write action. When you name a person rather than a number, the brain looks them up with `find_contact` first and asks you which one when several match. |
+| `find_contact(query)` | Looks someone up by name in your Google Contacts: at most 10 people, each number written with its country code as `contact_person` takes it, with whether it is on WhatsApp; one written without as it is written, to ask you for the country code. Only once the core brain's **Google Contacts** card is connected ([CALENDAR.md](CALENDAR.md#google-contacts)). It only reads, and keeps nothing. |
 | `errands(id)` | This brain's errands: those that have not ended, then the last ten others. With `id`, one errand with its conversation. |
 | `errand_answer(id, text)` | Passes on what you said to an open errand. Only in a run that answers your own message in your direct chat. A write action. |
 | `errand_stop(id)` | Ends an errand without a word to them. A write action. |
