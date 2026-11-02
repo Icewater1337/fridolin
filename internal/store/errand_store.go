@@ -66,6 +66,19 @@ func migrateV9(tx *sql.Tx) error {
 	return nil
 }
 
+// migrateV10 adds how an errand reaches its person: by message, as
+// before, or by a voice call (docs/CALLS.md).
+func migrateV10(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE errands ADD COLUMN mode TEXT NOT NULL DEFAULT 'message'`)
+	return err
+}
+
+// How an errand reaches its person.
+const (
+	ErrandByMessage = "message"
+	ErrandByCall    = "call"
+)
+
 // The states of an errand.
 const (
 	// ErrandAsking waits for the owner's approval of the first message.
@@ -113,6 +126,8 @@ type Errand struct {
 	CreatedAt time.Time
 	Deadline  time.Time
 	ClosedAt  time.Time
+	// Mode is ErrandByMessage or ErrandByCall.
+	Mode string
 }
 
 // Live reports whether the errand has not ended: it waits for the owner,
@@ -140,12 +155,12 @@ type ErrandContact struct {
 // ErrNoErrand is an errand, or a contact, the store does not have.
 var ErrNoErrand = errors.New("no such errand")
 
-const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at`
+const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at, mode`
 
 func scanErrand(row interface{ Scan(...any) error }) (Errand, error) {
 	var e Errand
 	var closed sql.NullTime
-	err := row.Scan(&e.ID, &e.Brain, &e.Contact, &e.Name, &e.Goal, &e.Brief, &e.Message, &e.State, &e.Approval, &e.ByOwner, &e.Run, &e.Chat, &e.Days, &e.Sent, &e.Outcome, &e.CreatedAt, &e.Deadline, &closed)
+	err := row.Scan(&e.ID, &e.Brain, &e.Contact, &e.Name, &e.Goal, &e.Brief, &e.Message, &e.State, &e.Approval, &e.ByOwner, &e.Run, &e.Chat, &e.Days, &e.Sent, &e.Outcome, &e.CreatedAt, &e.Deadline, &closed, &e.Mode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, ErrNoErrand
 	}
@@ -172,8 +187,12 @@ func (s *Store) queryErrands(ctx context.Context, q string, args ...any) ([]Erra
 
 // AddErrand records e as it is.
 func (s *Store) AddErrand(ctx context.Context, e Errand) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC())
+	mode := e.Mode
+	if mode == "" {
+		mode = ErrandByMessage
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC(), mode)
 	return err
 }
 
@@ -193,6 +212,13 @@ func (s *Store) ErrandByApproval(ctx context.Context, id string) (Errand, error)
 // LiveErrandWith is the errand with contact that has not ended, if any.
 func (s *Store) LiveErrandWith(ctx context.Context, contact string) (Errand, error) {
 	return scanErrand(s.db.QueryRowContext(ctx, `SELECT `+errandColumns+` FROM errands WHERE contact = ? AND state IN (?, ?) ORDER BY created_at DESC LIMIT 1`, contact, ErrandAsking, ErrandOpen))
+}
+
+// ErrandCallsSince counts the errands by call made since t.
+func (s *Store) ErrandCallsSince(ctx context.Context, t time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE mode = ? AND created_at >= ? AND state != ?`, ErrandByCall, t.UTC(), ErrandDeclined).Scan(&n)
+	return n, err
 }
 
 // OpenErrands lists the open errands, oldest first.

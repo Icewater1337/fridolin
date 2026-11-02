@@ -14,6 +14,7 @@ import (
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/purpshell/meowcaller"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	wastore "go.mau.fi/whatsmeow/store"
@@ -47,6 +48,11 @@ type Client struct {
 	// none.
 	errands  func(types.JID) bool
 	onErrand func(context.Context, chat.Inbound)
+	// withCalls puts the call stack onto each whatsmeow client, calls is
+	// the current one's (guarded by mu, as client is), and onCall takes
+	// the incoming calls (calls.go).
+	withCalls bool
+	onCall    func(Call)
 	// groupRules is what addresses the bridge in a group, by its brain's
 	// routing; nil means defaultGroupRules.
 	groupRules func(groupJID string) GroupRules
@@ -79,6 +85,7 @@ type Client struct {
 	// client is replaced when WhatsApp logged the device out (see
 	// newSession), so it is read with cl.
 	client *whatsmeow.Client
+	calls  *meowcaller.Client
 	state  chat.LinkState
 	// own and ownLID are the bridge account's JIDs, as whatsmeow reported
 	// them when it connected or paired; empty while unpaired.
@@ -122,6 +129,8 @@ func New(opts Options) (*Client, error) {
 		onChange:   opts.OnChange,
 		errands:    opts.Errands,
 		onErrand:   opts.OnErrand,
+		withCalls:  opts.Calls,
+		onCall:     opts.OnCall,
 		groupRules: opts.GroupRules,
 		log:        logger,
 		media:      opts.Downloader,
@@ -140,6 +149,9 @@ func New(opts Options) (*Client, error) {
 	}
 
 	client.AddEventHandler(wa.HandleEvent)
+	if wa.withCalls {
+		wa.calls = wa.attachCalls(client)
+	}
 	return wa, nil
 }
 

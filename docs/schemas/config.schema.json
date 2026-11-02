@@ -304,6 +304,16 @@
         "min_age_minutes": {"type": "integer", "minimum": 0, "maximum": 10080, "description": "Processes younger than this are left alone. Default 60."}
       }
     },
+    "calls": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "WhatsApp voice calls (docs/CALLS.md): the owner calls Fridolin's number and talks to the brain that gets their direct messages, and the core brain's errands call people Fridolin wrote to before. Off by default. They need the ElevenLabs connection with a voice.",
+      "properties": {
+        "enabled": {"type": "boolean", "description": "Take the owner's calls and let errands call. Needs a restart. Default false."},
+        "greeting": {"type": "string", "maxLength": 300, "description": "What Fridolin says when it answers the owner's call. Default: Hi, Fridolin here. What can I do for you?"},
+        "notice": {"type": "string", "maxLength": 300, "description": "What Fridolin says after its introduction when it calls someone for an errand. Default: I'm an AI assistant, and I keep notes of this call."}
+      }
+    },
     "connections": {
       "type": "object",
       "additionalProperties": false,

@@ -69,8 +69,13 @@ type Options struct {
 	// allowed_numbers does not let in is the errands' (someone the bridge
 	// wrote to for its owner), and OnErrand takes it: text only, nothing
 	// downloaded. Either nil: such a message is ignored as any other.
-	Errands    func(sender types.JID) bool
-	OnErrand   func(context.Context, chat.Inbound)
+	Errands  func(sender types.JID) bool
+	OnErrand func(context.Context, chat.Inbound)
+	// Calls puts the call stack onto the WhatsApp client (calls.enabled,
+	// read at startup), and OnCall takes each incoming call. A call
+	// OnCall neither answers nor ends rings on as before.
+	Calls      bool
+	OnCall     func(Call)
 	GroupRules func(string) GroupRules
 	Log        waLog.Logger
 	Chunks     func(string, int) []string

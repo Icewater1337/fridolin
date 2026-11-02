@@ -16,6 +16,7 @@ Content-Type: application/json
     },
     "brain_mode": true,
     "brain_model": "",
+    "calls": {},
     "claude_path": "<TEST_BINARY>",
     "connections": {
       "openai": {
@@ -90,6 +91,7 @@ Content-Type: application/json
     },
     "brain_mode": true,
     "brain_model": "",
+    "calls": {},
     "claude_path": "<TEST_BINARY>",
     "codex_effort": "high",
     "codex_model": "gpt-6.1-sol",

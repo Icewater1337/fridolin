@@ -29,7 +29,7 @@ const KINDS = [
   ['core_move_ended', 'Core move ended'], ['core_secrets', 'Host secrets kept or forgotten'],
   ['scheduled_command', 'Scheduled program on a node'],
   ['fride_instance', 'FrIDE instance started or stopped'], ['node_exec', 'Command on a node (node_exec)'],
-  ['errand', 'Errand (writing to someone)'],
+  ['errand', 'Errand (writing to someone)'], ['voice_call', 'Call to Fridolin'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 

@@ -669,3 +669,16 @@ notBlockedReply
 	❓ +15551234567 is not blocked, so nothing changed.
 unblockUsage
 	🔓 `!unblock <number>`, with the country code, lets Fridolin hear someone it stopped listening to in an errand.
+errandCallDraft
+	📞 Fridolin would call Alex (+15551234567) and open with:
+
+	Hi, this is Fridolin, Sam's assistant. I'm an AI assistant, and I keep notes of this call. Could we move dinner to 8pm?
+
+	*Goal:* Move dinner
+	*What it may tell them and agree to:* 8pm or later.
+errandCallingNotice
+	📞 Calling Alex (errand e1a2b3c4). I'll tell you how it goes.
+errandNoAnswerNotice
+	📞 Alex did not pick up (errand e1a2b3c4). Ask me to write to them instead, or to call again later.
+errandCallEndedNotice
+	📞 The call with Alex ended before the errand did (e1a2b3c4). It goes on by message: what they write comes to it.

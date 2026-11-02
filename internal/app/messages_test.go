@@ -228,6 +228,10 @@ func catalogue() []struct{ name, text string } {
 		{"unblockedReply", outboundmsg.UnblockedReply("15551234567")},
 		{"notBlockedReply", outboundmsg.NotBlockedReply("15551234567")},
 		{"unblockUsage", outboundmsg.UnblockUsage},
+		{"errandCallDraft", outboundmsg.ErrandCallDraft("Alex", "15551234567", "Hi, this is Fridolin, Sam's assistant. I'm an AI assistant, and I keep notes of this call. Could we move dinner to 8pm?", "Move dinner", "8pm or later.")},
+		{"errandCallingNotice", outboundmsg.ErrandCallingNotice("Alex", "e1a2b3c4")},
+		{"errandNoAnswerNotice", outboundmsg.ErrandNoAnswerNotice("Alex", "e1a2b3c4")},
+		{"errandCallEndedNotice", outboundmsg.ErrandCallEndedNotice("Alex", "e1a2b3c4")},
 	}
 }
 

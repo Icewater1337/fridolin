@@ -89,11 +89,14 @@ func shownExcluder(m chat.Inbound, shown []history.Entry) func(memindex.Hit) boo
 // ownerAsked reports whether the run c answers its owner: a message typed
 // in a direct chat (WhatsApp, or the dashboard's dev page, which only the
 // dashboard's owner reaches) by an allowed number, addressed to the
-// bridge. Standing intents are set only in such runs: not for a group
-// member, a file handed in, a schedule that fired or chatter.
+// bridge, or what an allowed number said on a voice call to it, which
+// the bridge takes only from them. Standing intents are set only in such
+// runs: not for a group member, a file handed in, a schedule that fired
+// or chatter.
 func ownerAsked(c runInfo, cfg *config.Settings) bool {
 	m := c.Message
-	if m.Silent || m.IsGroup() || m.Brain != "" || (m.Source != chat.SourceWhatsApp && m.Source != chat.SourceDev) {
+	call := m.Source == chat.SourceCall
+	if m.Silent || m.IsGroup() || (m.Brain != "" && !call) || (m.Source != chat.SourceWhatsApp && m.Source != chat.SourceDev && !call) {
 		return false
 	}
 	sender := chat.IdentityKey(m.Sender)

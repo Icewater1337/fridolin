@@ -105,7 +105,9 @@ type Errand struct {
 	Now time.Time
 	// Deadline is when the errand ends unless it ends before.
 	Deadline time.Time
-	Lines    []Line
+	// Call is a phone call: what the run writes is read aloud.
+	Call  bool
+	Lines []Line
 }
 
 // Answer is what a run answered.
@@ -132,6 +134,7 @@ Rules:
 6. If the person asks not to be written to any more, answer "done" with "stop": true.
 7. Lines from "owner" are the owner's own answers and instructions to you: follow them.
 8. Write short, friendly WhatsApp messages in the language the person writes in, or else the language of the conversation so far. No markup, no [POLL] blocks.
+9. When the document's channel is "phone call", what you write is read aloud and what they said was transcribed: short spoken sentences, no emoji, lists or links, and allow for words the transcription got wrong.
 
 Answer with one JSON object and nothing else:
 {"action": "reply" | "done" | "ask_owner" | "abort", "text": "", "summary": "", "question": "", "reason": "", "stop": false}
@@ -146,6 +149,7 @@ Answer with one JSON object and nothing else:
 type document struct {
 	Owner        string `json:"owner"`
 	Person       string `json:"person"`
+	Channel      string `json:"channel"`
 	Now          string `json:"now"`
 	Ends         string `json:"errand_ends"`
 	Goal         string `json:"goal"`
@@ -155,7 +159,10 @@ type document struct {
 
 // Document is e as its run reads it after the Instructions.
 func Document(e Errand) string {
-	d := document{Owner: e.Owner, Person: e.Name, Goal: e.Goal, Brief: e.Brief, Conversation: window(e.Lines)}
+	d := document{Owner: e.Owner, Person: e.Name, Channel: "WhatsApp messages", Goal: e.Goal, Brief: e.Brief, Conversation: window(e.Lines)}
+	if e.Call {
+		d.Channel = "phone call"
+	}
 	if !e.Now.IsZero() {
 		d.Now = e.Now.Format("Monday 2006-01-02 15:04 MST")
 	}

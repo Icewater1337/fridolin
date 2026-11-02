@@ -31,6 +31,9 @@ type Boot struct {
 	// VaultBucket holds the lease (vault.bucket), read as the lease is
 	// taken.
 	VaultBucket string `config:"vault.bucket"`
+	// CallsEnabled puts the call stack onto the WhatsApp client, which
+	// must happen before it connects (calls.enabled).
+	CallsEnabled bool `config:"calls.enabled"`
 }
 
 // Lease returns the lease settings the bridge started with.
@@ -46,7 +49,7 @@ func bootOf(c *File, paths Paths) Boot {
 		NodesEnabled: c.Nodes.Enabled, NodesListen: c.Nodes.Listen,
 		TailnetEnabled: c.Core.Tailnet.Enabled, TailnetHostname: c.Core.Tailnet.Hostname,
 		LeaseEnabled: c.Core.Lease.Enabled, LeaseRenewSeconds: c.Core.Lease.RenewSeconds, LeaseStaleSeconds: c.Core.Lease.StaleSeconds,
-		VaultBucket: c.Vault.Bucket,
+		VaultBucket: c.Vault.Bucket, CallsEnabled: c.Calls.Enabled,
 	}
 }
 

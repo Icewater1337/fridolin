@@ -10,6 +10,15 @@ for compatibility.
 
 ### Added
 
+- **Voice calls.** With `"calls": {"enabled": true}` in config.json (and
+  a restart), call Fridolin's number from an allowed number and talk to
+  the brain that gets your direct messages: what you say is transcribed
+  (OpenAI, else ElevenLabs), answered as your own words, and read aloud
+  by ElevenLabs (a key and a voice needed). Errands can call someone
+  Fridolin wrote to before (`contact_person` with `call: true`, at most
+  five a day), with the errand's approvals and rules. Calls from anyone
+  else ring on as before. The call stack is meowcaller, pinned; see
+  [docs/CALLS.md](docs/CALLS.md) for what that risks.
 - **Google Contacts for errands: `find_contact`.** The core brain's page
   has a **Google Contacts** card, a sign-in of its own apart from the
   calendar's (scope `contacts.readonly`, token
