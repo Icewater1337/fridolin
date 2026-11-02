@@ -1046,9 +1046,10 @@ denied either way.
 
 A directory of per-brain credential files kept outside the data directory
 (absolute or starting with `~/`): the calendar tokens,
-`google_calendar_token_<id>.json`. Brains are denied all of it, their own
-token included; the bridge makes their calendar calls (see
-[CALENDAR.md](CALENDAR.md#what-the-brain-gets)). Older versions let each
+`google_calendar_token_<id>.json`, and the core brain's Google Contacts
+token, `google_contacts_token_<id>.json`. Brains are denied all of it,
+their own token included; the bridge makes their calendar calls and
+contact lookups (see [CALENDAR.md](CALENDAR.md#what-the-brain-gets)). Older versions let each
 brain read its own token, and copied the OAuth client, secret and all,
 next to it as `google_calendar_credentials_<id>.json`, which the bridge no
 longer reads. It names the files of that name that hold a client secret

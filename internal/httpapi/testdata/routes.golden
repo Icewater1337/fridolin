@@ -7,6 +7,7 @@ DELETE /api/backup/drive-client
 DELETE /api/brain-dirs
 DELETE /api/brains/{id}
 DELETE /api/brains/{id}/calendar
+DELETE /api/brains/{id}/contacts
 DELETE /api/brains/{id}/intents/{intent}
 DELETE /api/google/client
 DELETE /api/plaud/devices/{id}
@@ -26,6 +27,7 @@ GET /api/brains
 GET /api/brains/{id}
 GET /api/brains/{id}/backup/versions
 GET /api/brains/{id}/calendar
+GET /api/brains/{id}/contacts
 GET /api/brains/{id}/skills
 GET /api/calendar/health
 GET /api/chats/ignored
@@ -77,6 +79,7 @@ POST /api/brains
 POST /api/brains/inspect
 POST /api/brains/{id}/approve
 POST /api/brains/{id}/calendar/connect
+POST /api/brains/{id}/contacts/connect
 POST /api/brains/{id}/skills/approve
 POST /api/brains/{id}/stop
 POST /api/chats/allow

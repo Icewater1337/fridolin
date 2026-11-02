@@ -1,0 +1,10 @@
+GET /api/brains/main/contacts
+200 OK
+Content-Type: application/json
+
+{
+  "client_configured": true,
+  "connected": false,
+  "scope": "https://www.googleapis.com/auth/contacts.readonly",
+  "token_path": "<HOME>/.fridolin/google_contacts_token_main.json"
+}

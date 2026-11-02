@@ -21,6 +21,7 @@ async function openPage(t, opts = {}) {
   const calls = serve(t, (path, init) => {
     if (path === '/api/brains/work/approve' && init.method === 'POST') return opts.approve;
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };
+    if (path.startsWith('/api/brains/work/contacts')) return { client_configured: true, connected: false, scope: 'https://www.googleapis.com/auth/contacts.readonly', token_path: '/Users/you/.fridolin/google_contacts_token_work.json' };
     if (path === '/api/brains/work' && init.method === 'PUT') return { ok: true };
     if (path.startsWith('/api/brains/work/intents/') && init.method === 'DELETE') return { status: 'removed' };
     if (path === '/api/brains/work') {
@@ -326,4 +327,21 @@ test('a brain without standing intents says how one is set', async (t) => {
   const { root } = await openPage(t);
   const section = root.querySelectorAll('section.section').find((s) => s.querySelector('h2').textContent === 'Standing intents');
   assert.match(section.textContent, /remind you/);
+});
+
+test('the Google Contacts section shows on the core brain only, with a note while errands are off', async (t) => {
+  const core = { ...view('Work'), manifest: { ...manifest('Work'), role: 'core' } };
+  const { root, calls, poll } = await openPage(t);
+  const section = () => root.querySelectorAll('section.section').find((s) => s.querySelector('h2').textContent === 'Google Contacts');
+  assert.equal(section().hidden, true, 'a sub-brain has none');
+  assert.ok(!calls.some((c) => c.path.startsWith('/api/brains/work/contacts')), 'and its contacts are not asked for');
+
+  await poll([core]);
+  assert.equal(section().hidden, false);
+  assert.ok(calls.some((c) => c.path === '/api/brains/work/contacts?check=1'), 'the core brain’s are');
+  assert.match(section().textContent, /Errands are off/);
+  assert.match(section().textContent, /Connect Google Contacts/);
+
+  await poll([{ ...core, manifest: { ...core.manifest, errands: { owner_name: 'Sam' } } }]);
+  assert.doesNotMatch(section().textContent, /Errands are off/);
 });

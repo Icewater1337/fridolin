@@ -25,14 +25,14 @@ func (b *App) registerErrandTools(r *tools.Set[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "contact_person",
 		Available: has,
-		Describe: func(mcpCaller) mcp.Tool {
+		Describe: func(c mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Have Fridolin write to someone who is not in allowed_numbers, on the owner's behalf, and carry the conversation with them until it comes to an end: an errand. " +
 					"You write the first message; Fridolin's first message to someone opens with its introduction as the owner's assistant, which the bridge adds. " +
 					"The person's answers never come to you: the errand's own run, which has no tools, answers them from the goal and the brief alone, and the owner hears how it ends. " +
 					"So the brief must hold everything Fridolin may tell them and agree to, and nothing else. " +
 					"The first errand with someone, and any errand the owner did not ask for in their own direct chat, waits for the owner's approval in a poll. " +
-					"Use it only when the owner asked for the person to be contacted.",
+					"Use it only when the owner asked for the person to be contacted. " + b.findContactAdvice(c),
 				InputSchema: tools.Schema(map[string]any{
 					"number":  map[string]any{"type": "string", "description": "Their phone number with the country code, e.g. +15551234567."},
 					"name":    map[string]any{"type": "string", "description": "How Fridolin calls them, e.g. their first name."},
@@ -85,6 +85,7 @@ func (b *App) registerErrandTools(r *tools.Set[mcpCaller]) {
 		},
 		Call: r.Guarded(skill.RiskWrite, b.callErrandStop),
 	})
+	b.registerFindContact(r, has)
 }
 
 func (b *App) callContactPerson(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {

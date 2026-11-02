@@ -15,8 +15,9 @@ import (
 // fileName are the secret files a move carries from the core's
 // credentials folder (sandbox.credentials_dir, under ~): the
 // Google OAuth web client, the dashboard's users, and each brain's
-// calendar client and token. Nothing else in that folder goes (#187).
-var fileName = regexp.MustCompile(`^(google_oauth_web_credentials|dashboard-users|google_calendar_(credentials|token)_[a-z0-9][a-z0-9_-]{0,63})\.json$`)
+// calendar client and token, and its Google Contacts token. Nothing else
+// in that folder goes (#187).
+var fileName = regexp.MustCompile(`^(google_oauth_web_credentials|dashboard-users|(google_calendar_(credentials|token)|google_contacts_token)_[a-z0-9][a-z0-9_-]{0,63})\.json$`)
 
 // LocalPrefix marks, in a move's files, a secret file of the data dir's
 // LocalDir rather than of the credentials folder: "local:gitlab.json".

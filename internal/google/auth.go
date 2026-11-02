@@ -94,6 +94,8 @@ type Endpoints struct {
 	Token   string
 	Revoke  string
 	APIBase string
+	// People is the People API's, for Google Contacts (contacts.go).
+	People string
 }
 
 func defaultGoogleEndpoints() Endpoints {
@@ -102,6 +104,7 @@ func defaultGoogleEndpoints() Endpoints {
 		Token:   "https://oauth2.googleapis.com/token",
 		Revoke:  "https://oauth2.googleapis.com/revoke",
 		APIBase: "https://www.googleapis.com",
+		People:  "https://people.googleapis.com",
 	}
 }
 
@@ -200,8 +203,11 @@ type Auth struct {
 	mu         sync.Mutex
 	pending    map[string]oauthPending  // state → sign-in in progress
 	lastError  map[string]string        // brain id → last sign-in error
-	tokenLocks map[string]chan struct{} // brain id → its token's lock; see lockToken
+	tokenLocks map[string]chan struct{} // brain id → its token's lock (contactsLock: its Contacts token's); see lockToken
 	health     map[string]grantRecord   // brain id → its grant's health, loaded on first use (health.go)
+	// contactsError is each brain's last Google Contacts sign-in error
+	// (contacts.go).
+	contactsError map[string]string
 }
 
 // New creates the manager, and logs the files in the credentials
@@ -220,11 +226,14 @@ func New(options Options) *Auth {
 	if options.Endpoints.APIBase == "" {
 		options.Endpoints.APIBase = defaults.APIBase
 	}
+	if options.Endpoints.People == "" {
+		options.Endpoints.People = defaults.People
+	}
 	if options.HTTP == nil {
 		options.HTTP = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	g := &Auth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
+	g := &Auth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}, contactsError: map[string]string{}}
 	if copies := g.leftoverClientCopies(); len(copies) > 0 {
 		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+
 			"each holding a client secret: %s. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: "+
@@ -241,18 +250,23 @@ func New(options Options) *Auth {
 // primary one (CalendarsOf). The lock is a channel of one, so that waiting
 // for it ends with ctx; unlock releases it.
 func (g *Auth) lockToken(ctx context.Context, brainID string) (unlock func(), err error) {
+	return g.lockFile(ctx, brainID, "brain "+brainID+"'s calendar token")
+}
+
+// lockFile takes the token lock named key, of the token file what names.
+func (g *Auth) lockFile(ctx context.Context, key, what string) (unlock func(), err error) {
 	g.mu.Lock()
-	l := g.tokenLocks[brainID]
+	l := g.tokenLocks[key]
 	if l == nil {
 		l = make(chan struct{}, 1)
-		g.tokenLocks[brainID] = l
+		g.tokenLocks[key] = l
 	}
 	g.mu.Unlock()
 	select {
 	case l <- struct{}{}:
 		return func() { <-l }, nil
 	case <-ctx.Done():
-		return nil, fmt.Errorf("waiting for brain %s's calendar token, which another request is using: %w", brainID, ctx.Err())
+		return nil, fmt.Errorf("waiting for %s, which another request is using: %w", what, ctx.Err())
 	}
 }
 
@@ -622,7 +636,7 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 	var revokeOld string
 	oldData, oldErr := readCredentialFile(g.TokenPath(p.brainID))
 	if old, err := g.loadToken(p.brainID); err == nil && old.RefreshToken != "" && old.Account != "" &&
-		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" {
+		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" && g.contactsSharing("", old) == "" {
 		revokeOld = old.RefreshToken
 	}
 	if err := g.saveToken(p.brainID, tok); err != nil {
@@ -836,7 +850,12 @@ func (g *Auth) loadToken(brainID string) (*Token, error) {
 // tool used added fields of its own (universe_domain), which Token
 // does not know.
 func (g *Auth) loadTokenFields(brainID string) (*Token, map[string]json.RawMessage, error) {
-	data, err := readCredentialFile(g.TokenPath(brainID))
+	return loadTokenFieldsAt(g.TokenPath(brainID))
+}
+
+// loadTokenFieldsAt is loadTokenFields of the token file at path.
+func loadTokenFieldsAt(path string) (*Token, map[string]json.RawMessage, error) {
+	data, err := readCredentialFile(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -873,7 +892,13 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 		return nil, err
 	}
 	defer unlock()
-	t, fields, err := g.loadTokenFields(brainID)
+	return g.freshToken(ctx, g.TokenPath(brainID), brainID, "calendar")
+}
+
+// freshToken is AccessToken's work on the token file at path, brainID's
+// token for kind (calendar, contacts). The caller holds the file's lock.
+func (g *Auth) freshToken(ctx context.Context, path, brainID, kind string) (*Token, error) {
+	t, fields, err := loadTokenFieldsAt(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, err // not connected
 	}
@@ -916,8 +941,8 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 	}
 	// The access token is good for this call either way; a token not saved
 	// is only refreshed again next time.
-	if err := writeTokenFields(g.TokenPath(brainID), fields, t); err != nil {
-		log.Printf("brain %s: saving the refreshed calendar token failed: %v", brainID, err)
+	if err := writeTokenFields(path, fields, t); err != nil {
+		log.Printf("brain %s: saving the refreshed %s token failed: %v", brainID, kind, err)
 	}
 	return t, nil
 }
@@ -1058,6 +1083,10 @@ func (g *Auth) Disconnect(ctx context.Context, brainID string, localOnly bool) (
 					"if nothing uses that file, delete it and remove the access at myaccount.google.com/permissions",
 					other, filepath.Base(g.TokenPath(other)))
 			}
+			break
+		}
+		if other := g.contactsSharing("", t); other != "" {
+			note = contactsSharingNote(other)
 			break
 		}
 		if err := g.revoke(ctx, t.RefreshToken); err != nil {
