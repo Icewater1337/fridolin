@@ -327,6 +327,21 @@ listed here because they decide what runs may do
 | `PUT /api/schedules/{brain}/{name}` | the agent's `brain.json` entry, written into `brain.json` and its approved copy, a new agent or in place of the one of that name; `422` for an entry the bridge refuses |
 | `DELETE /api/schedules/{brain}/{name}` | takes the agent out of `brain.json` (its history stays until it ages out) |
 
+## The errands' dashboard routes
+
+The Errands page ([BRAINS.md](BRAINS.md#errands)). Like the rest of
+`/api/`, these serve the dashboard (its token or session, and for writes
+its header and JSON) and are not a contract. Numbers are digits with the
+country code, as the Chats page shows `allowed_numbers`; `masked` is one
+as the audit log writes it (`+1…67`).
+
+| Route | What |
+| --- | --- |
+| `GET /api/errands` | `{"errands", "blocked"}`: every brain's errands, those that have not ended first, then the last 50 ended, newest first, each with `id`, `brain`, `name`, `number`, `masked`, `state` (`asking`, `open`, `done`, `aborted`, `declined`, `expired`, `stopped`), `live`, `sent`, `created`, `deadline`, `closed` and `outcome`; and the people Fridolin stopped listening to, with `number`, `masked`, `name`, `brain`, `reason` and `since`; ETag-cached |
+| `GET /api/errands/{id}` | one errand as listed, with its `goal`, `brief`, `by_owner`, `days`, `max_messages` and its conversation, `lines` (`from`: `you` for Fridolin, `them`, or `owner` for what `errand_answer` passed on; `text`; `at`); `404` for none; ETag-cached |
+| `POST /api/errands/{id}/stop` | ends an errand that has not ended without a word to the person, as `errand_stop` does; `404` for none, `409` for one that ended |
+| `POST /api/errand-contacts/{number}/unblock` | Fridolin hears the person again, and asks you before it writes to them, as `!unblock` does; an `errand` line in the audit log (`by` dashboard, `detail` unblock); `404` for a number nobody blocked, `422` for no number |
+
 ## Files and the wiki
 
 The Files and Wiki pages' routes (`/api/files/…`, `/api/wiki/…`) and

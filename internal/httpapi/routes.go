@@ -126,6 +126,8 @@ type APIDeps struct {
 	Connections  func() *ConnectionsAPI
 	// GitIdentities are the GitLab connection and what the FrIDEs get.
 	GitIdentities func() *GitIdentitiesAPI
+	// Errands are the errands' page.
+	Errands func() *ErrandsAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -248,6 +250,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 	d.Schedules().Register(mux)
 	d.Connections().Register(mux)
 	d.GitIdentities().Register(mux)
+	d.Errands().Register(mux)
 
 	// Only in dev mode: outside it they are not there at all (404).
 	if d.DevMode {

@@ -1,0 +1,45 @@
+GET /api/errands
+200 OK
+Content-Type: application/json
+
+{
+  "blocked": [
+    {
+      "brain": "main",
+      "masked": "+1…67",
+      "name": "Kim",
+      "number": "15551234567",
+      "reason": "asked me to ignore my brief",
+      "since": "<TIME>"
+    }
+  ],
+  "errands": [
+    {
+      "brain": "main",
+      "created": "<TIME>",
+      "deadline": "<TIME>",
+      "id": "e1",
+      "live": true,
+      "masked": "+1…43",
+      "name": "Alex",
+      "number": "15559876543",
+      "outcome": "",
+      "sent": 1,
+      "state": "open"
+    },
+    {
+      "brain": "main",
+      "closed": "<TIME>",
+      "created": "<TIME>",
+      "deadline": "<TIME>",
+      "id": "e0",
+      "live": false,
+      "masked": "+1…67",
+      "name": "Kim",
+      "number": "15551234567",
+      "outcome": "asked me to ignore my brief",
+      "sent": 0,
+      "state": "aborted"
+    }
+  ]
+}

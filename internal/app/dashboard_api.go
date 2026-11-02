@@ -376,5 +376,6 @@ func (b *App) apiMux() http.Handler {
 		Schedules:     b.newSchedulesAPI,
 		Connections:   b.newConnectionsAPI,
 		GitIdentities: b.newGitIdentitiesAPI,
+		Errands:       b.newErrandsAPI,
 	})
 }

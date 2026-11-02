@@ -459,6 +459,11 @@ The brain's tools:
 | `errand_answer(id, text)` | Passes on what you said to an open errand. Only in a run that answers your own message in your direct chat. A write action. |
 | `errand_stop(id)` | Ends an errand without a word to them. A write action. |
 
+The dashboard's **Errands** page lists every errand, those that have not
+ended first, with its conversation (what they wrote is shown as text
+only), a **Stop** for one that has not ended (as `errand_stop`), and the
+people Fridolin stopped listening to, with **Unblock** (as `!unblock`).
+
 The conversations are in bridge.db (`errands`, `errand_lines`,
 `errand_contacts`), never in a brain's folder or history. The audit log
 has one `errand` line for each step (asked, opened, sent, answered,

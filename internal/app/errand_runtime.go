@@ -745,11 +745,16 @@ func (b *App) answerErrand(ctx context.Context, brain, id, text string) error {
 
 // stopErrand ends errand id of brain without a word to the person.
 func (b *App) stopErrand(ctx context.Context, brain, id string) error {
+	return b.stopErrandFor(ctx, brain, id, "the brain ended it")
+}
+
+// stopErrandFor is stopErrand with why, the errand's outcome.
+func (b *App) stopErrandFor(ctx context.Context, brain, id, why string) error {
 	e, err := b.store.GetErrand(ctx, id)
 	if err != nil || e.Brain != brain {
 		return fmt.Errorf("no errand %s of this brain", id)
 	}
-	ended, err := b.store.EndErrand(ctx, e.ID, store.ErrandStopped, "the brain ended it", time.Now())
+	ended, err := b.store.EndErrand(ctx, e.ID, store.ErrandStopped, why, time.Now())
 	if err != nil {
 		return err
 	}

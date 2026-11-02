@@ -328,6 +328,18 @@ blockquote.preview {
 .approval-action { font-weight: 600; }
 .skill-card { display: flex; flex-direction: column; gap: 10px; }
 
+/* ── errands ────────────────────────────────────────────────────────────── */
+
+/* An errand's conversation: Fridolin's lines (and yours, passed on) on one
+   side, the person's on the other, as in a chat. */
+.errand-lines { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+.errand-line { max-width: 88%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); }
+.errand-line.you { align-self: flex-end; background: var(--accent-soft); border-color: transparent; }
+.errand-line.owner { align-self: flex-end; background: var(--info-soft); border-color: transparent; }
+.errand-line.them { align-self: flex-start; }
+.errand-line-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.errand-line-meta { margin-top: 4px; font-size: 11.5px; color: var(--muted); }
+
 /* ── FrIDE ─────────────────────────────────────────────────────────────── */
 
 .fride-news-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
