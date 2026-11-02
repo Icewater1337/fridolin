@@ -1,6 +1,7 @@
 // Google Calendar: the one-time OAuth client setup, a step-by-step guide
-// through Google Cloud Console (Settings), and the per-brain "Connect
-// Google Calendar" card (brain page).
+// through Google Cloud Console (Settings), the per-brain "Connect Google
+// Calendar" card, and the core brain's "Connect Google Contacts" card
+// (brain page).
 
 import { get, post, put, del, errorStatus } from '../app/api.js';
 import { h, mount } from '../lib/dom.js';
@@ -12,7 +13,7 @@ import { nextId } from './fields.js';
 import { tabs } from './tabs.js';
 import { pill, callout, mono, loading, timeAgo, kv } from './common.js';
 import { errorMessage } from '../lib/errors.js';
-/** @import { GoogleClientCheck, GrantHealth, CalendarStatus, CalendarEntry } from '../../types/api.js' */
+/** @import { GoogleClientCheck, GrantHealth, CalendarStatus, CalendarEntry, ContactsStatus } from '../../types/api.js' */
 
 const CONSOLE = 'https://console.cloud.google.com';
 const CALENDAR_API = 'calendar-json.googleapis.com';
@@ -552,3 +553,108 @@ export function calendarCard(brainId, { signal } = {}) {
   return Object.assign(el, { refresh });
 }
 
+
+const PEOPLE_API = 'people.googleapis.com';
+
+/**
+ * Brain page card of the core brain's Google Contacts, which find_contact
+ * reads for its errands: the one-time steps in Google Cloud Console,
+ * connect, check, disconnect. A sign-in of its own, apart from the
+ * calendar's. signal is the page's. el.refresh() checks again.
+ * @param {string} brainId
+ * @param {{signal?: AbortSignal}} [options]
+ */
+export function contactsCard(brainId, { signal } = {}) {
+  const el = h('div.card', loading('Checking Google Contacts…'));
+  const url = `/api/brains/${encodeURIComponent(brainId)}/contacts`;
+  // The paste box for a sign-in from another machine; it stays while the
+  // card repaints.
+  const returnBox = h('div');
+  /** @param {...any} children */
+  const show = (...children) => mount(el, ...children, returnBox);
+  /** @param {HTMLElement} state the pill */
+  const head = (state) => h('div.card-head', h('div.card-title', icon('users'), h('h3', 'Google Contacts')), state);
+
+  async function refresh() {
+    /** @type {ContactsStatus} */
+    const s = await get(`${url}?check=1`, { signal });
+    render(s);
+  }
+
+  function connectButton(label = 'Connect Google Contacts') {
+    return btn(label, {
+      kind: 'primary', icon: 'external',
+      onClick: async () => {
+        const r = await post(`${url}/connect`);
+        if (onThisMachine()) {
+          window.location.assign(r.auth_url);
+          return;
+        }
+        window.open(r.auth_url, '_blank', 'noopener');
+        mount(returnBox, pasteReturnBox({ onDone: async () => { mount(returnBox); await refresh(); } }));
+      },
+    });
+  }
+
+  /** @param {string} scope */
+  const setupSteps = (scope) => h('details.details',
+    h('summary', 'Once, in Google Cloud Console, before the first sign-in'),
+    h('ol.steps-list.small',
+      h('li', ext(consoleLink('/flows/enableapi', '', { apiid: PEOPLE_API }), 'Enable the People API'), ' in the project of the bridge’s Google client (Settings → Google sign-in).'),
+      h('li', ext(consoleLink('/auth/scopes', ''), 'Data access'), ' → Add or remove scopes → paste this into “Manually add scopes”, Add to table, Update, Save: ', mono(scope, { copy: true })),
+      h('li', 'Then connect here. Google asks for read access to the account’s contacts, and nothing else.')));
+
+  /** @param {ContactsStatus} s */
+  function render(s) {
+    const errBox = s.last_error ? callout('bad', 'Sign-in did not finish', s.last_error) : null;
+    if (!s.client_configured && !s.connected) {
+      show(head(pill('Not set up', 'neutral')),
+        h('p.muted', 'The bridge needs a Google OAuth client first: ', h('a', { href: '#/settings/google' }, 'Settings → Google sign-in'), '.'));
+      return;
+    }
+    if (!s.connected) {
+      show(head(pill('Not connected', 'neutral')),
+        errBox,
+        h('p.muted', 'Lets this brain look people up by name for its errands (find_contact): their phone numbers, and whether each is on WhatsApp. It reads the contacts when it looks someone up, and keeps nothing.'),
+        setupSteps(s.scope),
+        h('div.actions', connectButton()));
+      return;
+    }
+    const disconnectBtn = btn('Disconnect', {
+      kind: 'danger', icon: 'x', small: true,
+      onClick: async () => {
+        const ok = await confirmDialog({
+          title: 'Disconnect Google Contacts?',
+          message: 'The bridge deletes this brain’s contacts token and revokes the access at Google, unless another sign-in of the same Google client may share it (a calendar’s, say), which would lose its access too. The contacts themselves are not touched.',
+          confirm: 'Disconnect', danger: true,
+        });
+        if (!ok) return;
+        let r;
+        try {
+          r = await del(url);
+        } catch (e) {
+          if (errorStatus(e) !== 502) throw e;
+          const anyway = await confirmDialog({
+            title: 'Google did not revoke the access',
+            message: h('div', h('p', errorMessage(e)), h('p', 'Delete the token here anyway? The access then stays at Google until you remove it at myaccount.google.com/permissions.')),
+            confirm: 'Delete the token', danger: true,
+          });
+          if (!anyway) return;
+          r = await del(`${url}?local_only=1`);
+        }
+        if (r && r.note) toast(`Disconnected; ${r.note}`, 'info');
+        await refresh();
+      },
+    });
+    const works = s.works !== false;
+    show(head(works ? pill('Working', 'ok') : pill('Not working', 'bad')),
+      errBox,
+      works ? null : callout('bad', 'Google did not answer a search', s.check_error || '', h('div.actions', connectButton('Reconnect'))),
+      works ? null : setupSteps(s.scope),
+      h('p.muted.small', 'find_contact reads the account’s contacts through the bridge, which keeps nothing of them; the brain cannot read the token. Token: ', mono(s.token_path)),
+      h('div.actions', connectButton('Switch account'), disconnectBtn));
+  }
+
+  refresh().catch(failed(signal, (e) => mount(el, callout('bad', 'Could not check Google Contacts', errorMessage(e)))));
+  return Object.assign(el, { refresh });
+}

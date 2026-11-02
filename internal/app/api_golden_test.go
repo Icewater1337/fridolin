@@ -191,6 +191,8 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"calendar-health", "/api/calendar/health", nil},
 		{"calendar", "/api/brains/main/calendar?list=0", nil},
 		{"calendar-unknown-brain", "/api/brains/nope/calendar", nil},
+		{"contacts", "/api/brains/main/contacts", nil},
+		{"contacts-unknown-brain", "/api/brains/nope/contacts", nil},
 		{"plaud-status", "/api/plaud/status", nil},
 		{"github", "/api/github", nil},
 		// Which of node, cloudflared and gh this machine has, and whether

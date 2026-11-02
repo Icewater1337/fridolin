@@ -17,6 +17,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 		"dashboard-users.json":                  `[]`,
 		"google_calendar_token_personal.json":   `{"t":"x"}`,
 		"google_calendar_credentials_team.json": `{"installed":{}}`,
+		"google_contacts_token_core.json":       `{"t":"y"}`,
 		"restore.sh":                            "#!/bin/sh\n", // not a secret file
 		"git-crypt-backup.key":                  "k",
 	} {
@@ -37,7 +38,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 		names = append(names, n)
 	}
 	slices.Sort(names)
-	want := []string{"dashboard-users.json", "google_calendar_credentials_team.json", "google_calendar_token_personal.json", "google_oauth_web_credentials.json"}
+	want := []string{"dashboard-users.json", "google_calendar_credentials_team.json", "google_calendar_token_personal.json", "google_contacts_token_core.json", "google_oauth_web_credentials.json"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("read %q", names)
 	}
@@ -67,7 +68,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(kept, []string{"dashboard-users.json"}) || len(stored) != 3 {
+	if !slices.Equal(kept, []string{"dashboard-users.json"}) || len(stored) != 4 {
 		t.Fatalf("stored %q kept %q", stored, kept)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dst, "dashboard-users.json")); string(b) != `["mine"]` {

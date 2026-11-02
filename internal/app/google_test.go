@@ -36,7 +36,7 @@ var fakeGoogle = testutil.FakeGoogle
 // googleTestOptions supplies a private HTTP client and endpoints for a fake
 // service, keeping the real authorization URL unless a test overrides it.
 func googleTestOptions(options google.Options, srv *httptest.Server) google.Options {
-	options.Endpoints = google.Endpoints{Token: srv.URL + "/token", Revoke: srv.URL + "/revoke", APIBase: srv.URL}
+	options.Endpoints = google.Endpoints{Token: srv.URL + "/token", Revoke: srv.URL + "/revoke", APIBase: srv.URL, People: srv.URL}
 	client := *srv.Client()
 	client.Timeout = 20 * time.Second
 	options.HTTP = &client

@@ -8,6 +8,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/errand"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 )
 
@@ -147,4 +148,7 @@ type testHooks struct {
 	// errandRun answers an errand's run in place of the model: tests
 	// hand in what it says.
 	errandRun func(errand.Errand) (string, error)
+	// google changes the Google sign-in's options before the bridge makes
+	// it: tests point it at a fake Google.
+	google func(google.Options) google.Options
 }
