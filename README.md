@@ -387,6 +387,7 @@ writes there is not read.
 | `!dashboard` | Owner only, direct chat: a dashboard sign-in link that works once within 10 minutes, at the core's tailnet address and on the core machine, so another device signs in without the token. 5 an hour, audited |
 | `!approve`, `!deny` | Owner only, direct chat: approve, or turn down, what waits for you: a node, a brain's scheduled agent, changed brain.json or skill, a run's request. The bridge tells you of each in plain words; with several waiting a multi-select poll approves each one you tick, and one you did not start asks for a second `!approve` ([NODES.md](docs/NODES.md#approving-from-whatsapp)). `!approve <ref>` names one. `!approved`, `!denied` and `!revoked` mean the same. Audited |
 | `!revoke <ref>` | Owner only, direct chat: shut a node out, approved or not, named by its ref or its name. Audited |
+| `!unblock <number>` | Owner only, direct chat: let Fridolin hear someone again whom it stopped listening to in an [errand](docs/BRAINS.md#errands); writing to them again asks you first. Audited |
 | `!lockdown` | Owner only (a number in `allowed_numbers`): pause all work but reading, everywhere, until `!unlock` or the dashboard's *Unlock* ([BRAINS.md](docs/BRAINS.md#skills-risk-and-approvals)) |
 | `!unlock` | Owner only: end a lockdown |
 
@@ -563,6 +564,18 @@ sync: the Android app in [plaud-android/](plaud-android/README.md) pulls
 each recording off the pin as it stops and uploads its transcript through
 your site; the Plaud card builds and pairs it. See [docs/PLAUD.md](docs/PLAUD.md).
 
+### Errands: writing to people for you
+
+Ask the core brain to contact someone ("ask Alex when dinner suits
+them") and Fridolin writes to them from its own number, as your
+assistant, and carries the conversation until it comes to an end. The
+first message to someone waits for your yes. Their answers go to a run
+of its own with no tools, which knows only the errand's goal and what
+you allowed it to say; what that does not cover comes back to you, and
+someone who tries to turn it against you is cut off. Off until the core
+brain's brain.json sets `errands`. See
+[docs/BRAINS.md](docs/BRAINS.md#errands).
+
 ### OpenAI and ElevenLabs
 
 Dashboard → *Integrations → OpenAI* and *ElevenLabs* keep one key each.
@@ -696,6 +709,14 @@ What the bridge does about it:
   quotes or forwards it. A member WhatsApp names only by an internal ID,
   without their number, gets in only where everyone does
   ([details](docs/CONFIGURATION.md#group_members)).
+- **Errands talk to strangers through a run with no tools.** When the
+  core brain has Fridolin write to someone who is not in
+  `allowed_numbers` ([errands](docs/BRAINS.md#errands)), their answers
+  never reach a brain: a run with no tools, which knows only the
+  errand's goal and brief, answers them, and the bridge sends what it
+  writes to that person only. The first message to anyone waits for your
+  approval, and someone who tries to make it misbehave is cut off until
+  your `!unblock`.
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
   nothing the assistant writes can end up in your public Status.

@@ -104,6 +104,13 @@ Listing the voices only reads.
 A brain whose data must not leave the machine keeps transcribing with the
 local model of `tools/transcribe.py`: leave it out of `brains`.
 
+In Codex mode, the core brain's [errands](BRAINS.md#errands) run through
+the OpenAI connection too: each answer to the person an errand writes to
+is a `responses` call with no tools, made by the bridge, counted against
+the brain's `brain_monthly_usd` (caller `brain:<id>`, run
+`errand:<errand id>`), whether or not `brains` lists the brain. Without
+a key, errands are refused in Codex mode.
+
 ## Operations and limits
 
 | Connection | Operation | What it calls | Limits |

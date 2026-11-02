@@ -98,6 +98,48 @@ type Manifest struct {
 	// starts and ended with it (chat.GitHubGrant), as a scheduled agent's
 	// github does for its runs. nil gives them none.
 	GitHub *chat.GitHubGrant `json:"github,omitempty"`
+	// Errands lets the core brain have Fridolin write to people who are
+	// not in allowed_numbers and carry the conversation with them
+	// (docs/BRAINS.md, "Errands"); nil, the default, does not.
+	Errands *Errands `json:"errands,omitempty"`
+}
+
+// Errands is brain.json's "errands": how Fridolin introduces itself when
+// it writes to someone for the core brain.
+type Errands struct {
+	// OwnerName is how Fridolin names the owner to the people it writes
+	// to, and to its errands' runs.
+	OwnerName string `json:"owner_name"`
+	// Intro opens Fridolin's first message to someone, as the bridge
+	// sends it; "" is "Hi, this is Fridolin, <owner_name>'s assistant."
+	Intro string `json:"intro,omitempty"`
+	// Model is the OpenAI model of the errands' runs in Codex mode; ""
+	// is gpt-5. In Claude mode they run on the brain's model.
+	Model string `json:"model,omitempty"`
+}
+
+// The limits of brain.json's errands.
+const (
+	MaxErrandOwnerName = 60
+	MaxErrandIntro     = 300
+)
+
+var errandModelRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`)
+
+// ValidateErrands checks brain.json's errands.
+func ValidateErrands(e Errands) error {
+	name := strings.TrimSpace(e.OwnerName)
+	switch {
+	case name == "":
+		return errors.New("errands.owner_name is how Fridolin names you to the people it writes to: set it")
+	case len([]rune(name)) > MaxErrandOwnerName || strings.ContainsAny(name, "\r\n"):
+		return fmt.Errorf("errands.owner_name must be one line of at most %d characters", MaxErrandOwnerName)
+	case len([]rune(e.Intro)) > MaxErrandIntro:
+		return fmt.Errorf("errands.intro must be at most %d characters", MaxErrandIntro)
+	case e.Model != "" && !errandModelRe.MatchString(e.Model):
+		return fmt.Errorf("errands.model %q is not a model name", e.Model)
+	}
+	return nil
 }
 
 // Files is brain.json's "files": the folders that take uploads from site
@@ -449,6 +491,11 @@ func (m *Manifest) Validate() error {
 				return fmt.Errorf("brain %q: files.uploads lists %q twice", m.ID, u.Folder)
 			}
 			seen[u.Folder] = true
+		}
+	}
+	if m.Errands != nil {
+		if err := ValidateErrands(*m.Errands); err != nil {
+			return fmt.Errorf("brain %q: %w", m.ID, err)
 		}
 	}
 	if m.GitHub != nil {

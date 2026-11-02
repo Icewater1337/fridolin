@@ -633,6 +633,12 @@ func (b *App) deliverAnswer(a store.Approval) {
 		go b.coreSecretsDecided(a)
 		return
 	}
+	// An errand's first message goes out on the outbox, which may wait:
+	// not on the goroutine that brought the vote either.
+	if a.Notify == errandNotify {
+		go b.errandDecided(a)
+		return
+	}
 	br := b.brainMgr.Get(a.Notify)
 	if br == nil || a.Chat == "" {
 		log.Printf("approval %s: the answer came once its run was over, and brain %s is not there to hear it", a.ID, a.Notify)
