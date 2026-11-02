@@ -1,0 +1,34 @@
+GET /api/errands/e1
+200 OK
+Content-Type: application/json
+
+{
+  "brain": "main",
+  "brief": "Sam is free on Tuesday and Thursday evenings.",
+  "by_owner": true,
+  "created": "<TIME>",
+  "days": 3,
+  "deadline": "<TIME>",
+  "goal": "Find an evening for dinner next week",
+  "id": "e1",
+  "lines": [
+    {
+      "at": "<TIME>",
+      "from": "you",
+      "text": "Hi, this is Fridolin, Sam's assistant.\n\nWhen would dinner next week suit you?"
+    },
+    {
+      "at": "<TIME>",
+      "from": "them",
+      "text": "<b>Thursday</b>?"
+    }
+  ],
+  "live": true,
+  "masked": "+1…43",
+  "max_messages": 20,
+  "name": "Alex",
+  "number": "15559876543",
+  "outcome": "",
+  "sent": 1,
+  "state": "open"
+}

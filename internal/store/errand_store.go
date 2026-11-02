@@ -296,3 +296,30 @@ func (s *Store) ForgetErrandContact(ctx context.Context, contact string) (bool, 
 	n, _ := res.RowsAffected()
 	return n == 1, nil
 }
+
+// AllErrands lists every brain's errands, newest first: those that have
+// not ended, then the last ended of the others, for the dashboard.
+func (s *Store) AllErrands(ctx context.Context, ended int) ([]Errand, error) {
+	// One statement, so that an errand that ends meanwhile is listed once.
+	return s.queryErrands(ctx, `WHERE state IN (?, ?) OR id IN (SELECT id FROM errands WHERE state NOT IN (?, ?) ORDER BY created_at DESC LIMIT ?)
+		ORDER BY state IN (?, ?) DESC, created_at DESC`, ErrandAsking, ErrandOpen, ErrandAsking, ErrandOpen, ended, ErrandAsking, ErrandOpen)
+}
+
+// BlockedErrandContacts lists the people the errands stopped listening
+// to, the latest first.
+func (s *Store) BlockedErrandContacts(ctx context.Context) ([]ErrandContact, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT contact, lid, name, brain, state, reason, updated_at FROM errand_contacts WHERE state = ? ORDER BY updated_at DESC, contact`, ContactBlocked)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ErrandContact
+	for rows.Next() {
+		var c ErrandContact
+		if err := rows.Scan(&c.Contact, &c.LID, &c.Name, &c.Brain, &c.State, &c.Reason, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

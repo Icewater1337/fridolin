@@ -36,6 +36,13 @@ for compatibility.
   told, and they are ignored until `!unblock <number>`. Every step is an
   `errand` line in the audit log. Off unless you set it.
   [docs/BRAINS.md](docs/BRAINS.md#errands)
+- **The Errands page.** The dashboard lists every errand, those that
+  have not ended first, then the last 50, with its state, and opens each
+  with its goal, brief and conversation (their words shown as text
+  only). **Stop** ends one as the brain's `errand_stop` does; the people
+  Fridolin stopped listening to are listed with **Unblock**, which does
+  what `!unblock` does and is audited the same way.
+  [docs/API.md](docs/API.md#the-errands-dashboard-routes)
 - **Ops tools for the core brain.** Its runs that answer you, and those
   of its own scheduled agents (a maintenance agent, say), get
   `system_status` (one compact JSON snapshot: both lanes of every brain,

@@ -1080,6 +1080,63 @@ export interface Approvals {
   history: Approval[];
 }
 
+/** One errand of GET /api/errands (docs/BRAINS.md, Errands). */
+export interface ErrandView {
+  id: string;
+  brain: string;
+  /** What the brain called the person. */
+  name: string;
+  /** Their number, digits with the country code. */
+  number: string;
+  /** It as the audit log writes it: "+1…67". */
+  masked: string;
+  /** asking, open, done, aborted, declined, expired or stopped. */
+  state: string;
+  /** asking or open. */
+  live: boolean;
+  /** Fridolin's messages so far. */
+  sent: number;
+  created: string;
+  deadline: string;
+  closed?: string;
+  /** The summary, or why it ended. */
+  outcome: string;
+}
+
+/** Someone the errands stopped listening to, until the owner unblocks them. */
+export interface BlockedContact {
+  number: string;
+  masked: string;
+  name: string;
+  brain: string;
+  reason: string;
+  since: string;
+}
+
+/** GET /api/errands: live errands first, then the last 50 ended, newest first. */
+export interface Errands {
+  errands: ErrandView[];
+  blocked: BlockedContact[];
+}
+
+/** One message of an errand: from you (Fridolin), them (the person, untrusted) or owner. */
+export interface ErrandLine {
+  from: string;
+  text: string;
+  at: string;
+}
+
+/** GET /api/errands/{id}. */
+export interface ErrandDetail extends ErrandView {
+  goal: string;
+  brief: string;
+  /** The owner asked for it in their own chat. */
+  by_owner: boolean;
+  days: number;
+  max_messages: number;
+  lines: ErrandLine[];
+}
+
 /** GET /api/policy. */
 export interface PolicyStatus {
   lockdown: boolean;
@@ -2722,6 +2779,7 @@ export interface ApiGet {
   '/api/git-identities': GitIdentities;
   '/api/audit': AuditEntry[];
   '/api/approvals': Approvals;
+  '/api/errands': Errands;
   '/api/policy': PolicyStatus;
   '/api/backup/status': BackupStatus;
   '/api/vault/status': VaultStatus;
@@ -2767,6 +2825,7 @@ export type GetResponse<P extends string> =
   P extends `/api/brains/${string}/contacts` ? ContactsStatus :
   P extends `/api/brains/${string}/backup/versions` ? BackupVersions :
   P extends `/api/brains/${string}` ? Brain :
+  P extends `/api/errands/${string}` ? ErrandDetail :
   P extends `/api/schedules/preview${string}` ? SchedulePreview :
   P extends `/api/schedules/${string}/runs/${string}/log` ? ScheduleRunLog :
   P extends `/api/schedules/${string}/runs` ? ScheduleRun[] :

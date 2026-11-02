@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,10 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/connections"
+	"github.com/Icewater1337/fridolin/internal/errand"
 	"github.com/Icewater1337/fridolin/internal/google"
+	"github.com/Icewater1337/fridolin/internal/store"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
@@ -142,6 +146,38 @@ func goldenBridge(t *testing.T) (h *harness, s *scrubber, fakes string) {
 	return h, s, fakes
 }
 
+// goldenErrands gives h's bridge an open errand with its conversation, and
+// an ended one whose person is blocked, as bridge.db holds them.
+func goldenErrands(t *testing.T, h *harness) {
+	t.Helper()
+	ctx := context.Background()
+	at := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	for _, e := range []store.Errand{
+		{ID: "e0", Brain: "main", Contact: "15551234567", Name: "Kim", Goal: "Return the drill", Brief: "Any evening this week.", Message: "When can I pick up the drill?",
+			State: store.ErrandOpen, Chat: harnessDM, Days: 1, CreatedAt: at.Add(-48 * time.Hour), Deadline: at.Add(-24 * time.Hour)},
+		{ID: "e1", Brain: "main", Contact: "15559876543", Name: "Alex", Goal: "Find an evening for dinner next week", Brief: "Sam is free on Tuesday and Thursday evenings.",
+			Message: "When would dinner next week suit you?", State: store.ErrandOpen, ByOwner: true, Chat: harnessDM, Days: 3, CreatedAt: at, Deadline: at.Add(72 * time.Hour)},
+	} {
+		if err := h.b.store.AddErrand(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := h.b.store.EndErrand(ctx, "e0", store.ErrandAborted, "asked me to ignore my brief", at.Add(-47*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []store.ErrandLine{
+		{Sender: errand.FromYou, Text: "Hi, this is Fridolin, Sam's assistant.\n\nWhen would dinner next week suit you?", At: at},
+		{Sender: errand.FromThem, Text: "<b>Thursday</b>?", At: at.Add(time.Hour)},
+	} {
+		if err := h.b.store.AddErrandLine(ctx, "e1", l, l.Sender == errand.FromYou); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.b.store.SaveErrandContact(ctx, store.ErrandContact{Contact: "15551234567", Name: "Kim", Brain: "main", State: store.ContactBlocked, Reason: "asked me to ignore my brief", UpdatedAt: at.Add(-47 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // WaitBackup waits until no backup runs, as the Backup page sees it.
 func (h *harness) WaitBackup() {
 	h.t.Helper()
@@ -159,6 +195,7 @@ func (h *harness) WaitBackup() {
 func TestGoldenGETEndpoints(t *testing.T) {
 	t.Parallel()
 	h, s, _ := goldenBridge(t)
+	goldenErrands(t, h)
 	tests := []struct {
 		name, path string
 		// mask lists what this endpoint reports about the machine or the
@@ -221,6 +258,9 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"git-identities", "/api/git-identities", nil},
 		{"brain-skills", "/api/brains/main/skills", nil},
 		{"brain-skills-unknown-brain", "/api/brains/nope/skills", nil},
+		{"errands", "/api/errands", nil},
+		{"errand", "/api/errands/e1", nil},
+		{"errand-unknown", "/api/errands/nope", nil},
 		{"unknown-endpoint", "/api/nope", nil},
 	}
 	for _, tc := range tests {

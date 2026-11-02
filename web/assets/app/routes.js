@@ -18,6 +18,7 @@ export const ROUTES = [
   { id: 'threads', path: 'threads', nav: { label: 'Threads', icon: 'clock' }, load: () => import('../pages/threads.js') },
   { id: 'schedules', path: 'schedules/:brain?/:name?/:run?', nav: { label: 'Schedules', icon: 'event' }, load: () => import('../pages/schedules.js') },
   { id: 'approvals', path: 'approvals', nav: { label: 'Approvals', icon: 'shield' }, load: () => import('../pages/approvals.js') },
+  { id: 'errands', path: 'errands/:id?', nav: { label: 'Errands', icon: 'send' }, load: () => import('../pages/errands.js') },
   { id: 'audit', path: 'audit/:run?', nav: { label: 'Audit', icon: 'lock' }, load: () => import('../pages/audit.js') },
   { id: 'settings', path: 'settings/:section?', nav: { label: 'Settings', icon: 'settings' }, load: () => import('../pages/settings.js') },
   { id: 'fride', path: 'fride/:thread?', nav: { label: 'FrIDE', icon: 'git' }, load: () => import('../pages/fride.js') },
