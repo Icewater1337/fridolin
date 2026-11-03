@@ -15,6 +15,7 @@ The Mend Renovate GitHub app runs Renovate on this repository with
 | Actions, pinned by SHA | `.github/workflows/*.yml` |
 | The Python tools | `tools/requirements*.txt` |
 | The site's npm packages | `site/package.json`, `site/template/package.json` |
+| The core image's npm CLIs (Claude Code, Codex, the Plaud CLI) | `container/npm/package.json`, with every package beneath them in `package-lock.json` |
 | Base images | `container/Dockerfile`, `container/fride/Dockerfile` |
 | Versions pinned by hand | the `ARG …_VERSION` lines of the Dockerfiles and `…_VERSION :=` of the Makefile, each under a `# renovate: datasource=… depName=…` comment |
 | The Plaud phone app | `plaud-android/` (Gradle) |
