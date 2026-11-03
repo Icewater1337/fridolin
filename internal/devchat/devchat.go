@@ -21,7 +21,7 @@ type Messenger struct {
 	chunk  func(string) []string
 	mu     sync.Mutex
 	outbox []Message
-	polls  atomic.Int64
+	ids    atomic.Int64 // numbers the ids of polls and notices
 }
 
 // New takes the current chunking policy. Each SendChunked call
@@ -34,7 +34,8 @@ type Message struct {
 	JID  string    `json:"jid"`
 	Text string    `json:"text"`
 	Poll []string  `json:"poll,omitempty"`
-	// ID is a poll's message id, which a vote names (POST /api/dev/vote).
+	// ID is a poll's message id, which a vote names (POST /api/dev/vote),
+	// or a notice's (SendMessageWithID), which a reply may quote.
 	ID string `json:"id,omitempty"`
 }
 
@@ -75,10 +76,21 @@ func (d *Messenger) SendChunked(ctx context.Context, jid, text string) error {
 	return nil
 }
 
+// SendMessageWithID shows text in the dev chat with an id of its own,
+// which sending has first.
+func (d *Messenger) SendMessageWithID(_ context.Context, jid, text string, sending func(id string)) error {
+	id := fmt.Sprintf("dev-msg-%d-%d", time.Now().UnixNano(), d.ids.Add(1))
+	if sending != nil {
+		sending(id)
+	}
+	d.record(Message{JID: jid, Text: text, ID: id})
+	return nil
+}
+
 // SendPoll shows the poll in the dev chat, where it can be voted on at
 // once: sending has its id first.
 func (d *Messenger) SendPoll(_ context.Context, jid, q string, opts []string, _ int, sending func(id string)) (string, error) {
-	id := fmt.Sprintf("dev-poll-%d-%d", time.Now().UnixNano(), d.polls.Add(1))
+	id := fmt.Sprintf("dev-poll-%d-%d", time.Now().UnixNano(), d.ids.Add(1))
 	if sending != nil {
 		sending(id)
 	}

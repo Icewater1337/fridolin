@@ -744,13 +744,20 @@ func (b *App) recordIgnored(kind, jid, name, sender, pushName string) {
 // allowed_numbers. Group messages without the trigger arrive Silent, and go
 // on to their brain like the rest: it keeps them in its history. Once the
 // bridge stops, a message is kept for the next start instead: no command
-// runs and no notice goes out (see intake).
+// runs and no notice goes out (see intake). A reply quoting a notice that
+// carries an errand's person's words shows the notice's history version,
+// and the owner's reply to an errand's question goes to the errand
+// without a run (readQuote).
 func (b *App) handleInbound(ctx context.Context, m brainruntime.Inbound) {
 	if !b.intake.Enter() {
 		b.keepLate(m)
 		return
 	}
 	defer b.intake.Leave()
+	m, answered := b.readQuote(ctx, m)
+	if answered {
+		return
+	}
 	b.pipeline.Handle(ctx, m)
 }
 

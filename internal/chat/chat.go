@@ -149,6 +149,9 @@ func (m Inbound) HandedIn() bool {
 
 // Quote is the message a reply quotes.
 type Quote struct {
+	// ID is the quoted message's WhatsApp id: a notice of the bridge's
+	// is known by it (store.Note).
+	ID   string
 	From string // phone number (or LID) of whoever wrote it
 	Text string // its text, shortened
 }
