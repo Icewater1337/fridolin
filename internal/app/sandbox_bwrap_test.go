@@ -94,7 +94,7 @@ func TestBwrapArgsKeepTheDataDirOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(got, "\n")
-	for _, want := range []string{"--unshare-user", "--unshare-pid", "--die-with-parent", "--new-session"} {
+	for _, want := range []string{"--unshare-user", "--disable-userns", "--unshare-pid", "--die-with-parent", "--new-session"} {
 		if !slices.Contains(lines, want) {
 			t.Errorf("no %s in\n%s", want, got)
 		}
