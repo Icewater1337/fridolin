@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,5 +72,30 @@ func TestMirrorUploadsChangesAndBatchesDeletes(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(out, "bridge.db/ltx/1/d.ltx")); string(b) != "dd" {
 		t.Errorf("fetched %q", b)
+	}
+}
+
+func TestMirrorNeverEmptiesStoreFromAnEmptyDir(t *testing.T) {
+	ctx := context.Background()
+	key, _ := seal.NewKey()
+	store, _ := newSealedDir(t, key)
+	for _, k := range []string{"bridge.db/0000.ltx", "vault.db/0000.ltx"} {
+		if err := store.Put(ctx, k, strings.NewReader("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := filepath.Join(t.TempDir(), "missing")
+	m := &Mirror{Dir: dir, Store: store, DeleteEvery: 6 * time.Hour}
+	if st, err := m.Sync(ctx, time.Now()); err == nil || st.Deleted != 0 {
+		t.Fatalf("missing dir: %+v %v, want an error and no deletes", st, err)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := m.Sync(ctx, time.Now()); err != nil || st.Deleted != 0 {
+		t.Fatalf("empty dir: %+v %v, want no deletes", st, err)
+	}
+	if objs, err := store.List(ctx, ""); err != nil || len(objs) != 2 {
+		t.Fatalf("store has %d objects (%v), want 2", len(objs), err)
 	}
 }
