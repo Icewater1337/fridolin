@@ -376,7 +376,9 @@ brain's brain.json turns it on:
 "errands": {
   "owner_name": "Sam",
   "intro": "Hallo, hier ist Fridolin, der Assistent von Sam.",
-  "model": "gpt-5"
+  "model": "gpt-5",
+  "persona": "Warm, a bit witty, Swiss du.",
+  "profile": "Sam usually answers in the evening."
 }
 ```
 
@@ -385,10 +387,12 @@ brain's brain.json turns it on:
 | `owner_name` | How Fridolin names you, to the people it writes to and to its errands' runs. Required. |
 | `intro` | What Fridolin's first message to someone opens with, as the bridge sends it. Default: `Hi, this is Fridolin, <owner_name>'s assistant.` Write it in the language your contacts speak. |
 | `model` | In Codex mode, the OpenAI model the errands' runs use. Default `gpt-5`. In Claude mode they run on the brain's model. |
+| `persona` | How Fridolin comes across to the people it talks with, at most 500 characters. Default: warm and natural, with a light touch of humour. |
+| `profile` | What Fridolin may tell anyone it talks with about you, at most 2000 characters. Each person's own brief and each errand's brief add to it. They can read it. |
 
 **How one goes.** You ask the core brain; it calls `contact_person` with
-the number, the name, the goal, a *brief* (everything Fridolin may tell
-them and agree to) and the first message.
+the number, the name, the goal, a *brief* (what Fridolin may tell them
+about you and agree to) and the first message.
 
 - **The first time** Fridolin writes to someone, you get the message as
   it will go out, the introduction ahead of it, with the goal and the
@@ -403,11 +407,19 @@ them and agree to) and the first message.
   started it, not from anything the model says, and what an errand
   reports to you never starts a run.
 - **Their answers** never reach the brain. Each goes to the errand's own
-  run, which reads the rules, the goal, the brief and the conversation,
-  and nothing else, and answers with one of four things: write back,
-  done (with a summary for you), ask you (with a question), or abort. A
-  few messages that come close together are answered at once.
-- **What the brief does not cover** (another date, money, a promise,
+  run, which reads the rules, the goal, the briefs (the errand's,
+  `profile` and the person's own), how it comes across (`persona`), the
+  latest 20 lines of its earlier conversations with them and this one,
+  and nothing else. It answers with one of four things: write back, done
+  (with a summary for you), ask you (with a question), or abort; and with
+  any but an abort, a note for you. A few messages that come close
+  together are answered at once.
+- **It is good company.** Small talk, a joke, a general question, what it
+  is: Fridolin answers those itself. Only about you does it keep to the
+  briefs: it tells nothing they do not allow and agrees to nothing in your
+  name beyond them. When they ask it to pass something on to you, you get
+  it as a note (📝).
+- **What the briefs do not cover** (another date, money, a promise,
   details about you) goes to you: Fridolin tells them it will check, and
   you get the question in your chat. Reply to that message (WhatsApp's
   Reply, so that it quotes it) with your answer: the bridge hands it to
@@ -421,8 +433,32 @@ them and agree to) and the first message.
   them: the next errand with them asks you first. An errand also ends
   after its days (`days`, 1 to 14, default 3) or 20 messages of
   Fridolin's, and the brain's `errand_stop` ends one at once. What they
-  write after the end is passed on to you, up to five messages a day,
-  and not answered.
+  write after the end begins a conversation of its own (below), or, for
+  someone whose messages you have passed on, goes to you, up to five
+  messages a day, and is not answered.
+
+### Conversations
+
+Once Fridolin has written to someone, with your approval the first time,
+it talks with them when they write to it, as your assistant: what they
+write while nothing is open with them begins a *conversation*, an errand
+of its own, with no poll and nothing for you to do. Its goal is to talk
+with them for you; it knows about you only `profile` and their own brief.
+You hear how it went when it ends (💬 Talked with …), and get their notes
+as they come.
+
+- **Their own brief.** What Fridolin may always tell one person, at most
+  2000 characters, on top of `profile`: "Alex is my brother, tell him
+  about my plans freely". Set it on the Errands page (**People** → Edit),
+  or ask the core brain, which sets it with `errand_contact`, from your
+  own direct chat only.
+- **Talk or pass on.** Each person's mode: `converse`, the default, talks
+  with them; `forward` passes what they write on to you instead, as
+  before. Same places.
+- **Limits.** At most three conversations they begin, and 40 of their
+  messages, a day; past either, what they write goes to you. One stays
+  open a day from its start, and ends sooner when the run says it is
+  done or after 20 messages of Fridolin's.
 
 **Why a person cannot turn Fridolin against you.** The protection is the
 bridge's, not a model's judgement:
@@ -452,17 +488,28 @@ bridge's, not a model's judgement:
   marks them as theirs, data and not instructions. A live session
   (`live_session`) is told only each new message, so it meets them no
   other way either.
-- **Abort.** When they try to make Fridolin do what it must not (ignore
-  its rules or brief, tell more than the brief allows, write to someone
-  else, run something, speak as you), the run answers abort. They get
-  the bridge's own message, `🚫 I won't go along with that, so I'm
-  ending our conversation here. <owner_name> has been told.`, never a
-  text of the run's; you get why, with their last message; and Fridolin
-  ignores them from then on: what they send is not read, not passed on
-  and not answered. Only you lift that, with `!unblock <number>` in your
-  own chat, after which writing to them asks you first again. Telling an
-  attempt from an odd message is a model's judgement, so it can miss one
-  or see one where there is none; the points above hold either way.
+- **A warning, then the end.** When they try to make Fridolin do what it
+  must not (ignore its rules or brief, tell more than the briefs allow,
+  write to someone else, run something, speak as you, pass a made-up
+  claim on to you), the run answers abort.
+  - The first time in 30 days, unless it is serious, they get the
+    bridge's own warning, `🙅 I won't do that. Once is fine, but if you
+    try again, I'll end our conversation. <owner_name> has been told.`,
+    the conversation goes on, and you get why (⚠️).
+  - A second time within 30 days, or a first that goes after your data,
+    tries to make Fridolin speak as you or to override its rules, ends
+    it: they get `🚫 I won't go along with that, so I'm ending our
+    conversation here. <owner_name> has been told.`, you get why, with
+    their last message, and Fridolin ignores them from then on: what they
+    send is not read, not passed on and not answered.
+  - They never get a text of the run's for either. Only you lift a
+    block, with `!unblock <number>` in your own chat or **Unblock** on the
+    Errands page. They are someone Fridolin knows again, whose messages
+    are passed on to you until you let it talk with them again, and an
+    errand you ask for in your own chat reaches them without a poll.
+  - Telling an attempt from an odd message is a model's judgement, so it
+    can miss one or see one where there is none; the points above hold
+    either way.
 - Their voice notes, photos and files are not downloaded: the run reads
   a line that says what came instead.
 
@@ -475,11 +522,13 @@ The brain's tools:
 | `errands(id)` | This brain's errands: those that have not ended, then the last ten others. With `id`, one errand with its conversation. |
 | `errand_answer(id, text)` | Passes on what you said to an open errand. Only in a run that answers your own message in your direct chat. A write action. |
 | `errand_stop(id)` | Ends an errand without a word to them. A write action. |
+| `errand_contact(number, mode, brief)` | Shows how Fridolin deals with someone it knows; with `mode` (`converse` or `forward`) or `brief` (their own brief, `""` clears it) sets it. Setting only in a run that answers your own message in your direct chat, and not for someone blocked. |
 
 The dashboard's **Errands** page lists every errand, those that have not
 ended first, with its conversation (what they wrote is shown as text
 only), a **Stop** for one that has not ended (as `errand_stop`), and the
-people Fridolin stopped listening to, with **Unblock** (as `!unblock`).
+**People** Fridolin knows: how it deals with each, with **Edit** (as
+`errand_contact`), and **Unblock** for someone blocked (as `!unblock`).
 
 The conversations are in bridge.db (`errands`, `errand_lines`,
 `errand_contacts`), never in a brain's folder or history. So are the
@@ -487,8 +536,8 @@ WhatsApp ids of the notices that carry their words, with the version a
 run is shown (`sent_notes`, for 60 days), by which the bridge knows a
 reply that quotes one. The audit log
 has one `errand` line for each step (asked, opened, sent, answered,
-asked the owner, ended, blocked), with the number masked and without
-the messages' text.
+asked the owner, passed on, warned, ended, blocked, contact), with the
+number masked and without the messages' text.
 
 ## Skills, risk and approvals
 

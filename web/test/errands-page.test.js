@@ -14,7 +14,8 @@ const ended = {
   id: 'e0', brain: 'core', name: 'Kim', number: '15551234567', masked: '+1…67', state: 'aborted', live: false, sent: 2,
   created: '2026-10-16T09:00:00Z', deadline: '2026-10-17T09:00:00Z', closed: '2026-10-16T10:00:00Z', outcome: 'asked me to ignore my brief',
 };
-const blocked = { number: '15551234567', masked: '+1…67', name: 'Kim', brain: 'core', reason: 'asked me to ignore my brief', since: '2026-10-16T10:00:00Z' };
+const blocked = { number: '15551234567', masked: '+1…67', name: 'Kim', brain: 'core', state: 'blocked', reason: 'asked me to ignore my brief', mode: 'converse', brief: '', since: '2026-10-16T10:00:00Z' };
+const known = { number: '15559876543', masked: '+1…43', name: 'Alex', brain: 'core', state: 'known', mode: 'converse', brief: 'Alex is Sam’s brother.', warned: '2026-10-17T10:00:00Z', since: '2026-10-18T09:00:00Z' };
 const detail = {
   ...open, goal: 'Find an evening for dinner', brief: 'Sam is free on Tuesday.', by_owner: true, days: 3, max_messages: 20,
   lines: [
@@ -32,9 +33,10 @@ async function openPage(t, opts = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  const bridge = { list: { errands: [open, ended], blocked: [blocked] }, ...opts.bridge };
+  const bridge = { list: { errands: [open, ended], people: [known, blocked] }, ...opts.bridge };
   const calls = serve(t, (path, init) => {
     if (init.method === 'POST') return { status: 'ok' };
+    if (init.method === 'PUT') return { ...known, ...JSON.parse(String(init.body)) };
     if (path === '/api/errands') return bridge.list;
     if (path === '/api/errands/e1') return detail;
     if (path.startsWith('/api/errands/')) return { status: 404, body: { error: 'no errand' } };
@@ -49,10 +51,10 @@ async function openPage(t, opts = {}) {
   return { root, calls, bridge };
 }
 
-test('the errands are listed with their state, live ones with Stop, and the people blocked with Unblock', async (t) => {
+test('the errands are listed with their state, live ones with Stop, and the people with Edit or Unblock', async (t) => {
   const { root } = await openPage(t);
   const rows = root.querySelectorAll('tbody tr');
-  assert.equal(rows.length, 3, 'two errands and one blocked person');
+  assert.equal(rows.length, 4, 'two errands and two people');
   assert.match(rows[0].textContent, /Alex/);
   assert.match(rows[0].textContent, /\+1…43/, 'the list shows the number masked');
   assert.doesNotMatch(rows[0].textContent, /15559876543/);
@@ -62,7 +64,36 @@ test('the errands are listed with their state, live ones with Stop, and the peop
   assert.ok(rows[1].querySelector('.badge.bad'), 'aborted');
   assert.match(rows[1].textContent, /asked me to ignore my brief/);
   assert.ok(rows[0].querySelector('a').getAttribute('href') === '#/errands/e1', 'each opens its conversation');
-  assert.ok(button(rows[2], 'Unblock'));
+  assert.match(rows[2].textContent, /Talks with them/);
+  assert.match(rows[2].textContent, /Warned/);
+  assert.match(rows[2].textContent, /Alex is Sam’s brother/);
+  assert.ok(button(rows[2], 'Edit'), 'someone known can be edited');
+  assert.equal(button(rows[2], 'Unblock'), undefined);
+  assert.ok(rows[3].querySelector('.badge.bad'), 'blocked');
+  assert.ok(button(rows[3], 'Unblock'));
+  assert.equal(button(rows[3], 'Edit'), undefined, 'someone blocked is unblocked first');
+});
+
+test('Edit sets how Fridolin deals with someone, and puts it only on Save', async (t) => {
+  const { root, calls } = await openPage(t);
+  button(root, 'Edit').click();
+  await settle();
+  const dlg = dialog();
+  assert.equal(dlg.querySelector('select').value, 'converse');
+  assert.equal(dlg.querySelector('textarea').value, 'Alex is Sam’s brother.');
+  button(dlg, 'Cancel').click();
+  await settle();
+  assert.ok(!calls.some((c) => c.method === 'PUT'), 'nothing after Cancel');
+
+  button(root, 'Edit').click();
+  await settle();
+  dialog().querySelector('select').value = 'forward';
+  dialog().querySelector('textarea').value = 'Nothing about my plans.';
+  button(dialog(), 'Save').click();
+  await settle();
+  const sent = calls.find((c) => c.method === 'PUT');
+  assert.equal(sent && sent.path, '/api/errand-contacts/15559876543');
+  assert.deepEqual(sent && sent.body, { mode: 'forward', brief: 'Nothing about my plans.' });
 });
 
 test('Stop asks first, and posts only on a yes', async (t) => {
@@ -115,8 +146,8 @@ test('an errand that is not there says so', async (t) => {
   assert.match(root.textContent, /No such errand/);
 });
 
-test('no errands and nobody blocked say what the page is for', async (t) => {
-  const { root } = await openPage(t, { bridge: { list: { errands: [], blocked: [] } } });
+test('no errands and nobody known say what the page is for', async (t) => {
+  const { root } = await openPage(t, { bridge: { list: { errands: [], people: [] } } });
   assert.match(root.textContent, /No errands yet/);
   assert.match(root.textContent, /!unblock/);
 });

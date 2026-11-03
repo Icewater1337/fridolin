@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -73,11 +74,47 @@ func migrateV10(tx *sql.Tx) error {
 	return err
 }
 
+// migrateV12 lets Fridolin talk with the people it knows (docs/BRAINS.md,
+// "Conversations"): how it takes each one's messages and what it may
+// always tell them, when it last warned them, and who began an errand.
+func migrateV12(tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE errand_contacts ADD COLUMN mode TEXT NOT NULL DEFAULT 'converse'`, // converse, forward
+		`ALTER TABLE errand_contacts ADD COLUMN brief TEXT NOT NULL DEFAULT ''`,        // what Fridolin may always tell them
+		`ALTER TABLE errand_contacts ADD COLUMN warned_at DATETIME`,                    // the last warning, which a second try within ErrandWarningKeep ends with a block
+		`ALTER TABLE errands ADD COLUMN opened_by TEXT NOT NULL DEFAULT ''`,            // '' a brain, 'them' the person, who wrote first
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // How an errand reaches its person.
 const (
 	ErrandByMessage = "message"
 	ErrandByCall    = "call"
 )
+
+// OpenedByThem is Errand.OpenedBy of a conversation the person began:
+// they wrote while nothing was open with them.
+const OpenedByThem = "them"
+
+// How Fridolin takes the messages of a contact while nothing is open
+// with them.
+const (
+	// ContactConverse talks with them: their message begins a
+	// conversation of its own.
+	ContactConverse = "converse"
+	// ContactForward passes their message on to the owner.
+	ContactForward = "forward"
+)
+
+// ErrandWarningKeep is how long a warning counts: a second try at making
+// Fridolin misbehave within it ends the conversation and blocks them.
+const ErrandWarningKeep = 30 * 24 * time.Hour
 
 // The states of an errand.
 const (
@@ -128,6 +165,9 @@ type Errand struct {
 	ClosedAt  time.Time
 	// Mode is ErrandByMessage or ErrandByCall.
 	Mode string
+	// OpenedBy is OpenedByThem for a conversation the person began, ""
+	// for an errand a brain asked for.
+	OpenedBy string
 }
 
 // Live reports whether the errand has not ended: it waits for the owner,
@@ -150,17 +190,58 @@ type ErrandContact struct {
 	State     string
 	Reason    string
 	UpdatedAt time.Time
+	// Mode is ContactConverse or ContactForward.
+	Mode string
+	// Brief is what Fridolin may always tell them.
+	Brief string
+	// WarnedAt is when Fridolin last warned them, zero for never.
+	WarnedAt time.Time
+}
+
+// Warned reports whether c was warned within ErrandWarningKeep of now.
+func (c ErrandContact) Warned(now time.Time) bool {
+	return !c.WarnedAt.IsZero() && now.Sub(c.WarnedAt) < ErrandWarningKeep
 }
 
 // ErrNoErrand is an errand, or a contact, the store does not have.
 var ErrNoErrand = errors.New("no such errand")
 
-const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at, mode`
+const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at, mode, opened_by`
+
+const contactColumns = `contact, lid, name, brain, state, reason, updated_at, mode, brief, warned_at`
+
+func scanContact(row interface{ Scan(...any) error }) (ErrandContact, error) {
+	var c ErrandContact
+	var warned sql.NullTime
+	err := row.Scan(&c.Contact, &c.LID, &c.Name, &c.Brain, &c.State, &c.Reason, &c.UpdatedAt, &c.Mode, &c.Brief, &warned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c, ErrNoErrand
+	}
+	c.WarnedAt = warned.Time
+	return c, err
+}
+
+func (s *Store) queryContacts(ctx context.Context, q string, args ...any) ([]ErrandContact, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+contactColumns+` FROM errand_contacts `+q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ErrandContact
+	for rows.Next() {
+		c, err := scanContact(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
 
 func scanErrand(row interface{ Scan(...any) error }) (Errand, error) {
 	var e Errand
 	var closed sql.NullTime
-	err := row.Scan(&e.ID, &e.Brain, &e.Contact, &e.Name, &e.Goal, &e.Brief, &e.Message, &e.State, &e.Approval, &e.ByOwner, &e.Run, &e.Chat, &e.Days, &e.Sent, &e.Outcome, &e.CreatedAt, &e.Deadline, &closed, &e.Mode)
+	err := row.Scan(&e.ID, &e.Brain, &e.Contact, &e.Name, &e.Goal, &e.Brief, &e.Message, &e.State, &e.Approval, &e.ByOwner, &e.Run, &e.Chat, &e.Days, &e.Sent, &e.Outcome, &e.CreatedAt, &e.Deadline, &closed, &e.Mode, &e.OpenedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, ErrNoErrand
 	}
@@ -191,9 +272,45 @@ func (s *Store) AddErrand(ctx context.Context, e Errand) error {
 	if mode == "" {
 		mode = ErrandByMessage
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC(), mode)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC(), mode, e.OpenedBy)
 	return err
+}
+
+// ErrandsOpenedByThemSince counts the conversations contact began since t.
+func (s *Store) ErrandsOpenedByThemSince(ctx context.Context, contact string, t time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE contact = ? AND opened_by = ? AND created_at >= ?`, contact, OpenedByThem, t.UTC()).Scan(&n)
+	return n, err
+}
+
+// ErrandLinesFromSince counts the messages sender wrote in contact's
+// errands since t.
+func (s *Store) ErrandLinesFromSince(ctx context.Context, contact, sender string, t time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errand_lines l JOIN errands e ON e.id = l.errand WHERE e.contact = ? AND l.sender = ? AND l.at >= ?`, contact, sender, t.UTC()).Scan(&n)
+	return n, err
+}
+
+// EarlierErrandLines is the latest limit lines of contact's errands other
+// than id, oldest first.
+func (s *Store) EarlierErrandLines(ctx context.Context, contact, id string, limit int) ([]ErrandLine, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT l.sender, l.text, l.at FROM errand_lines l JOIN errands e ON e.id = l.errand
+		WHERE e.contact = ? AND e.id != ? ORDER BY l.id DESC LIMIT ?`, contact, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ErrandLine
+	for rows.Next() {
+		var l ErrandLine
+		if err := rows.Scan(&l.Sender, &l.Text, &l.At); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	slices.Reverse(out)
+	return out, rows.Err()
 }
 
 // GetErrand reads errand id.
@@ -294,16 +411,50 @@ func (s *Store) ErrandLines(ctx context.Context, id string) ([]ErrandLine, error
 
 // ErrandContactOf is the contact whose number, or LID, is id.
 func (s *Store) ErrandContactOf(ctx context.Context, id string) (ErrandContact, error) {
-	var c ErrandContact
-	err := s.db.QueryRowContext(ctx, `SELECT contact, lid, name, brain, state, reason, updated_at FROM errand_contacts WHERE contact = ? OR (lid != '' AND lid = ?) LIMIT 1`, id, id).
-		Scan(&c.Contact, &c.LID, &c.Name, &c.Brain, &c.State, &c.Reason, &c.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return c, ErrNoErrand
-	}
-	return c, err
+	return scanContact(s.db.QueryRowContext(ctx, `SELECT `+contactColumns+` FROM errand_contacts WHERE contact = ? OR (lid != '' AND lid = ?) LIMIT 1`, id, id))
 }
 
-// SaveErrandContact writes c, a new contact or one the store has.
+// SetErrandContactWays sets how Fridolin takes contact's messages (mode)
+// and what it may always tell them (brief). It reports whether there was
+// such a contact.
+func (s *Store) SetErrandContactWays(ctx context.Context, contact, mode, brief string, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE errand_contacts SET mode = ?, brief = ?, updated_at = ? WHERE contact = ?`, mode, brief, at.UTC(), contact)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// WarnErrandContact records that Fridolin warned contact at at.
+func (s *Store) WarnErrandContact(ctx context.Context, contact string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE errand_contacts SET warned_at = ? WHERE contact = ?`, at.UTC(), contact)
+	return err
+}
+
+// UnblockErrandContact lets Fridolin listen to contact again: someone it
+// knows, whose messages go to the owner until the owner lets it talk
+// with them, with no warning held against them. It reports whether
+// contact was blocked.
+func (s *Store) UnblockErrandContact(ctx context.Context, contact string, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE errand_contacts SET state = ?, mode = ?, reason = '', warned_at = NULL, updated_at = ? WHERE contact = ? AND state = ?`,
+		ContactKnown, ContactForward, at.UTC(), contact, ContactBlocked)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// ErrandContacts lists everyone the errands know, blocked or not, the
+// latest first.
+func (s *Store) ErrandContacts(ctx context.Context) ([]ErrandContact, error) {
+	return s.queryContacts(ctx, `ORDER BY updated_at DESC, contact`)
+}
+
+// SaveErrandContact writes c, a new contact or one the store has; a
+// new one takes the messages of ContactConverse, and the mode, brief and
+// warning of one the store has stay as they are.
 func (s *Store) SaveErrandContact(ctx context.Context, c ErrandContact) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO errand_contacts (contact, lid, name, brain, state, reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (contact) DO UPDATE SET lid = excluded.lid, name = excluded.name, brain = excluded.brain, state = excluded.state, reason = excluded.reason, updated_at = excluded.updated_at`,
@@ -334,18 +485,5 @@ func (s *Store) AllErrands(ctx context.Context, ended int) ([]Errand, error) {
 // BlockedErrandContacts lists the people the errands stopped listening
 // to, the latest first.
 func (s *Store) BlockedErrandContacts(ctx context.Context) ([]ErrandContact, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT contact, lid, name, brain, state, reason, updated_at FROM errand_contacts WHERE state = ? ORDER BY updated_at DESC, contact`, ContactBlocked)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []ErrandContact
-	for rows.Next() {
-		var c ErrandContact
-		if err := rows.Scan(&c.Contact, &c.LID, &c.Name, &c.Brain, &c.State, &c.Reason, &c.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	return s.queryContacts(ctx, `WHERE state = ? ORDER BY updated_at DESC, contact`, ContactBlocked)
 }

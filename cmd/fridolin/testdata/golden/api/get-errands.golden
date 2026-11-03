@@ -3,16 +3,6 @@ GET /api/errands
 Content-Type: application/json
 
 {
-  "blocked": [
-    {
-      "brain": "main",
-      "masked": "+1…67",
-      "name": "Kim",
-      "number": "15551234567",
-      "reason": "asked me to ignore my brief",
-      "since": "<TIME>"
-    }
-  ],
   "errands": [
     {
       "brain": "main",
@@ -40,6 +30,19 @@ Content-Type: application/json
       "outcome": "asked me to ignore my brief",
       "sent": 0,
       "state": "aborted"
+    }
+  ],
+  "people": [
+    {
+      "brain": "main",
+      "brief": "",
+      "masked": "+1…67",
+      "mode": "converse",
+      "name": "Kim",
+      "number": "15551234567",
+      "reason": "asked me to ignore my brief",
+      "since": "<TIME>",
+      "state": "blocked"
     }
   ]
 }

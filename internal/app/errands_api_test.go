@@ -32,7 +32,7 @@ func TestErrandsDashboard(t *testing.T) {
 	if w := h.Do("GET", "/api/errands", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &list) != nil {
 		t.Fatalf("GET /api/errands: %d %s", w.Code, w.Body.String())
 	}
-	if len(list.Errands) != 1 || len(list.Blocked) != 0 {
+	if len(list.Errands) != 1 || len(list.People) != 1 || list.People[0].State != store.ContactKnown || list.People[0].Mode != store.ContactConverse || list.People[0].Warned != nil {
 		t.Fatalf("the list: %+v", list)
 	}
 	e := list.Errands[0]
@@ -68,8 +68,11 @@ func TestErrandsDashboard(t *testing.T) {
 	}
 	list = httpapi.ErrandsResponse{}
 	_ = json.Unmarshal(h.Do("GET", "/api/errands", nil).Body.Bytes(), &list)
-	if len(list.Blocked) != 1 || list.Blocked[0].Number != errandNumber || list.Blocked[0].Reason != "asked for Sam's address" || list.Blocked[0].Masked != "+1…21" {
-		t.Fatalf("blocked: %+v", list.Blocked)
+	if len(list.People) != 1 || list.People[0].Number != errandNumber || list.People[0].State != store.ContactBlocked || list.People[0].Reason != "asked for Sam's address" || list.People[0].Masked != "+1…21" {
+		t.Fatalf("blocked: %+v", list.People)
+	}
+	if w := h.Do("PUT", "/api/errand-contacts/"+errandNumber, map[string]string{"mode": "forward", "brief": ""}); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "!unblock") {
+		t.Errorf("setting someone blocked: %d %s", w.Code, w.Body.String())
 	}
 	if w := h.Do("POST", "/api/errand-contacts/Alex/unblock", nil); w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("unblocking no number: %d %s", w.Code, w.Body.String())
@@ -77,8 +80,8 @@ func TestErrandsDashboard(t *testing.T) {
 	if w := h.Do("POST", "/api/errand-contacts/"+errandNumber+"/unblock", nil); w.Code != http.StatusOK {
 		t.Fatalf("unblock: %d %s", w.Code, w.Body.String())
 	}
-	if _, err := h.b.store.ErrandContactOf(ctx, errandNumber); err == nil {
-		t.Error("still blocked after the unblock")
+	if c, err := h.b.store.ErrandContactOf(ctx, errandNumber); err != nil || c.State != store.ContactKnown {
+		t.Errorf("still blocked after the unblock: %+v %v", c, err)
 	}
 	if w := h.Do("POST", "/api/errand-contacts/"+errandNumber+"/unblock", nil); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "is not blocked") {
 		t.Errorf("unblocking again: %d %s", w.Code, w.Body.String())
@@ -94,5 +97,29 @@ func TestErrandsDashboard(t *testing.T) {
 	}
 	if strings.Join(unblocks, ",") != "unblocked,nothing blocked" {
 		t.Errorf("the audit's unblock lines: %q", unblocks)
+	}
+
+	// How Fridolin deals with them, as errand_contact sets it.
+	for _, c := range []struct {
+		number string
+		body   any
+		code   int
+	}{
+		{"15550000000", map[string]string{"mode": "forward", "brief": ""}, http.StatusNotFound}, // personal-data:ignore (a fictional 555 number)
+		{"Alex", map[string]string{"mode": "forward", "brief": ""}, http.StatusUnprocessableEntity},
+		{errandNumber, map[string]string{"mode": "chat", "brief": ""}, http.StatusUnprocessableEntity},
+		{errandNumber, map[string]any{"mode": "forward", "brief": "", "warned": true}, http.StatusBadRequest},
+	} {
+		if w := h.Do("PUT", "/api/errand-contacts/"+c.number, c.body); w.Code != c.code {
+			t.Errorf("PUT %s %v: %d %s", c.number, c.body, w.Code, w.Body.String())
+		}
+	}
+	w := h.Do("PUT", "/api/errand-contacts/"+errandNumber, map[string]string{"mode": "converse", "brief": " Alex may know Sam is away in May. "})
+	var p httpapi.ErrandPerson
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &p) != nil || p.Mode != store.ContactConverse || p.Brief != "Alex may know Sam is away in May." || p.State != store.ContactKnown {
+		t.Errorf("setting them: %d %s", w.Code, w.Body.String())
+	}
+	if l := h.auditOf("errand"); l[len(l)-1]["detail"] != "contact" || l[len(l)-1]["by"] != "dashboard" || l[len(l)-1]["outcome"] != store.ContactConverse {
+		t.Errorf("the audit's line: %v", l[len(l)-1])
 	}
 }
