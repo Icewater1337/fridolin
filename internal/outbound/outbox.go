@@ -126,6 +126,21 @@ func (o *Outbox) Question(ctx context.Context, brain, chat, text string, maxChun
 	return o.add(ctx, store.OutboxRow{Chat: chat, Brain: brain, History: text, Parts: o.textParts(chat, text, maxChunk)})
 }
 
+// Notice puts a notice of the bridge's about ref ("errand-question:<id>",
+// say) into the outbox, in chunks of at most maxChunk characters: the
+// chat gets text, and brain's history records history in its place,
+// once all of it went out. Each message of it is kept with ref and
+// history (store.Note), where the messenger can tell its id, so that a
+// reply quoting it is known by ref and shows history instead of text.
+// text carries words a run must not see; history does not.
+func (o *Outbox) Notice(ctx context.Context, brain, chat, text, history, ref string, maxChunk int) error {
+	parts := o.textParts(chat, text, maxChunk)
+	for i := range parts {
+		parts[i].Ref = ref
+	}
+	return o.add(ctx, store.OutboxRow{Chat: chat, Brain: brain, History: history, Parts: parts})
+}
+
 // Poll puts a poll of the bridge's own into the outbox, for ref (an
 // approval, "approval:<id>"), whose votes go there: single choice,
 // recorded in no history. WhatsApp refusing it as a poll sends it as a
@@ -195,6 +210,9 @@ func (o *Outbox) run(ctx context.Context) {
 		if now := o.now(); now.Sub(pruned) >= outboxPruneEvery {
 			pruned = now
 			if err := o.store.PruneOutbox(ctx, now.Add(-store.OutboxFailedKeep)); err != nil && ctx.Err() == nil {
+				log.Printf("outbox: %v", err)
+			}
+			if err := o.store.PruneNotes(ctx, now.Add(-store.NoteKeep)); err != nil && ctx.Err() == nil {
 				log.Printf("outbox: %v", err)
 			}
 		}
@@ -354,6 +372,9 @@ func (o *Outbox) send(ctx context.Context, m Link, r *store.OutboxRow, p store.O
 	ctx, cancel := context.WithTimeout(ctx, outboxSendLimit)
 	defer cancel()
 	if !p.IsPoll() {
+		if p.Ref != "" {
+			return o.sendNote(ctx, m, r, p)
+		}
 		return m.SendMessage(ctx, r.Chat, p.Text)
 	}
 	poll := Poll{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}
@@ -382,6 +403,32 @@ func (o *Outbox) send(ctx context.Context, m Link, r *store.OutboxRow, p store.O
 		return m.SendMessage(ctx, r.Chat, PollAsText(poll))
 	}
 	return nil
+}
+
+// sendNote sends a part of a notice (Notice), kept as a store.Note
+// before it goes out. A messenger that cannot tell the id sends it as
+// plain text, of which nothing is kept: a reply quoting it shows what
+// WhatsApp quotes.
+func (o *Outbox) sendNote(ctx context.Context, m Link, r *store.OutboxRow, p store.OutboxPart) error {
+	ids, ok := m.(IDTransport)
+	if !ok {
+		return m.SendMessage(ctx, r.Chat, p.Text)
+	}
+	kept := ""
+	err := ids.SendMessageWithID(ctx, r.Chat, p.Text, func(id string) {
+		n := store.Note{MsgID: id, Chat: r.Chat, Brain: r.Brain, Ref: p.Ref, History: r.History, CreatedAt: o.now()}
+		if err := o.store.SaveNote(context.WithoutCancel(ctx), n); err != nil {
+			log.Printf("outbox: keeping the note of message %s: %v", id, err)
+			return
+		}
+		kept = id
+	})
+	if err != nil && kept != "" {
+		if err := o.store.DeleteNote(context.WithoutCancel(ctx), kept); err != nil {
+			log.Printf("outbox: forgetting the note of message %s that did not go out: %v", kept, err)
+		}
+	}
+	return err
 }
 
 // giveUp stops trying r, logs why and keeps the fact for the dashboard.

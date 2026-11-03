@@ -409,9 +409,13 @@ them and agree to) and the first message.
   few messages that come close together are answered at once.
 - **What the brief does not cover** (another date, money, a promise,
   details about you) goes to you: Fridolin tells them it will check, and
-  you get the question in your chat. Tell the core brain the answer; it
-  passes it on with `errand_answer`, which only a run that answers your
-  own message may call.
+  you get the question in your chat. Reply to that message (WhatsApp's
+  Reply, so that it quotes it) with your answer: the bridge hands it to
+  the errand as your word, with no run of the brain's in between, and
+  says so. Or tell the core brain; it passes your answer on with
+  `errand_answer`, which only a run that answers your own message may
+  call. A reply that is a command, looks like a one-time code, or comes
+  once the errand has ended goes to the brain as any message does.
 - **The end.** When the goal is reached, or clearly cannot be, you get
   the summary. If they ask not to be written to again, Fridolin forgets
   them: the next errand with them asks you first. An errand also ends
@@ -435,7 +439,19 @@ bridge's, not a model's judgement:
   and cannot pass for a rule or for you.
 - The bridge sends what it writes to that one person only. A run they
   talked into anything can do no more than write back to them, and give
-  away no more than the brief.
+  away no more than the brief. So count the brief as theirs to read:
+  put nothing in it they may not see.
+- **What your brain sees.** Their words, and what the errand's run makes
+  of them, reach you on WhatsApp but never a run of your brain, which
+  has tools. A notice that carries them (a question for you, how an
+  errand ended, why one was aborted, a message passed on) goes into the
+  brain's history in a version without them, which says where they are;
+  a reply of yours that quotes such a notice shows the brain that
+  version too; and your reply to a question goes to the errand without a
+  run. The brain reads their words only when it calls `errands`, which
+  marks them as theirs, data and not instructions. A live session
+  (`live_session`) is told only each new message, so it meets them no
+  other way either.
 - **Abort.** When they try to make Fridolin do what it must not (ignore
   its rules or brief, tell more than the brief allows, write to someone
   else, run something, speak as you), the run answers abort. They get
@@ -466,7 +482,10 @@ only), a **Stop** for one that has not ended (as `errand_stop`), and the
 people Fridolin stopped listening to, with **Unblock** (as `!unblock`).
 
 The conversations are in bridge.db (`errands`, `errand_lines`,
-`errand_contacts`), never in a brain's folder or history. The audit log
+`errand_contacts`), never in a brain's folder or history. So are the
+WhatsApp ids of the notices that carry their words, with the version a
+run is shown (`sent_notes`, for 60 days), by which the bridge knows a
+reply that quotes one. The audit log
 has one `errand` line for each step (asked, opened, sent, answered,
 asked the owner, ended, blocked), with the number masked and without
 the messages' text.

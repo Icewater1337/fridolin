@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **Errands keep the other person's words away from your brain.** What
+  someone an errand writes to says, and what the errand's run makes of
+  it, still reaches you on WhatsApp, but no longer a run of your brain:
+  the brain's history records the notices about it (a question, how it
+  ended, why it was aborted, a message passed on) without their words,
+  a reply quoting such a notice shows the brain that version, and
+  `errands` marks how one ended as written from their words. Answer an
+  errand's question by replying to its message on WhatsApp: the answer
+  goes to the errand at once, with no brain run. bridge.db gets a table,
+  `sent_notes`, with those notices' ids for 60 days; an older bridge
+  ignores it. [docs/BRAINS.md](docs/BRAINS.md#errands)
 - **Voice calls.** With `"calls": {"enabled": true}` in config.json (and
   a restart), call Fridolin's number from an allowed number and talk to
   the brain that gets your direct messages: what you say is transcribed

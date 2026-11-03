@@ -13,6 +13,14 @@ type Transport interface {
 	SendPoll(ctx context.Context, jid, question string, options []string, maxSelectable int, sending func(id string)) (string, error)
 }
 
+// IDTransport is a Transport that also sends text with an id it chooses,
+// as SendPoll does: sending has the id before the message goes out, so
+// that whoever keeps it has it before a reply can quote it. The outbox
+// sends a notice (Outbox.Notice) this way where it can.
+type IDTransport interface {
+	SendMessageWithID(ctx context.Context, jid, text string, sending func(id string)) error
+}
+
 // Link adds the connection observation used by the durable outbox.
 // Connected is closed while the transport can send and replaced when it
 // disconnects; reading it does not start or stop a connection.

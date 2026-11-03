@@ -15,6 +15,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/Icewater1337/fridolin/internal/audit"
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -22,6 +23,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/errand"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/otp"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -444,6 +446,27 @@ func (b *App) tellErrandOwner(ctx context.Context, e store.Errand, text string) 
 	}
 }
 
+// Refs of the notices that carry the person's words (Outbox.Notice): a
+// reply quoting one is known by them (readQuote).
+const (
+	// errandQuestionRef is an errand's question, "errand-question:<id>",
+	// whose quote-reply by the owner answers it.
+	errandQuestionRef = "errand-question:"
+	errandNoteRef     = "errand:"         // "errand:<id>": how it ended
+	errandForwardRef  = "errand-forward:" // "errand-forward:<number>"
+)
+
+// tellErrandOwnerApart tells the owner text about errand e, which carries
+// words the person shaped: the brain's history records history in its
+// place, and a reply quoting it shows history too (ref, Outbox.Notice).
+// The brain's runs meet the person's words only through `errands`, which
+// marks them as theirs.
+func (b *App) tellErrandOwnerApart(ctx context.Context, e store.Errand, text, history, ref string) {
+	if err := b.outbox.Notice(ctx, e.Brain, e.Chat, text, history, ref, b.cfgs.Get().MaxChunkSize); err != nil {
+		log.Printf("errand %s: telling the owner: %v", e.ID, err)
+	}
+}
+
 // auditErrand writes one step of errand e to the audit log.
 func (b *App) auditErrand(e store.Errand, detail, outcome string) {
 	run := e.Run
@@ -504,7 +527,9 @@ func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 	if target == "" {
 		return
 	}
-	if err := b.outbox.Question(ctx, contact.Brain, target, outboundmsg.ErrandForwardNotice(contact.Name, contact.Contact, text), b.cfgs.Get().MaxChunkSize); err != nil {
+	notice := outboundmsg.ErrandForwardNotice(contact.Name, contact.Contact, text)
+	history := outboundmsg.ErrandForwardHistory(contact.Name, contact.Contact)
+	if err := b.outbox.Notice(ctx, contact.Brain, target, notice, history, errandForwardRef+contact.Contact, b.cfgs.Get().MaxChunkSize); err != nil {
 		log.Printf("errand: passing on a message from %s: %v", logx.MaskJID(contact.Contact, "", ""), err)
 	}
 }
@@ -585,7 +610,8 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 			}
 		}
 		b.auditErrand(e, "asked the owner", textx.Truncate(ans.Question, 200))
-		b.tellErrandOwner(ctx, e, outboundmsg.ErrandQuestionNotice(e.Name, e.ID, ans.Question))
+		b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandQuestionNotice(e.Name, e.ID, ans.Question),
+			outboundmsg.ErrandQuestionHistory(e.Name, e.ID), errandQuestionRef+e.ID)
 	case errand.Done:
 		if ans.Text != "" {
 			if err := ch.say(ans.Text); err != nil {
@@ -609,7 +635,8 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 			}
 			b.auditErrand(e, "forgotten", "they asked not to be written to again")
 		}
-		b.tellErrandOwner(ctx, e, outboundmsg.ErrandDoneNotice(e.Name, e.ID, summary, ans.Stop))
+		b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandDoneNotice(e.Name, e.ID, summary, ans.Stop),
+			outboundmsg.ErrandDoneHistory(e.Name, e.ID, ans.Stop), errandNoteRef+e.ID)
 	case errand.Abort:
 		b.abortErrand(ctx, e, ans.Reason, lines, ch)
 	}
@@ -644,7 +671,8 @@ func (b *App) abortErrand(ctx context.Context, e store.Errand, reason string, li
 			break
 		}
 	}
-	b.tellErrandOwner(ctx, e, outboundmsg.ErrandAbortedNotice(e.Name, e.Contact, e.ID, reason, last))
+	b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandAbortedNotice(e.Name, e.Contact, e.ID, reason, last),
+		outboundmsg.ErrandAbortedHistory(e.Name, e.Contact, e.ID), errandNoteRef+e.ID)
 }
 
 // expireErrand ends errand e, whose time or messages ran out (why).
@@ -833,6 +861,72 @@ func (b *App) answerErrand(ctx context.Context, brain, id, text string) error {
 	b.auditErrand(e, "owner answered", fmt.Sprintf("%d characters", len([]rune(text))))
 	b.errands.soon(e.ID, 0, b.errandTurn)
 	return nil
+}
+
+// quoteShownLen is how much of a note's history a quote of it shows.
+const quoteShownLen = 300
+
+// quoteUnread is what a quote shows when the bridge could not tell
+// whether it quotes a notice that carries someone's words.
+const quoteUnread = "[a message of mine, which could not be read]"
+
+// readQuote reads what m quotes when it is a notice of the bridge's kept
+// as a store.Note (Outbox.Notice): the quote shows the note's history
+// instead of the words WhatsApp quotes, so that an errand's person's
+// words in it never reach a run, and the owner's reply to an errand's
+// question goes to the errand at once, with no run at all (answered).
+func (b *App) readQuote(ctx context.Context, m brainruntime.Inbound) (_ brainruntime.Inbound, answered bool) {
+	q := m.Quoted
+	if q == nil || q.ID == "" {
+		return m, false
+	}
+	n, err := b.store.NoteOf(ctx, q.ID)
+	switch {
+	case errors.Is(err, store.ErrNoNote):
+		return m, false
+	case err != nil:
+		// Whether it quotes such a notice cannot be told: its words stay out.
+		log.Printf("reading the message a reply in %s quotes: %v", maskChatJID(m.JID), err)
+		m.Quoted = &chat.Quote{ID: q.ID, From: q.From, Text: quoteUnread}
+		return m, false
+	}
+	if id, ok := strings.CutPrefix(n.Ref, errandQuestionRef); ok && b.answerByQuote(ctx, m, n, id) {
+		return m, true
+	}
+	m.Quoted = &chat.Quote{ID: q.ID, From: q.From, Text: textx.Truncate(n.History, quoteShownLen)}
+	return m, false
+}
+
+// answerByQuote passes m, a reply quoting n, the question of errand id,
+// on to the errand as the owner's answer, and tells them so. Only the
+// owner's own text in the chat n went to counts, and not a command or
+// what looks like a one-time code, which go their usual way; nor does
+// a reply once the errand has ended. It reports whether it passed m on;
+// what it does not goes to the brain as any message does.
+func (b *App) answerByQuote(ctx context.Context, m brainruntime.Inbound, n store.Note, id string) bool {
+	owner := ownerChat(b.cfgs.Get())
+	text := strings.TrimSpace(m.Text)
+	if _, code := otp.Code(text); code {
+		return false
+	}
+	switch {
+	case owner == "" || chat.IdentityKey(m.Sender) != chat.IdentityKey(owner),
+		!slices.Contains(chatJIDs(m), n.Chat),
+		text == "" || len(m.Media) > 0 || strings.HasPrefix(text, "!"):
+		return false
+	}
+	e, err := b.store.GetErrand(ctx, id)
+	if err != nil || e.State != store.ErrandOpen {
+		return false
+	}
+	if err := b.answerErrand(ctx, e.Brain, e.ID, text); err != nil {
+		log.Printf("errand %s: passing on the owner's reply: %v", e.ID, err)
+		return false
+	}
+	if err := b.outbox.Question(ctx, e.Brain, n.Chat, outboundmsg.ErrandAnsweredReply(e.Name, e.ID), b.cfgs.Get().MaxChunkSize); err != nil {
+		log.Printf("errand %s: telling the owner: %v", e.ID, err)
+	}
+	return true
 }
 
 // stopErrand ends errand id of brain without a word to the person.

@@ -23,6 +23,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/lease"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/tailnet"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
@@ -344,6 +345,18 @@ func (g leaseGate) StartPairing() error {
 func (g leaseGate) SendMessage(ctx context.Context, jid, text string) error {
 	if g.lost() {
 		return errLeaseLost
+	}
+	return g.Messenger.SendMessage(ctx, jid, text)
+}
+
+// SendMessageWithID is outbound.IDTransport's, where the messenger has
+// it; otherwise the message goes out with an id nobody knows.
+func (g leaseGate) SendMessageWithID(ctx context.Context, jid, text string, sending func(string)) error {
+	if g.lost() {
+		return errLeaseLost
+	}
+	if ids, ok := g.Messenger.(outboundmsg.IDTransport); ok {
+		return ids.SendMessageWithID(ctx, jid, text, sending)
 	}
 	return g.Messenger.SendMessage(ctx, jid, text)
 }

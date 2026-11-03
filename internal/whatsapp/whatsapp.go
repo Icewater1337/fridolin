@@ -190,6 +190,25 @@ func (wa *Client) SendMessage(ctx context.Context, jid string, text string) erro
 	return wa.outbound.Classify(err)
 }
 
+// SendMessageWithID is SendMessage with an id chosen here and given to
+// sending before the message goes out (outbound.IDTransport), so that a
+// reply quoting it can be known by it.
+func (wa *Client) SendMessageWithID(ctx context.Context, jid, text string, sending func(id string)) error {
+	recipient, err := wa.outbound.Recipient(jid)
+	if err != nil {
+		return err
+	}
+	cli := wa.cl()
+	id := cli.GenerateMessageID()
+	if sending != nil {
+		sending(string(id))
+	}
+	_, err = cli.SendMessage(ctx, recipient, &waE2E.Message{
+		Conversation: proto.String(text),
+	}, whatsmeow.SendRequestExtra{ID: id})
+	return wa.outbound.Classify(err)
+}
+
 // SendChunked splits text into chunks and sends each as a separate message,
 // with a small delay between them so they arrive in order, for /send,
 // whose caller hears of a failure; brains' replies go through the Outbox.
@@ -924,7 +943,7 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *chat.Quote {
 		quotedText = textx.Truncate(quotedText, maxQuoteLen)
 	}
 
-	return &chat.Quote{From: senderJID, Text: quotedText}
+	return &chat.Quote{ID: contextInfo.GetStanzaID(), From: senderJID, Text: quotedText}
 }
 
 // extractText returns the plain text content of a message. A shared
