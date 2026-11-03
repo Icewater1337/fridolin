@@ -124,20 +124,23 @@ RUN python3 -m venv /opt/fridolin/venv \
 # (bin/claude.exe, whatever the OS); Node stays for npm-installed helpers
 # such as the Plaud CLI and the site process.
 FROM ${NODE_IMAGE} AS node
-# At least the version internal/claudecli tests against (TestedClaudeVersion).
-# renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.311
-# Codex (agent_provider "codex"), at least the version the bridge is tested
-# against; its package installs the native build for the image's platform.
-# Each brain signs in to it with a file of its own (brains/<id>/codex/
-# auth.json in the data dir), so a sign-in moves with an export.
-# renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.164.0
-# The Plaud CLI (plaud.enabled), as docs/PLAUD.md installs it.
-# renovate: datasource=npm depName=@plaud-ai/cli
-ARG PLAUD_CLI_VERSION=0.3.15
-RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-      "@openai/codex@${CODEX_VERSION}" "@plaud-ai/cli@${PLAUD_CLI_VERSION}" \
+# Claude Code (at least internal/claudecli's TestedClaudeVersion), Codex
+# (agent_provider "codex"; each brain signs in with brains/<id>/codex/
+# auth.json in the data dir, so a sign-in moves with an export) and the
+# Plaud CLI (plaud.enabled, as docs/PLAUD.md installs it). Their versions,
+# and every package beneath them with its hash, are pinned in
+# container/npm/package-lock.json, which Renovate updates: a build installs
+# the same tree every time, not whatever was published last. Install
+# scripts stay off, but for Claude Code's own, which puts the native build
+# for the image's platform in place. container/npm/.npmrc nests each
+# tool's dependencies in its own folder, as npm install -g does, and the
+# tools are copied into the global folder from there.
+COPY container/npm/package.json container/npm/package-lock.json container/npm/.npmrc /tmp/npm/
+RUN cd /tmp/npm \
+ && npm ci --ignore-scripts --no-fund --no-audit \
+ && npm rebuild @anthropic-ai/claude-code \
+ && cp -a node_modules/@anthropic-ai node_modules/@openai node_modules/@plaud-ai /usr/local/lib/node_modules/ \
+ && cd / && rm -rf /tmp/npm \
  && npm cache clean --force
 
 # ── the runtime ───────────────────────────────────────────────────────────

@@ -127,6 +127,11 @@ for compatibility.
 
 ### Changed
 
+- **The core image installs its npm CLIs from a lockfile.** Claude Code,
+  Codex and the Plaud CLI, and every package beneath them, come from
+  `container/npm/package-lock.json` with their hashes, so each build of
+  the image installs the same tree, not whatever was last published to
+  the Plaud CLI's version ranges. Nothing changes where they are installed.
 - **Scheduled agents run beside a brain's chats, not in their queue.**
   A brain now has two queues: its chats', and its scheduled agents' in
   the background (everything in an agent's own chat, `schedule:<name>`,
