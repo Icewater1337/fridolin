@@ -149,6 +149,18 @@ func (s siteChatMessenger) SendMessage(ctx context.Context, jid, text string) er
 	return s.Messenger.SendMessage(ctx, jid, text)
 }
 
+// SendMessageWithID is outbound.IDTransport's: a build chat's message
+// has no id a reply could quote.
+func (s siteChatMessenger) SendMessageWithID(ctx context.Context, jid, text string, sending func(string)) error {
+	if id := brainOfBuildJID(jid); id != "" {
+		return s.toChat(id, text)
+	}
+	if ids, ok := s.Messenger.(outboundmsg.IDTransport); ok {
+		return ids.SendMessageWithID(ctx, jid, text, sending)
+	}
+	return s.Messenger.SendMessage(ctx, jid, text)
+}
+
 func (s siteChatMessenger) SendChunked(ctx context.Context, jid, text string) error {
 	if id := brainOfBuildJID(jid); id != "" {
 		return s.toChat(id, text)
