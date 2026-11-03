@@ -1473,7 +1473,12 @@ permissions, which lasts an hour. 25 minutes before it ends the node
 asks the core for a new one (the event `fride.identities`), and the
 core mints one when the one it handed out has less than 30 minutes left.
 git asks FrIDE's credential helper at each push and so always gets the
-current token; `gh` and `glab` read theirs when a session starts. The
+current token. `gh` reads FrIDE's login for it (`GH_CONFIG_DIR`), which
+FrIDE rewrites with each new token, at every call, so an agent that works
+for longer than an hour can still open and merge its pull request (a FrIDE
+before fride#94 handed `gh` the token when a session started, which then
+failed with "401 Bad credentials"). `glab` reads its token when a session
+starts; a GitLab token does not run out within the hour. The
 app must let it write code (*Contents: Read and write* in the app's
 settings on GitHub, accepted on the installation): an app that may only
 read code gives FrIDE no GitHub identity, so that the node's own git
