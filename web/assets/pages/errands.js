@@ -1,21 +1,32 @@
 // Errands: what Fridolin writes to people for you, for the core brain
 // (docs/BRAINS.md, "Errands"). Every errand, those that have not ended
 // first, with Stop for one that has not; #/errands/<id> shows one with its
-// conversation; and the people Fridolin stopped listening to, with
-// Unblock. What the people wrote is theirs: it is shown as text only,
-// never read as markup.
+// conversation; and the people Fridolin knows, with how it deals with
+// them (Edit, as errand_contact) or Unblock. What the people wrote is
+// theirs: it is shown as text only, never read as markup.
 
-import { post } from '../app/api.js';
+import { post, put } from '../app/api.js';
 import { resource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { btn } from '../components/buttons.js';
-import { confirmDialog } from '../components/dialog.js';
+import { confirmDialog, openDialog } from '../components/dialog.js';
+import { field, select } from '../components/fields.js';
 import { toast } from '../components/toast.js';
 import { icon } from '../components/icons.js';
 import { badge, empty, kv, longText, mono, spinner, timeAgo } from '../components/common.js';
 
 /** @import { PageModule } from '../app/page.js' */
-/** @import { BlockedContact, ErrandDetail, ErrandLine, ErrandView } from '../../types/api.js' */
+/** @import { ErrandDetail, ErrandLine, ErrandPerson, ErrandView } from '../../types/api.js' */
+
+// The longest brief of one person, as the bridge takes it (errand.MaxForThem).
+const MAX_BRIEF = 2000;
+
+// How Fridolin takes what someone writes while no errand is open.
+/** @type {Record<string, string>} */
+const MODES = {
+  converse: 'Talks with them',
+  forward: 'Passes it on to you',
+};
 
 const errandsResource = resource('/api/errands');
 
@@ -66,7 +77,7 @@ function stopButton(e, after) {
 
 /**
  * Unblock, after a confirmation: as !unblock in your own chat.
- * @param {BlockedContact} c
+ * @param {ErrandPerson} c
  */
 function unblockButton(c) {
   return btn('Unblock', {
@@ -75,7 +86,7 @@ function unblockButton(c) {
       const ok = await confirmDialog({
         title: 'Unblock this person?',
         message: h('div',
-          h('p', 'Fridolin reads what ', h('strong', c.name || 'they'), ' (', mono(`+${c.number}`), ') write again, and passes it on to you. Writing to them in an errand asks you first again.'),
+          h('p', 'Fridolin reads what ', h('strong', c.name || 'they'), ' (', mono(`+${c.number}`), ') write again, and passes it on to you. When you ask for it in your own chat, it writes to them without asking you first.'),
           h('p.muted.small', 'As !unblock in your own chat.')),
         confirm: 'Unblock',
       });
@@ -83,6 +94,34 @@ function unblockButton(c) {
       await post(`/api/errand-contacts/${encodeURIComponent(c.number)}/unblock`);
       toast('Unblocked', 'ok', { timeout: 2000 });
       await errandsResource.refresh();
+    },
+  });
+}
+
+/**
+ * Edit: how Fridolin deals with someone it knows, as errand_contact sets it.
+ * @param {ErrandPerson} c
+ */
+function editButton(c) {
+  return btn('Edit', {
+    small: true, icon: 'edit',
+    onClick: async () => {
+      const mode = select(Object.entries(MODES), c.mode);
+      const brief = h('textarea', { rows: 5, maxLength: MAX_BRIEF, placeholder: 'e.g. Alex is my brother: tell him about my plans freely.' });
+      brief.value = c.brief || '';
+      const saved = await openDialog({
+        title: `How Fridolin deals with ${c.name || `+${c.number}`}`,
+        body: h('div',
+          field({ label: 'When they write and nothing is open', control: mode,
+            help: 'Talks with them: Fridolin answers by itself, with the errands’ rules and limits, and tells you how it went. Passes it on: you get their message and decide.' }),
+          field({ label: 'What Fridolin may always tell them about you', control: brief,
+            help: 'On top of brain.json’s errands.profile and each errand’s brief. They can read it: someone who pushes can get Fridolin to repeat it.' })),
+        actions: [
+          { label: 'Cancel', value: null },
+          { label: 'Save', kind: 'primary', onClick: async () => { await put(`/api/errand-contacts/${encodeURIComponent(c.number)}`, { mode: mode.value, brief: brief.value }); return true; } },
+        ],
+      });
+      if (saved) { toast('Saved', 'ok', { timeout: 2000 }); await errandsResource.refresh(); }
     },
   });
 }
@@ -100,13 +139,17 @@ function errandRow(e) {
     h('td', e.live ? stopButton(e, () => errandsResource.refresh()) : null));
 }
 
-/** @param {BlockedContact} c */
-function blockedRow(c) {
+/** @param {ErrandPerson} c */
+function personRow(c) {
+  const blocked = c.state === 'blocked';
   return h('tr',
     h('td', c.name || h('span.muted', 'no name'), h('div.muted.small.mono', c.masked)),
-    h('td', c.reason ? longText(c.reason, { limit: 160, lines: 3 }) : null),
+    h('td', blocked
+      ? h('div', badge('Blocked', 'bad'), c.reason ? h('div.muted.small', longText(c.reason, { limit: 160, lines: 3 })) : null)
+      : h('div', MODES[c.mode] || c.mode, c.warned ? h('div.muted.small', 'Warned ', timeAgo(c.warned)) : null)),
+    h('td', c.brief ? longText(c.brief, { limit: 160, lines: 3 }) : h('span.muted', 'Only errands.profile')),
     h('td', timeAgo(c.since)),
-    h('td', unblockButton(c)));
+    h('td', blocked ? unblockButton(c) : editButton(c)));
 }
 
 /**
@@ -137,20 +180,20 @@ export default /** @satisfies {PageModule} */ ({
     const table = h('div.card.flush.table-wrap', h('table.table',
       h('thead', h('tr', h('th', 'Opened'), h('th', 'With'), h('th', 'Brain'), h('th', 'State'), h('th', 'Messages'), h('th', 'Ends'), h('th', 'How it ended'), h('th', ''))),
       listBody));
-    const blockedBox = h('div');
-    const blockedBody = h('tbody');
-    const blockedTable = h('div.card.flush.table-wrap', h('table.table',
-      h('thead', h('tr', h('th', 'Who'), h('th', 'Why'), h('th', 'Since'), h('th', ''))),
-      blockedBody));
+    const peopleBox = h('div');
+    const peopleBody = h('tbody');
+    const peopleTable = h('div.card.flush.table-wrap', h('table.table',
+      h('thead', h('tr', h('th', 'Who'), h('th', 'When they write'), h('th', 'What Fridolin may tell them'), h('th', 'Changed'), h('th', ''))),
+      peopleBody));
 
     mount(root,
       h('header.page-header', h('div.page-heading',
         id ? h('a.back-link', { href: '#/errands' }, icon('left'), 'Errands') : null,
         heading,
-        id ? null : h('p.page-sub', 'Fridolin writes to people who are not in allowed_numbers for you, for the core brain, and carries the conversation until it ends. The first message to someone waits for your approval; what the brief does not cover comes to you.'))),
+        id ? null : h('p.page-sub', 'Fridolin writes to people who are not in allowed_numbers for you, for the core brain, and carries the conversation until it ends. The first message to someone waits for your approval; after that, it talks with them when they write, and what it may not settle comes to you.'))),
       id ? h('section.section', detailBox) : null,
       h('section.section', h('h2.section-title', id ? 'All errands' : 'Errands'), listBox),
-      h('section.section', h('h2.section-title', 'Blocked'), blockedBox));
+      h('section.section', h('h2.section-title', 'People'), peopleBox));
 
     ctx.follow(errandsResource, (data) => {
       if (!data) return;
@@ -161,12 +204,12 @@ export default /** @satisfies {PageModule} */ ({
         paint(listBox, 'list', () => table);
         reconcile(listBody, errands, (e) => e.id, errandRow);
       }
-      const blocked = data.blocked || [];
-      if (!blocked.length) {
-        paint(blockedBox, 'none', () => h('p.muted.small', 'Nobody. When someone tries to make Fridolin do what it must not, it ends the errand and stops listening to them until you unblock them, here or with !unblock in your own chat.'));
+      const people = data.people || [];
+      if (!people.length) {
+        paint(peopleBox, 'none', () => h('p.muted.small', 'Nobody yet. The people Fridolin wrote to show here, with how it deals with them. Someone who tries to make Fridolin do what it must not is warned once, then blocked until you unblock them, here or with !unblock in your own chat.'));
       } else {
-        paint(blockedBox, 'list', () => blockedTable);
-        reconcile(blockedBody, blocked, (c) => c.number, blockedRow);
+        paint(peopleBox, 'list', () => peopleTable);
+        reconcile(peopleBody, people, (c) => c.number, personRow);
       }
     }, 5000);
 

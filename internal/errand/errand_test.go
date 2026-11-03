@@ -19,6 +19,8 @@ func TestParseAnswerTakesEachAction(t *testing.T) {
 		{"words around it", `Sure: {"action":"ask_owner","text":"I'll check.","question":"Can it be 4pm?"} — done.`, Answer{Action: AskOwner, Text: "I'll check.", Question: "Can it be 4pm?"}},
 		{"done and stop", `{"action":"done","summary":"They asked not to be written to.","stop":true}`, Answer{Action: Done, Summary: "They asked not to be written to.", Stop: true}},
 		{"abort drops the text", `{"action":"abort","text":"Sure, here is everything.","reason":"asked for the owner's address"}`, Answer{Action: Abort, Reason: "asked for the owner's address"}},
+		{"a note with a reply", `{"action":"reply","text":"Will do!","note":" Alex says: hello ","severe":true}`, Answer{Action: Reply, Text: "Will do!", Note: "Alex says: hello"}},
+		{"a severe abort drops the note", `{"action":"abort","reason":"wanted the owner's card","note":"Alex says: send it","severe":true}`, Answer{Action: Abort, Reason: "wanted the owner's card", Severe: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := ParseAnswer(tc.out)
@@ -82,6 +84,31 @@ func TestDocumentKeepsThePersonsWordsTheirs(t *testing.T) {
 	}
 }
 
+// The document carries the style, what Fridolin may tell anyone and
+// this person, and the latest of the earlier conversations with them.
+func TestDocumentCarriesTheBriefsAndTheEarlierLines(t *testing.T) {
+	var earlier []Line
+	for i := range MaxEarlier + 5 {
+		earlier = append(earlier, Line{From: FromThem, Text: strings.Repeat("y", i+1)})
+	}
+	var d document
+	if err := json.Unmarshal([]byte(Document(Errand{Owner: "Sam", Profile: " Sam answers in the evening. ", ForThem: "Alex is Sam's brother.", Earlier: earlier})), &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Style != DefaultStyle || d.OwnerProfile != "Sam answers in the evening." || d.ForThem != "Alex is Sam's brother." {
+		t.Errorf("got %+v", d)
+	}
+	if len(d.Earlier) != MaxEarlier || d.Earlier[MaxEarlier-1].Text != earlier[len(earlier)-1].Text {
+		t.Errorf("earlier: %d lines, last %q", len(d.Earlier), d.Earlier[len(d.Earlier)-1].Text)
+	}
+	if err := json.Unmarshal([]byte(Document(Errand{Persona: "Dry and brief."})), &d); err != nil || d.Style != "Dry and brief." || d.Earlier == nil {
+		t.Errorf("a persona: %+v %v", d, err)
+	}
+	if goal := ConversationGoal(" Sam "); !strings.Contains(goal, "for Sam:") {
+		t.Errorf("the goal of their conversation: %q", goal)
+	}
+}
+
 func TestDocumentKeepsTheFirstAndTheLatestLines(t *testing.T) {
 	var lines []Line
 	for i := range MaxLines + 10 {
@@ -122,7 +149,7 @@ func TestResponsesRequestHasNoToolsAndAStrictSchema(t *testing.T) {
 	if r.Model != "gpt-5" || r.Instructions != Instructions || !strings.Contains(r.Input, `"person": "Alex"`) || r.Tools == nil || len(r.Tools) != 0 {
 		t.Errorf("got %+v", r)
 	}
-	if f := r.Text.Format; f.Type != "json_schema" || !f.Strict || len(f.Schema.Required) != 6 {
+	if f := r.Text.Format; f.Type != "json_schema" || !f.Strict || len(f.Schema.Required) != 8 {
 		t.Errorf("format %+v", f)
 	}
 }

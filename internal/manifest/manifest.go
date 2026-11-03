@@ -116,12 +116,21 @@ type Errands struct {
 	// Model is the OpenAI model of the errands' runs in Codex mode; ""
 	// is gpt-5. In Claude mode they run on the brain's model.
 	Model string `json:"model,omitempty"`
+	// Persona is how Fridolin comes across to the people it talks with;
+	// "" is errand.DefaultStyle.
+	Persona string `json:"persona,omitempty"`
+	// Profile is what Fridolin may tell anyone it talks with about the
+	// owner. Each person's standing brief and each errand's brief add to
+	// it.
+	Profile string `json:"profile,omitempty"`
 }
 
 // The limits of brain.json's errands.
 const (
 	MaxErrandOwnerName = 60
 	MaxErrandIntro     = 300
+	MaxErrandPersona   = 500
+	MaxErrandProfile   = 2000
 )
 
 var errandModelRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`)
@@ -136,6 +145,10 @@ func ValidateErrands(e Errands) error {
 		return fmt.Errorf("errands.owner_name must be one line of at most %d characters", MaxErrandOwnerName)
 	case len([]rune(e.Intro)) > MaxErrandIntro:
 		return fmt.Errorf("errands.intro must be at most %d characters", MaxErrandIntro)
+	case len([]rune(e.Persona)) > MaxErrandPersona:
+		return fmt.Errorf("errands.persona must be at most %d characters", MaxErrandPersona)
+	case len([]rune(e.Profile)) > MaxErrandProfile:
+		return fmt.Errorf("errands.profile must be at most %d characters", MaxErrandProfile)
 	case e.Model != "" && !errandModelRe.MatchString(e.Model):
 		return fmt.Errorf("errands.model %q is not a model name", e.Model)
 	}

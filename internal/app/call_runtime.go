@@ -423,7 +423,10 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		return nil
 	}
 	// The chat's words, read aloud without their emoji.
-	ch := errandChannel{say: say, abort: strings.TrimLeftFunc(outboundmsg.ErrandAbortMessage(owner), func(r rune) bool { return !unicode.IsLetter(r) })}
+	unEmoji := func(s string) string {
+		return strings.TrimLeftFunc(s, func(r rune) bool { return !unicode.IsLetter(r) })
+	}
+	ch := errandChannel{say: say, abort: unEmoji(outboundmsg.ErrandAbortMessage(owner)), warn: unEmoji(outboundmsg.ErrandWarnMessage(owner))}
 	opener := errand.Intro(s.OwnerName, s.Intro) + " " + cfg.Calls.NoticeOrDefault() + " " + e.Message
 	if err := say(opener); err != nil {
 		log.Printf("errand %s: opening the call: %v", e.ID, err)

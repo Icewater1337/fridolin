@@ -283,6 +283,7 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/errands/{id}", classAPI, "/api/errands/e1"},
 	{"POST", "/api/errands/{id}/stop", classAPI, "/api/errands/e1/stop"},
 	{"POST", "/api/errand-contacts/{number}/unblock", classAPI, "/api/errand-contacts/15551234567/unblock"},
+	{"PUT", "/api/errand-contacts/{number}", classAPI, "/api/errand-contacts/15551234567"},
 	{"GET", "/api/brains/{id}/skills", classAPI, "/api/brains/main/skills"},
 	{"POST", "/api/brains/{id}/skills/approve", classAPI, "/api/brains/main/skills/approve"},
 	{"PUT", "/api/brains/{id}/skills/policy", classAPI, "/api/brains/main/skills/policy"},

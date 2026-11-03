@@ -56,8 +56,9 @@ two connections (`brain_monthly_usd`), as its tools' calls are.
   say goes to the errand's run, which is told it is on a call; its
   answers are read aloud and its rules are the errand's rules: a question
   for you ends the call ("I'll get back to you on WhatsApp"), done ends it
-  and the errand, abort says the bridge's own words, ends it and blocks
-  them.
+  and the errand, and abort says the bridge's own words: a warning the
+  first time, and the call goes on; the end and a block after that, or
+  for a serious try ([BRAINS.md](BRAINS.md#errands)).
 - Nobody picks up within 45 seconds: the errand ends and you are told.
 - A call that ends before the errand did (they hang up, 45 seconds of
   silence, 10 minutes) leaves the errand open: it goes on by message.

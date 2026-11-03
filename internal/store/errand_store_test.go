@@ -107,3 +107,82 @@ func TestErrandContacts(t *testing.T) {
 		t.Error("forgot twice")
 	}
 }
+
+// TestErrandConversations: a new contact talks with Fridolin; their mode
+// and brief stay when an errand saves them again; a warning counts for
+// ErrandWarningKeep; unblocking leaves them known, forwarded and with no
+// warning; their conversations count, and the earlier ones' lines read
+// back oldest first.
+func TestErrandConversations(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	const alex = "15551234567"
+	if err := s.SaveErrandContact(ctx, ErrandContact{Contact: alex, Name: "Alex", Brain: "core", State: ContactKnown, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.ErrandContactOf(ctx, alex)
+	if err != nil || c.Mode != ContactConverse || c.Brief != "" || !c.WarnedAt.IsZero() || c.Warned(now) {
+		t.Fatalf("a new contact: %+v %v", c, err)
+	}
+	if ok, err := s.SetErrandContactWays(ctx, alex, ContactForward, "Alex is Sam's brother.", now); !ok || err != nil {
+		t.Fatalf("setting the ways: %v %v", ok, err)
+	}
+	if ok, _ := s.SetErrandContactWays(ctx, "15550000000", ContactForward, "", now); ok { // personal-data:ignore (a fictional 555 number)
+		t.Error("set the ways of nobody")
+	}
+	if err := s.WarnErrandContact(ctx, alex, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveErrandContact(ctx, ErrandContact{Contact: alex, Name: "Alex P.", Brain: "core", State: ContactKnown, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = s.ErrandContactOf(ctx, alex)
+	if c.Name != "Alex P." || c.Mode != ContactForward || c.Brief != "Alex is Sam's brother." || !c.WarnedAt.Equal(now) || !c.Warned(now.Add(ErrandWarningKeep-time.Minute)) || c.Warned(now.Add(ErrandWarningKeep)) {
+		t.Errorf("saved again: %+v", c)
+	}
+	if ok, _ := s.UnblockErrandContact(ctx, alex, now); ok {
+		t.Error("unblocked someone not blocked")
+	}
+	c.State, c.Reason = ContactBlocked, "a prank"
+	if err := s.SaveErrandContact(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.UnblockErrandContact(ctx, alex, now); !ok || err != nil {
+		t.Fatalf("unblock: %v %v", ok, err)
+	}
+	c, _ = s.ErrandContactOf(ctx, alex)
+	if c.State != ContactKnown || c.Mode != ContactForward || c.Reason != "" || !c.WarnedAt.IsZero() || c.Brief != "Alex is Sam's brother." {
+		t.Errorf("unblocked: %+v", c)
+	}
+	if all, _ := s.ErrandContacts(ctx); len(all) != 1 || all[0].Contact != alex {
+		t.Errorf("all contacts: %+v", all)
+	}
+
+	for i, opened := range []string{"", OpenedByThem, OpenedByThem} {
+		id := []string{"e1", "e2", "e3"}[i]
+		at := now.Add(time.Duration(i) * time.Hour)
+		if err := s.AddErrand(ctx, Errand{ID: id, Brain: "core", Contact: alex, Name: "Alex", State: ErrandOpen, Chat: "c", Days: 1, CreatedAt: at, Deadline: at.Add(time.Hour), OpenedBy: opened}); err != nil {
+			t.Fatal(err)
+		}
+		for j, who := range []string{"them", "you"} {
+			if err := s.AddErrandLine(ctx, id, ErrandLine{Sender: who, Text: id + who, At: at.Add(time.Duration(j) * time.Minute)}, who == "you"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if e, _ := s.GetErrand(ctx, "e2"); e.OpenedBy != OpenedByThem {
+		t.Errorf("opened by: %+v", e)
+	}
+	if n, err := s.ErrandsOpenedByThemSince(ctx, alex, now.Add(90*time.Minute)); n != 1 || err != nil {
+		t.Errorf("opened by them since: %d %v", n, err)
+	}
+	if n, err := s.ErrandLinesFromSince(ctx, alex, "them", now); n != 3 || err != nil {
+		t.Errorf("their lines: %d %v", n, err)
+	}
+	lines, err := s.EarlierErrandLines(ctx, alex, "e3", 3)
+	if err != nil || len(lines) != 3 || lines[0].Text != "e1you" || lines[2].Text != "e2you" {
+		t.Errorf("earlier lines: %+v %v", lines, err)
+	}
+}

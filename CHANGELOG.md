@@ -10,6 +10,25 @@ for compatibility.
 
 ### Added
 
+- **Fridolin talks with the people it knows.** Once Fridolin has written
+  to someone (with your approval the first time), what they write while
+  nothing is open with them begins a conversation of its own: Fridolin
+  answers by itself and tells you how it went, instead of passing each
+  message on for you to decide. It chats freely (small talk, jokes,
+  general questions) and keeps to the briefs only about you. New in the
+  core brain's brain.json: `errands.persona` (how it comes across) and
+  `errands.profile` (what anyone may hear about you). Each person gets a
+  mode (`converse`, the default, or `forward`, as before) and a brief of
+  their own, set on the Errands page's new **People** section or with
+  the brain's `errand_contact`. What they ask to pass on reaches you as a
+  note. A first, light try at misusing Fridolin now gets a warning, and
+  only a second within 30 days, or a serious one, ends the conversation
+  and blocks them. `!unblock` keeps them known with their messages
+  passed on, so writing to them no longer asks again. At most three
+  conversations and 40 messages of theirs a day. bridge.db's
+  `errand_contacts` and `errands` get columns; an older bridge ignores
+  them. `GET /api/errands` answers `people` in place of `blocked`.
+  [docs/BRAINS.md](docs/BRAINS.md#conversations)
 - **Errands keep the other person's words away from your brain.** What
   someone an errand writes to says, and what the errand's run makes of
   it, still reaches you on WhatsApp, but no longer a run of your brain:

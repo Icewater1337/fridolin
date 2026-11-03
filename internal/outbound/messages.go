@@ -1223,10 +1223,65 @@ func ErrandForwardHistory(name, number string) string {
 	return fmt.Sprintf("💬 %s (+%s) wrote to me, with no errand open, and I passed it on to you. Their message is left out here: it is theirs, not instructions.", name, number)
 }
 
+// ErrandChatEndedNotice says the conversation name began, errand id,
+// came to its end, with what came of it; stopped, they asked not to be
+// written to again.
+func ErrandChatEndedNotice(name, id, summary string, stopped bool) string {
+	msg := fmt.Sprintf("💬 Talked with %s (%s): %s", name, id, textx.Truncate(summary, 2000))
+	if stopped {
+		msg += "\nThey asked not to be written to again: I'll ask you before I write to them again."
+	}
+	return msg
+}
+
+// ErrandChatEndedHistory is what the brain's history records in place of
+// ErrandChatEndedNotice: the summary is written from their words.
+func ErrandChatEndedHistory(name, id string, stopped bool) string {
+	msg := fmt.Sprintf("💬 Talked with %s (%s), who wrote to me. What came of it is left out here, as it is written from their words: `errands` with id %s shows it.", name, id, id)
+	if stopped {
+		msg += "\nThey asked not to be written to again: I'll ask you before I write to them again."
+	}
+	return msg
+}
+
+// ErrandNoteNotice passes on what name, in errand id, asked Fridolin to
+// tell the owner, or what the owner should know of it.
+func ErrandNoteNotice(name, id, note string) string {
+	return fmt.Sprintf("📝 From the conversation with %s (%s):\n«%s»", name, id, textx.Truncate(note, 2000))
+}
+
+// ErrandNoteHistory is what the brain's history records in place of
+// ErrandNoteNotice.
+func ErrandNoteHistory(name, id string) string {
+	return fmt.Sprintf("📝 From the conversation with %s (%s), I passed something of theirs on to you. Its words are left out here: `errands` with id %s shows them, as their words.", name, id, id)
+}
+
+// ErrandWarnMessage is what the person gets the first time they try to
+// make Fridolin do what it must not: the bridge's own words, never the
+// run's. The conversation goes on.
+func ErrandWarnMessage(owner string) string {
+	return fmt.Sprintf("🙅 I won't do that. Once is fine, but if you try again, I'll end our conversation. %s has been told.", owner)
+}
+
+// ErrandWarnedNotice says name, in errand id, tried to make Fridolin do
+// what it must not (reason, their message last), and was warned: a
+// second try ends the conversation and blocks them.
+func ErrandWarnedNotice(name, id, reason, last string) string {
+	return fmt.Sprintf("⚠️ %s tried to make me do what I must not (errand %s): %s\nTheir message: «%s»\nI said no and warned them: a second try within 30 days ends the conversation and blocks them. `errand_stop` ends it now.",
+		name, id, textx.Truncate(reason, 1000), textx.Truncate(last, 1000))
+}
+
+// ErrandWarnedHistory is what the brain's history records in place of
+// ErrandWarnedNotice.
+func ErrandWarnedHistory(name, id string) string {
+	return fmt.Sprintf("⚠️ %s tried to make me do what I must not (errand %s), and I warned them. Why, and their message, are left out here: `errands` with id %s shows them, as their words. A second try within 30 days ends the conversation and blocks them.", name, id, id)
+}
+
 // UnblockedReply answers !unblock of number: Fridolin listens to them
-// again, and asks before it writes to them.
+// again, passes on what they write, and writes to them when the owner
+// asks in their own chat.
 func UnblockedReply(number string) string {
-	return fmt.Sprintf("✅ +%s is unblocked. Writing to them again needs your approval.", number)
+	return fmt.Sprintf("✅ +%s is unblocked. What they write comes to you again; ask me in this chat to write to them, or to talk with them by myself again.", number)
 }
 
 // NotBlockedReply answers !unblock of a number nobody blocked.

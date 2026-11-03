@@ -93,7 +93,9 @@
       "properties": {
         "owner_name": {"type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^\\r\\n]*$", "description": "How Fridolin names you to the people it writes to."},
         "intro": {"type": "string", "maxLength": 300, "description": "What Fridolin's first message to someone opens with. Default: Hi, this is Fridolin, <owner_name>'s assistant."},
-        "model": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$", "description": "The OpenAI model of the errands' runs in Codex mode. Default gpt-5. In Claude mode they run on the brain's model."}
+        "model": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$", "description": "The OpenAI model of the errands' runs in Codex mode. Default gpt-5. In Claude mode they run on the brain's model."},
+        "persona": {"type": "string", "maxLength": 500, "description": "How Fridolin comes across to the people it talks with, e.g. warm, a bit witty, Swiss du. Default: warm and natural, with a light touch of humour."},
+        "profile": {"type": "string", "maxLength": 2000, "description": "What Fridolin may tell anyone it talks with about you, e.g. that you usually answer in the evening. Each person's own brief and each errand's brief add to it."}
       }
     },
     "github": {

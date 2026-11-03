@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/audit"
@@ -16,14 +18,15 @@ import (
 )
 
 // The Errands page (docs/BRAINS.md, "Errands"): every brain's errands
-// with their conversations, and the people Fridolin stopped listening to.
-// Its Stop and Unblock do what errand_stop and !unblock do.
+// with their conversations, and the people Fridolin knows. Its Stop,
+// Unblock and the people's settings do what errand_stop, !unblock and
+// errand_contact do.
 
 // errandsEndedShown is how many ended errands the page lists.
 const errandsEndedShown = 50
 
 func (b *App) newErrandsAPI() *httpapi.ErrandsAPI {
-	return &httpapi.ErrandsAPI{List: b.errandsList, Get: b.errandDetail, Stop: b.dashboardStopErrand, Unblock: b.dashboardUnblock}
+	return &httpapi.ErrandsAPI{List: b.errandsList, Get: b.errandDetail, Stop: b.dashboardStopErrand, Unblock: b.dashboardUnblock, SetPerson: b.dashboardSetPerson}
 }
 
 // maskedNumber is a person's number as the audit log writes it.
@@ -41,7 +44,7 @@ func errandViewOf(e store.Errand) httpapi.ErrandView {
 
 // errandsList answers GET /api/errands.
 func (b *App) errandsList(ctx context.Context) (httpapi.ErrandsResponse, error) {
-	out := httpapi.ErrandsResponse{Errands: []httpapi.ErrandView{}, Blocked: []httpapi.BlockedContact{}}
+	out := httpapi.ErrandsResponse{Errands: []httpapi.ErrandView{}, People: []httpapi.ErrandPerson{}}
 	list, err := b.store.AllErrands(ctx, errandsEndedShown)
 	if err != nil {
 		return out, err
@@ -49,14 +52,67 @@ func (b *App) errandsList(ctx context.Context) (httpapi.ErrandsResponse, error) 
 	for _, e := range list {
 		out.Errands = append(out.Errands, errandViewOf(e))
 	}
-	blocked, err := b.store.BlockedErrandContacts(ctx)
+	people, err := b.store.ErrandContacts(ctx)
 	if err != nil {
 		return out, err
 	}
-	for _, c := range blocked {
-		out.Blocked = append(out.Blocked, httpapi.BlockedContact{Number: c.Contact, Masked: maskedNumber(c.Contact), Name: c.Name, Brain: c.Brain, Reason: c.Reason, Since: c.UpdatedAt})
+	for _, c := range people {
+		out.People = append(out.People, errandPersonOf(c))
 	}
 	return out, nil
+}
+
+func errandPersonOf(c store.ErrandContact) httpapi.ErrandPerson {
+	p := httpapi.ErrandPerson{Number: c.Contact, Masked: maskedNumber(c.Contact), Name: c.Name, Brain: c.Brain, State: c.State, Reason: c.Reason,
+		Mode: c.Mode, Brief: c.Brief, Since: c.UpdatedAt}
+	if c.Warned(time.Now()) {
+		warned := c.WarnedAt
+		p.Warned = &warned
+	}
+	return p
+}
+
+// checkContactWays reports what is wrong with setting contact's mode
+// and brief, "" for nothing: what errand_contact and the Errands page
+// refuse alike.
+func checkContactWays(contact store.ErrandContact, mode, brief string) (string, apperr.Kind) {
+	switch {
+	case contact.State == store.ContactBlocked:
+		return fmt.Sprintf("+%s is blocked: only the owner lifts that, with !unblock %s", contact.Contact, contact.Contact), apperr.Conflict
+	case mode != store.ContactConverse && mode != store.ContactForward:
+		return "mode is converse or forward", apperr.Invalid
+	case len([]rune(brief)) > errand.MaxForThem:
+		return fmt.Sprintf("brief is at most %d characters", errand.MaxForThem), apperr.Invalid
+	}
+	return "", apperr.Unknown
+}
+
+// dashboardSetPerson answers PUT /api/errand-contacts/{number}: how
+// Fridolin deals with someone it knows, as errand_contact sets it.
+func (b *App) dashboardSetPerson(ctx context.Context, written string, ways httpapi.PersonWays) (httpapi.ErrandPerson, error) {
+	number, err := chat.PhoneNumber(written)
+	if err != nil {
+		return httpapi.ErrandPerson{}, apperr.Wrap(apperr.Invalid, err)
+	}
+	contact, err := b.store.ErrandContactOf(ctx, number)
+	if errors.Is(err, store.ErrNoErrand) {
+		return httpapi.ErrandPerson{}, apperr.New(apperr.NotFound, "Fridolin never wrote to +"+number)
+	}
+	if err != nil {
+		return httpapi.ErrandPerson{}, err
+	}
+	mode, brief := strings.TrimSpace(ways.Mode), strings.TrimSpace(ways.Brief)
+	if why, kind := checkContactWays(contact, mode, brief); why != "" {
+		return httpapi.ErrandPerson{}, apperr.New(kind, why)
+	}
+	if _, err := b.store.SetErrandContactWays(ctx, number, mode, brief, time.Now()); err != nil {
+		return httpapi.ErrandPerson{}, err
+	}
+	b.audit.Append(audit.Entry{Kind: audit.Errand, By: "dashboard", ID: logx.MaskJID(number, "", ""), Detail: "contact", Outcome: mode})
+	if contact, err = b.store.ErrandContactOf(ctx, number); err != nil {
+		return httpapi.ErrandPerson{}, err
+	}
+	return errandPersonOf(contact), nil
 }
 
 // errandDetail answers GET /api/errands/{id}.

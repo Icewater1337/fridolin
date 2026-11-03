@@ -1103,20 +1103,30 @@ export interface ErrandView {
   outcome: string;
 }
 
-/** Someone the errands stopped listening to, until the owner unblocks them. */
-export interface BlockedContact {
+/** Someone Fridolin wrote to in an errand, with how it deals with them. */
+export interface ErrandPerson {
   number: string;
   masked: string;
   name: string;
+  /** The brain of the last errand with them. */
   brain: string;
-  reason: string;
+  /** known, or blocked until the owner unblocks them, for reason. */
+  state: string;
+  reason?: string;
+  /** What Fridolin does when they write and no errand is open: converse or forward. */
+  mode: string;
+  /** What Fridolin may always tell them about the owner. */
+  brief: string;
+  /** When Fridolin warned them, within the month a second try blocks them. */
+  warned?: string;
+  /** When they last changed. */
   since: string;
 }
 
-/** GET /api/errands: live errands first, then the last 50 ended, newest first. */
+/** GET /api/errands: live errands first, then the last 50 ended, newest first; and the people Fridolin knows. */
 export interface Errands {
   errands: ErrandView[];
-  blocked: BlockedContact[];
+  people: ErrandPerson[];
 }
 
 /** One message of an errand: from you (Fridolin), them (the person, untrusted) or owner. */

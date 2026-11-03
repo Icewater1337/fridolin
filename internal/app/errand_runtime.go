@@ -58,9 +58,22 @@ const errandRunTimeout = 3 * time.Minute
 // someone it wrote to while no errand with them is open.
 const errandForwardsPerDay = 5
 
+// Conversations someone begins (docs/BRAINS.md, "Conversations"): at most
+// errandChatsPerDay of them, and errandHeardPerDay of their messages, a
+// day; past either, what they write goes to the owner as from someone
+// whose messages are passed on. One stays open errandChatDays.
+const (
+	errandChatsPerDay = 3
+	errandHeardPerDay = 40
+	errandChatDays    = 1
+)
+
 // errandTurns runs each errand's turns one at a time: a message that
 // comes while its run answers waits for the next turn.
 type errandTurns struct {
+	// begin keeps two messages of one person that come at once from
+	// beginning two conversations.
+	begin    sync.Mutex
 	mu       sync.Mutex
 	timers   map[string]*time.Timer
 	running  map[string]bool
@@ -510,7 +523,11 @@ func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 	if text == "" {
 		return
 	}
-	if e, err := b.store.LiveErrandWith(ctx, contact.Contact); err == nil && e.State == store.ErrandOpen {
+	b.errands.begin.Lock()
+	e, err := b.store.LiveErrandWith(ctx, contact.Contact)
+	switch {
+	case err == nil && e.State == store.ErrandOpen:
+		b.errands.begin.Unlock()
 		if err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromThem, Text: text, At: m.At}, false); err != nil {
 			log.Printf("errand %s: recording their message: %v", e.ID, err)
 			return
@@ -518,6 +535,16 @@ func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 		b.auditErrand(e, "answered", fmt.Sprintf("%d characters", len([]rune(text))))
 		b.errands.soon(e.ID, b.waits.errandGather, b.errandTurn)
 		return
+	case errors.Is(err, store.ErrNoErrand) && contact.Mode == store.ContactConverse:
+		begun := b.beginConversation(ctx, contact, text, m.At)
+		b.errands.begin.Unlock()
+		if begun {
+			return
+		}
+	default:
+		// One that waits for the owner's approval, or a store that cannot
+		// tell: the owner hears of it.
+		b.errands.begin.Unlock()
 	}
 	if !b.errands.forward(contact.Contact, time.Now()) {
 		log.Printf("errand: %s wrote again; passed on %d times today already", logx.MaskJID(contact.Contact, "", ""), errandForwardsPerDay)
@@ -532,6 +559,52 @@ func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 	if err := b.outbox.Notice(ctx, contact.Brain, target, notice, history, errandForwardRef+contact.Contact, b.cfgs.Get().MaxChunkSize); err != nil {
 		log.Printf("errand: passing on a message from %s: %v", logx.MaskJID(contact.Contact, "", ""), err)
 	}
+}
+
+// beginConversation begins a conversation with contact, who wrote text
+// at at while nothing was open with them: an errand of its own, with no
+// approval (the owner approved writing to them once, and they wrote
+// first), which errandTurn answers like any. It reports false, and
+// begins nothing, when errands are off for their brain or they reached
+// a day's limit: their message then goes to the owner.
+func (b *App) beginConversation(ctx context.Context, contact store.ErrandContact, text string, at time.Time) bool {
+	s, ok := b.errandSettings(contact.Brain)
+	cfg := b.cfgs.Get()
+	target := ownerChat(cfg)
+	if !ok || target == "" || b.errandEngineReady(cfg) != nil {
+		return false
+	}
+	now := time.Now()
+	day := now.Add(-24 * time.Hour)
+	begun, err := b.store.ErrandsOpenedByThemSince(ctx, contact.Contact, day)
+	if err != nil {
+		log.Printf("errand: counting the conversations of %s: %v", logx.MaskJID(contact.Contact, "", ""), err)
+		return false
+	}
+	heard, err := b.store.ErrandLinesFromSince(ctx, contact.Contact, errand.FromThem, day)
+	if err != nil {
+		log.Printf("errand: counting the messages of %s: %v", logx.MaskJID(contact.Contact, "", ""), err)
+		return false
+	}
+	if begun >= errandChatsPerDay || heard >= errandHeardPerDay {
+		log.Printf("errand: %s wrote again after %d conversations and %d messages today: passed on to the owner", logx.MaskJID(contact.Contact, "", ""), begun, heard)
+		return false
+	}
+	e := store.Errand{ID: "e" + randomToken(7), Brain: contact.Brain, Contact: contact.Contact, Name: contact.Name, Goal: errand.ConversationGoal(s.OwnerName),
+		State: store.ErrandOpen, Chat: target, Days: errandChatDays, CreatedAt: now, Deadline: now.Add(errandChatDays * 24 * time.Hour),
+		Mode: store.ErrandByMessage, OpenedBy: store.OpenedByThem}
+	if err := b.store.AddErrand(ctx, e); err != nil {
+		log.Printf("errand: beginning a conversation with %s: %v", logx.MaskJID(contact.Contact, "", ""), err)
+		return false
+	}
+	if err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromThem, Text: text, At: at}, false); err != nil {
+		log.Printf("errand %s: recording their message: %v", e.ID, err)
+		_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandStopped, "their message could not be recorded", now)
+		return false
+	}
+	b.auditErrand(e, "opened", "they wrote first")
+	b.errands.soon(e.ID, b.waits.errandGather, b.errandTurn)
+	return true
 }
 
 // errandTurn answers what the person (or the owner) said in errand id
@@ -552,16 +625,27 @@ func (b *App) errandTurn(id string) {
 	if err != nil || e.State != store.ErrandOpen {
 		return
 	}
-	if time.Now().After(e.Deadline) {
-		b.expireErrand(ctx, e, fmt.Sprintf("its %d days are over", e.Days))
+	lines, err := b.store.ErrandLines(ctx, id)
+	if err != nil {
 		return
 	}
-	lines, err := b.store.ErrandLines(ctx, id)
-	if err != nil || len(lines) == 0 || lines[len(lines)-1].Sender == errand.FromYou {
+	// What they wrote that nobody answered, once it ends unanswered, goes
+	// on: to a conversation of its own, or to the owner.
+	unanswered := len(lines)
+	for unanswered > 0 && lines[unanswered-1].Sender == errand.FromThem {
+		unanswered--
+	}
+	if time.Now().After(e.Deadline) {
+		b.expireErrand(ctx, e, errandTimeUp(e))
+		b.hearLate(ctx, e, unanswered)
+		return
+	}
+	if len(lines) == 0 || lines[len(lines)-1].Sender == errand.FromYou {
 		return
 	}
 	if e.Sent >= errand.MaxMessages {
 		b.expireErrand(ctx, e, fmt.Sprintf("I wrote its %d messages", errand.MaxMessages))
+		b.hearLate(ctx, e, unanswered)
 		return
 	}
 	s, ok := b.errandSettings(e.Brain)
@@ -581,7 +665,16 @@ func (b *App) errandTurn(id string) {
 	b.errandAct(ctx, e, ans, lines, errandChannel{
 		say:   func(text string) error { return b.sayInErrand(ctx, e, text) },
 		abort: outboundmsg.ErrandAbortMessage(strings.TrimSpace(s.OwnerName)),
+		warn:  outboundmsg.ErrandWarnMessage(strings.TrimSpace(s.OwnerName)),
 	})
+}
+
+// errandTimeUp is why errand e ended when its time ran out.
+func errandTimeUp(e store.Errand) string {
+	if e.OpenedBy == store.OpenedByThem {
+		return "the day a conversation they begin stays open is over"
+	}
+	return fmt.Sprintf("its %d days are over", e.Days)
 }
 
 // errandChannel is how what an errand's run writes reaches its person:
@@ -589,8 +682,9 @@ func (b *App) errandTurn(id string) {
 type errandChannel struct {
 	// say sends text, and adds it to the conversation as Fridolin's.
 	say func(text string) error
-	// abort is the bridge's own last words when the run aborts.
-	abort string
+	// abort is the bridge's own last words when the run aborts; warn its
+	// words when the person is warned instead.
+	abort, warn string
 }
 
 // errandAct does what errand e's run answered over ch, and reports
@@ -602,6 +696,7 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 		if err := ch.say(ans.Text); err != nil {
 			log.Printf("errand %s: sending: %v", e.ID, err)
 		}
+		b.passOnNote(ctx, e, ans.Note)
 		return true
 	case errand.AskOwner:
 		if ans.Text != "" {
@@ -613,19 +708,23 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 		b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandQuestionNotice(e.Name, e.ID, ans.Question),
 			outboundmsg.ErrandQuestionHistory(e.Name, e.ID), errandQuestionRef+e.ID)
 	case errand.Done:
+		summary := ans.Summary
+		if summary == "" {
+			summary = "it came to its end."
+		}
+		// Ended before the last words go out, so that what they write to
+		// those begins a conversation of its own instead of joining one
+		// that is over.
+		if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandDone, summary, time.Now()); !ended {
+			return false
+		}
 		if ans.Text != "" {
 			if err := ch.say(ans.Text); err != nil {
 				log.Printf("errand %s: sending: %v", e.ID, err)
 			}
 		}
-		summary := ans.Summary
-		if summary == "" {
-			summary = "it came to its end."
-		}
-		if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandDone, summary, time.Now()); !ended {
-			return false
-		}
 		b.auditErrand(e, "ended", store.ErrandDone)
+		defer b.hearLate(ctx, e, len(lines))
 		if ans.Stop {
 			// They asked not to be written to: the next errand with them
 			// asks the owner first, and what they send meanwhile is a
@@ -635,12 +734,92 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 			}
 			b.auditErrand(e, "forgotten", "they asked not to be written to again")
 		}
+		b.passOnNote(ctx, e, ans.Note)
+		if e.OpenedBy == store.OpenedByThem {
+			b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandChatEndedNotice(e.Name, e.ID, summary, ans.Stop),
+				outboundmsg.ErrandChatEndedHistory(e.Name, e.ID, ans.Stop), errandNoteRef+e.ID)
+			return false
+		}
 		b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandDoneNotice(e.Name, e.ID, summary, ans.Stop),
 			outboundmsg.ErrandDoneHistory(e.Name, e.ID, ans.Stop), errandNoteRef+e.ID)
+		return false
 	case errand.Abort:
+		if !ans.Severe {
+			if c, err := b.store.ErrandContactOf(ctx, e.Contact); err == nil && !c.Warned(time.Now()) {
+				b.warnInErrand(ctx, e, ans.Reason, lines, ch)
+				return true
+			}
+		}
 		b.abortErrand(ctx, e, ans.Reason, lines, ch)
+		return false
 	}
+	b.passOnNote(ctx, e, ans.Note)
 	return false
+}
+
+// hearLate takes what errand e's person wrote after its first seen lines,
+// which the run that ended it did not read: e is over, so it goes the
+// way a message does while nothing is open with them, to a conversation
+// of its own or to the owner. A call's are not: they were said on it.
+func (b *App) hearLate(ctx context.Context, e store.Errand, seen int) {
+	if e.Mode == store.ErrandByCall {
+		return
+	}
+	all, err := b.store.ErrandLines(ctx, e.ID)
+	if err != nil || len(all) <= seen {
+		return
+	}
+	var late []string
+	var at time.Time
+	for _, l := range all[seen:] {
+		if l.Sender == errand.FromThem {
+			late, at = append(late, l.Text), l.At
+		}
+	}
+	if len(late) == 0 {
+		return
+	}
+	b.errandInbound(ctx, chat.Inbound{JID: chat.DMJID(e.Contact), Sender: e.Contact, Text: strings.Join(late, "\n"), At: at, Source: chat.SourceWhatsApp})
+}
+
+// passOnNote tells the owner note, what errand e's person asked Fridolin
+// to pass on: their words, which the brain's history leaves out.
+func (b *App) passOnNote(ctx context.Context, e store.Errand, note string) {
+	if note == "" {
+		return
+	}
+	b.auditErrand(e, "passed on", fmt.Sprintf("%d characters", len([]rune(note))))
+	b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandNoteNotice(e.Name, e.ID, note), outboundmsg.ErrandNoteHistory(e.Name, e.ID), errandNoteRef+e.ID)
+}
+
+// lastFromThem is the latest of lines the person wrote, "" for none.
+func lastFromThem(lines []store.ErrandLine) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lines[i].Sender == errand.FromThem {
+			return lines[i].Text
+		}
+	}
+	return ""
+}
+
+// warnInErrand answers the person of errand e, who tried for the first
+// time in ErrandWarningKeep to make Fridolin do what it must not (and
+// not severely), with the bridge's own warning (ch.warn) instead of the
+// end: the conversation goes on, the owner hears why, and a second try
+// ends it.
+func (b *App) warnInErrand(ctx context.Context, e store.Errand, reason string, lines []store.ErrandLine, ch errandChannel) {
+	if reason == "" {
+		reason = "they tried to make me do what I must not."
+	}
+	if err := b.store.WarnErrandContact(ctx, e.Contact, time.Now()); err != nil {
+		log.Printf("errand %s: warning +%s: %v", e.ID, logx.MaskJID(e.Contact, "", ""), err)
+	}
+	if err := ch.say(ch.warn); err != nil {
+		log.Printf("errand %s: sending the warning: %v", e.ID, err)
+	}
+	b.auditErrand(e, "warned", textx.Truncate(reason, 200))
+	b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandWarnedNotice(e.Name, e.ID, reason, lastFromThem(lines)),
+		outboundmsg.ErrandWarnedHistory(e.Name, e.ID), errandNoteRef+e.ID)
 }
 
 // abortErrand ends errand e because the person tried to make Fridolin do
@@ -664,14 +843,7 @@ func (b *App) abortErrand(ctx context.Context, e store.Errand, reason string, li
 		log.Printf("errand %s: blocking +%s: %v", e.ID, logx.MaskJID(e.Contact, "", ""), err)
 	}
 	b.auditErrand(e, "blocked", textx.Truncate(reason, 200))
-	last := ""
-	for i := len(lines) - 1; i >= 0; i-- {
-		if lines[i].Sender == errand.FromThem {
-			last = lines[i].Text
-			break
-		}
-	}
-	b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandAbortedNotice(e.Name, e.Contact, e.ID, reason, last),
+	b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandAbortedNotice(e.Name, e.Contact, e.ID, reason, lastFromThem(lines)),
 		outboundmsg.ErrandAbortedHistory(e.Name, e.Contact, e.ID), errandNoteRef+e.ID)
 }
 
@@ -689,14 +861,28 @@ func (b *App) expireErrand(ctx context.Context, e store.Errand, why string) {
 // connection, in Claude mode through `claude -p` with no tools at all.
 func (b *App) errandAsk(ctx context.Context, e store.Errand, s manifest.Errands, lines []store.ErrandLine, call bool) (errand.Answer, error) {
 	cfg := RuntimeConfig(b.cfgs)
-	doc := errand.Errand{Owner: strings.TrimSpace(s.OwnerName), Name: e.Name, Goal: e.Goal, Brief: e.Brief, Now: time.Now().In(cfg.Location()), Deadline: e.Deadline, Call: call}
+	doc := errand.Errand{Owner: strings.TrimSpace(s.OwnerName), Name: e.Name, Goal: e.Goal, Brief: e.Brief, Now: time.Now().In(cfg.Location()), Deadline: e.Deadline, Call: call,
+		Persona: s.Persona, Profile: s.Profile}
+	if c, err := b.store.ErrandContactOf(ctx, e.Contact); err == nil {
+		doc.ForThem = c.Brief
+	}
+	// What was said before, but not what the owner said then: that was
+	// meant for its own errand, and the run follows the owner's lines.
+	earlier, err := b.store.EarlierErrandLines(ctx, e.Contact, e.ID, 2*errand.MaxEarlier)
+	if err != nil {
+		log.Printf("errand %s: reading the earlier conversations: %v", e.ID, err)
+	}
+	for _, l := range earlier {
+		if l.Sender != errand.FromOwner {
+			doc.Earlier = append(doc.Earlier, errand.Line{From: l.Sender, Text: l.Text, At: l.At})
+		}
+	}
 	for _, l := range lines {
 		doc.Lines = append(doc.Lines, errand.Line{From: l.Sender, Text: l.Text, At: l.At})
 	}
 	ctx, cancel := context.WithTimeout(ctx, errandRunTimeout)
 	defer cancel()
 	var out string
-	var err error
 	switch {
 	case b.hooks.errandRun != nil:
 		out, err = b.hooks.errandRun(doc)
@@ -833,7 +1019,7 @@ func (b *App) sweepErrands(ctx context.Context, now time.Time, resume bool) {
 	}
 	for _, e := range open {
 		if now.After(e.Deadline) {
-			b.expireErrand(ctx, e, fmt.Sprintf("its %d days are over", e.Days))
+			b.expireErrand(ctx, e, errandTimeUp(e))
 			continue
 		}
 		if !resume {
@@ -955,8 +1141,7 @@ func (b *App) stopErrandFor(ctx context.Context, brain, id, why string) error {
 }
 
 // unblockErrandContact lets Fridolin hear number again, someone it
-// stopped listening to: it forgets them, so that writing to them again
-// asks the owner first.
+// stopped listening to.
 func (b *App) unblockErrandContact(ctx context.Context, number string) (bool, error) {
 	c, err := b.store.ErrandContactOf(ctx, number)
 	if errors.Is(err, store.ErrNoErrand) || (err == nil && c.State != store.ContactBlocked) {
@@ -965,8 +1150,8 @@ func (b *App) unblockErrandContact(ctx context.Context, number string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	if _, err := b.store.ForgetErrandContact(ctx, c.Contact); err != nil {
-		return false, err
-	}
-	return true, nil
+	// Known again, so that the owner's own request writes to them without
+	// a poll; what they write goes to the owner until the owner lets
+	// Fridolin talk with them again (errand_contact).
+	return b.store.UnblockErrandContact(ctx, c.Contact, time.Now())
 }
