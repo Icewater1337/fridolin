@@ -61,9 +61,9 @@ ARG LITESTREAM_VERSION=0.5.17
 # What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
 # (quick tunnels to a dev server).
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.103.2
+ARG GH_VERSION=2.103.3
 # renovate: datasource=github-releases depName=cloudflare/cloudflared
-ARG CLOUDFLARED_VERSION=2026.10.3
+ARG CLOUDFLARED_VERSION=2026.10.4
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
@@ -126,7 +126,7 @@ RUN python3 -m venv /opt/fridolin/venv \
 FROM ${NODE_IMAGE} AS node
 # At least the version internal/claudecli tests against (TestedClaudeVersion).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.310
+ARG CLAUDE_CODE_VERSION=2.1.311
 # Codex (agent_provider "codex"), at least the version the bridge is tested
 # against; its package installs the native build for the image's platform.
 # Each brain signs in to it with a file of its own (brains/<id>/codex/
