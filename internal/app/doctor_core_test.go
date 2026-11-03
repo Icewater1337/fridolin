@@ -65,7 +65,7 @@ func TestDoctorCoreChecks(t *testing.T) {
 		t.Errorf("bubblewrap that fails: %+v", got)
 	}
 	s := &fakeSystem{goos: "linux", files: map[string]fs.FileMode{sandbox.BwrapPath: 0o755}, runs: map[string]fakeRun{
-		sandbox.BwrapPath + " --unshare-user --unshare-pid --unshare-ipc --ro-bind / / --proc /proc --dev /dev --die-with-parent -- /bin/true": {},
+		sandbox.BwrapPath + " --unshare-user --disable-userns --unshare-pid --unshare-ipc --ro-bind / / --proc /proc --dev /dev --die-with-parent -- /bin/true": {},
 	}}
 	if got := checkContainerSandbox(context.Background(), s.doctorEnv(cfg, nil)); got.Status != doctor.OK {
 		t.Errorf("bubblewrap that works: %+v", got)

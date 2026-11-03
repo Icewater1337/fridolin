@@ -347,7 +347,7 @@ func (sp *SandboxProfiler) Available() error {
 func probeBwrap(bwrap string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bwrap, "--unshare-user", "--unshare-pid", "--unshare-ipc",
+	cmd := exec.CommandContext(ctx, bwrap, "--unshare-user", "--disable-userns", "--unshare-pid", "--unshare-ipc",
 		"--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--die-with-parent", "--", "/bin/true")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("bubblewrap cannot make a brain's namespaces here (%v: %s); the container needs compose.yaml's security_opt (docs/CORE.md)", err, strings.TrimSpace(string(out)))

@@ -132,7 +132,7 @@ func checkContainerSandbox(ctx context.Context, env *doctor.Env) doctor.Result {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := env.Run(ctx, sandbox.BwrapPath, "--unshare-user", "--unshare-pid", "--unshare-ipc",
+	if _, err := env.Run(ctx, sandbox.BwrapPath, "--unshare-user", "--disable-userns", "--unshare-pid", "--unshare-ipc",
 		"--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--die-with-parent", "--", "/bin/true"); err != nil {
 		return doctor.Result{Status: doctor.Fail, Detail: "bubblewrap cannot make a brain's namespaces here: " + err.Error(),
 			Fix: "run the core with compose.yaml's security_opt (seccomp profile, systempaths=unconfined); on an AppArmor host also apparmor=unconfined (docs/CORE.md)"}
