@@ -54,8 +54,8 @@ func (m *Mirror) Status() MirrorStatus {
 func (m *Mirror) local() (map[string]int64, error) {
 	out := map[string]int64{}
 	err := filepath.WalkDir(m.Dir, func(p string, d fs.DirEntry, err error) error {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+		if errors.Is(err, fs.ErrNotExist) && p != m.Dir {
+			return nil // gone mid-walk; a missing Dir is an error, not an empty copy
 		}
 		if err != nil || d.IsDir() {
 			return err
@@ -138,6 +138,9 @@ func (m *Mirror) sync(ctx context.Context, now time.Time) (MirrorStatus, error) 
 	}
 	if m.DeleteEvery > 0 && now.Sub(m.lastDelete) < m.DeleteEvery {
 		return st, nil
+	}
+	if len(files) == 0 {
+		return st, nil // an empty Dir never empties Store: Litestream has not written, not deleted everything
 	}
 	var gone []string
 	for key := range m.remote {

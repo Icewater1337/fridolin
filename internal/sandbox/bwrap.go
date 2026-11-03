@@ -123,7 +123,9 @@ func BwrapArgs(p BwrapPolicy, prog string, args []string) ([]string, error) {
 		// A user namespace with the brain's user, mapped onto the bridge's;
 		// PID, IPC and cgroup namespaces of its own. The network stays the
 		// container's: Claude needs it, and the brain API is on loopback.
-		"--unshare-user", "--uid", uid, "--gid", uid,
+		// The run cannot make namespaces of its own: unshare -U would give it
+		// capabilities over the kernel code only they reach (issue 489).
+		"--unshare-user", "--disable-userns", "--uid", uid, "--gid", uid,
 		"--unshare-pid", "--unshare-ipc", "--unshare-cgroup-try",
 		// The run ends with the bridge's supervision of it; no terminal
 		// to inject keystrokes into; no capabilities.

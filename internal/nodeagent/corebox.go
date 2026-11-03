@@ -653,7 +653,7 @@ const bwrapPath = "/usr/bin/bwrap"
 func BwrapProbe(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bwrapPath, "--unshare-user", "--unshare-pid", "--unshare-ipc",
+	cmd := exec.CommandContext(ctx, bwrapPath, "--unshare-user", "--disable-userns", "--unshare-pid", "--unshare-ipc",
 		"--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--die-with-parent", "--", "/bin/true")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%v: %s", err, lastLine(string(out)))
