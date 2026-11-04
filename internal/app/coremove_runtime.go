@@ -339,7 +339,8 @@ func (b *App) coreMoveEnded(r nodes.MoveRecord) {
 	switch {
 	case r.State == nodes.MoveDone:
 		left, leftName = r.Source, r.SourceName
-	case secretsSent(r):
+	case secretsSent(r) && !(r.State == nodes.MoveFailed && releaseSent(r)):
+		// With a release sent, a failed move leaves unclear where the core runs.
 		left, leftName = r.Target, r.TargetName
 	}
 	if left != "" {
@@ -350,6 +351,16 @@ func (b *App) coreMoveEnded(r nodes.MoveRecord) {
 			go b.coreMoveSite(s.Domain, r.TargetName)
 		}
 	}
+}
+
+// releaseSent reports whether r's source was asked to release the core.
+func releaseSent(r nodes.MoveRecord) bool {
+	for _, s := range r.Steps {
+		if s.Step == "releasing" {
+			return true
+		}
+	}
+	return false
 }
 
 // secretsSent reports whether r's host secrets went to its target.
