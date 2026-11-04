@@ -154,7 +154,8 @@ func TestErrandContactTool(t *testing.T) {
 		t.Errorf("setting from a schedule: %q", out)
 	}
 	for args, want := range map[string]string{
-		`"mode":"chat"`: "mode is converse or forward",
+		`"calendar":"always"`: "calendar is off, offer",
+		`"mode":"chat"`:       "mode is converse or forward",
 		`"brief":"` + strings.Repeat("a", errand.MaxForThem+1) + `"`: "brief is at most",
 	} {
 		if out, isErr := call(h.ownerRun(), `{"number":"`+errandWritten+`",`+args+`}`); !isErr || !strings.Contains(out, want) {
@@ -167,6 +168,9 @@ func TestErrandContactTool(t *testing.T) {
 	}
 	if out, _ := call(h.ownerRun(), `{"number":"`+errandWritten+`","brief":""}`); !strings.Contains(out, "(forward)") || !strings.Contains(out, "Standing brief: none") {
 		t.Errorf("clearing the brief keeps the mode: %q", out)
+	}
+	if out, _ := call(h.ownerRun(), `{"number":"`+errandWritten+`","calendar":"offer"}`); !strings.Contains(out, "may do at most: offer") || !strings.Contains(out, "(forward)") {
+		t.Errorf("setting their calendar: %q", out)
 	}
 	if l := h.auditOf("errand"); l[len(l)-1]["detail"] != "contact" || l[len(l)-1]["outcome"] != store.ContactForward {
 		t.Errorf("the audit's line: %v", l[len(l)-1])

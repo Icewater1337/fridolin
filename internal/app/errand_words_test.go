@@ -115,7 +115,7 @@ func TestErrandWordsStayOutOfTheBrain(t *testing.T) {
 
 	// Once the owner has their messages passed on, what they write with no
 	// errand open is passed on.
-	if _, err := h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", time.Now()); err != nil {
+	if _, err := h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	h.theyWrite("Thanks! " + errandMarker)
@@ -223,7 +223,7 @@ func TestErrandWordsStayOutOfTheLiveSession(t *testing.T) {
 	h, log := liveHarnessOf(t, manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true},
 		LiveSession: manifest.LiveSessionOwnerDM, Errands: &manifest.Errands{OwnerName: "Sam"}}, nil)
 	h.knowAlex()
-	if _, err := h.b.store.SetErrandContactWays(context.Background(), errandNumber, store.ContactForward, "", time.Now()); err != nil {
+	if _, err := h.b.store.SetErrandContactWays(context.Background(), errandNumber, store.ContactForward, "", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	h.Answer(inbound{JID: harnessDM, Text: "one"})

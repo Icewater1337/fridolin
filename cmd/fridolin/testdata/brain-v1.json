@@ -147,6 +147,20 @@
     "intro": "Hi, this is Fridolin, Sam's assistant.",
     "model": "gpt-5",
     "persona": "Warm, a bit witty, informal.",
-    "profile": "Sam usually answers in the evening."
+    "profile": "Sam usually answers in the evening.",
+    "calendar": {
+      "mode": "book_after_yes",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ],
+      "from": "09:00",
+      "to": "18:00",
+      "days_ahead": 14,
+      "max_minutes": 90
+    }
   }
 }

@@ -562,6 +562,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"brain.json approvals", "brain.schema.json#/properties/approvals", manifest.ApprovalsModes(), `{"id": "a", "name": "A", "approvals": %s}`},
 		{"brain.json live_session", "brain.schema.json#/properties/live_session", manifest.LiveSessionModes(), `{"id": "a", "name": "A", "live_session": %s}`},
 		{"brain.json role", "brain.schema.json#/properties/role", manifest.Roles(), `{"id": "a", "name": "A", "role": %s}`},
+		{"brain.json errands.calendar.mode", "brain.schema.json#/properties/errands/properties/calendar/properties/mode", manifest.ErrandCalendarModes(), `{"id": "a", "name": "A", "errands": {"owner_name": "Sam", "calendar": {"mode": %s}}}`},
 		{"schedule report", "schedule.schema.json#/properties/report", manifest.ScheduleReports(), `{"name": "s", "when": "every 6h", "report": %s}`},
 		{"schedule missed", "schedule.schema.json#/properties/missed", manifest.ScheduleMissed(), `{"name": "s", "when": "every 6h", "missed": %s}`},
 		{"schedule risk", "schedule.schema.json#/properties/risk", manifest.ScheduleRisks(), `{"name": "s", "when": "every 6h", "risk": %s}`},

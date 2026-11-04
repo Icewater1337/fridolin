@@ -125,6 +125,7 @@ var appMigrations = []func(*sql.Tx) error{
 	migrateV10,
 	migrateV11,
 	migrateV12,
+	migrateV13,
 }
 
 // migrate brings the bridge's tables to the newest version, one

@@ -88,6 +88,9 @@ const (
 	// FromOwner is the owner's own answer or instruction, handed in by
 	// their brain (errand_answer).
 	FromOwner = "owner"
+	// FromCalendar is the bridge's word on a booking: what it booked, or
+	// why not.
+	FromCalendar = "calendar"
 )
 
 // What a run may answer.
@@ -105,6 +108,11 @@ const (
 	// what it must not, with Reason for the owner. The bridge sends the
 	// person a fixed message, never a text of the run's.
 	Abort = "abort"
+	// Book asks the bridge to book BookStart for BookMinutes in the
+	// owner's calendar: one of the free times, as the errand's calendar
+	// allows. Text goes out as for a reply once the bridge booked it, or
+	// asked the owner.
+	Book = "book"
 )
 
 // Line is one message of the conversation.
@@ -136,7 +144,10 @@ type Errand struct {
 	// Earlier are the latest lines of the conversations with the person
 	// before this one, oldest first.
 	Earlier []Line
-	Lines   []Line
+	// Calendar is what the run may do with the owner's calendar, nil for
+	// nothing.
+	Calendar *Calendar
+	Lines    []Line
 }
 
 // Answer is what a run answered.
@@ -153,6 +164,10 @@ type Answer struct {
 	// the bridge then ends the conversation at once.
 	Severe bool `json:"severe"`
 	Stop   bool `json:"stop"`
+	// BookStart and BookMinutes are what a Book asks to book: a local
+	// time, "2006-01-02 15:04", and how long.
+	BookStart   string `json:"book_start"`
+	BookMinutes int    `json:"book_minutes"`
 }
 
 // Instructions are the rules every errand's run gets ahead of its
@@ -172,31 +187,34 @@ Rules:
 9. Lines from "owner" are the owner's own answers and instructions to you: follow them.
 10. Write short WhatsApp messages in the language the person writes in, as formal or informal as they are ("du" or "Sie"), or else in the language of the conversation so far. No markup, no [POLL] blocks.
 11. When the document's channel is "phone call", what you write is read aloud and what they said was transcribed: short spoken sentences, no emoji, lists or links, and allow for words the transcription got wrong.
+12. If the document has a calendar, you may help find a time to meet: offer only times inside calendar.free_times, and claim to know nothing else of the owner's calendar. With calendar.may "book" or "book_after_yes", once the person agrees on a time inside free_times, answer "book" with book_start (local time, "YYYY-MM-DD HH:MM") and book_minutes (at most calendar.max_minutes). With "book" your text goes out only once it is booked, so write it as the confirmation; with "book_after_yes" it goes out at once, so say the owner will confirm. Lines from "calendar" are the bridge's word on what was booked or not: tell the person what they say.
 
 Answer with one JSON object and nothing else:
-{"action": "reply" | "done" | "ask_owner" | "abort", "text": "", "summary": "", "question": "", "reason": "", "note": "", "severe": false, "stop": false}
+{"action": "reply" | "done" | "ask_owner" | "abort" | "book", "text": "", "summary": "", "question": "", "reason": "", "note": "", "severe": false, "stop": false, "book_start": "", "book_minutes": 0}
 - text: your message to the person; required for "reply", may be "" otherwise.
 - summary: for "done", what came of it, for the owner.
 - question: for "ask_owner", what the owner should answer.
 - reason: for "abort", what the person tried; severe: whether it was serious (rule 4).
-- note: what to pass on to the owner (rule 6), else "".`
+- note: what to pass on to the owner (rule 6), else "".
+- book_start, book_minutes: for "book", the time to book (rule 12); else "" and 0.`
 
 // document is the errand as its run reads it: JSON, so that nothing the
 // person writes can end their line and start another, or pass for a
 // rule.
 type document struct {
-	Owner        string `json:"owner"`
-	Person       string `json:"person"`
-	Channel      string `json:"channel"`
-	Now          string `json:"now"`
-	Ends         string `json:"errand_ends"`
-	Style        string `json:"style"`
-	Goal         string `json:"goal"`
-	Brief        string `json:"brief"`
-	OwnerProfile string `json:"owner_profile"`
-	ForThem      string `json:"for_them"`
-	Earlier      []Line `json:"earlier"`
-	Conversation []Line `json:"conversation"`
+	Owner        string       `json:"owner"`
+	Person       string       `json:"person"`
+	Channel      string       `json:"channel"`
+	Now          string       `json:"now"`
+	Ends         string       `json:"errand_ends"`
+	Style        string       `json:"style"`
+	Goal         string       `json:"goal"`
+	Brief        string       `json:"brief"`
+	OwnerProfile string       `json:"owner_profile"`
+	ForThem      string       `json:"for_them"`
+	Calendar     *calendarDoc `json:"calendar,omitempty"`
+	Earlier      []Line       `json:"earlier"`
+	Conversation []Line       `json:"conversation"`
 }
 
 // Document is e as its run reads it after the Instructions.
@@ -208,6 +226,12 @@ func Document(e Errand) string {
 	}
 	if d.Earlier == nil {
 		d.Earlier = []Line{}
+	}
+	if c := e.Calendar; c != nil {
+		d.Calendar = &calendarDoc{May: c.May, FreeTimes: c.Free, MaxMinutes: c.MaxMinutes, Note: c.Note}
+		if d.Calendar.FreeTimes == nil {
+			d.Calendar.FreeTimes = []string{}
+		}
 	}
 	if e.Call {
 		d.Channel = "phone call"
@@ -294,6 +318,10 @@ func ParseAnswer(out string) (Answer, error) {
 		if a.Question == "" {
 			return Answer{}, fmt.Errorf("%w: ask_owner without a question", ErrNoAnswer)
 		}
+	case Book:
+		if strings.TrimSpace(a.BookStart) == "" || a.BookMinutes <= 0 || a.BookMinutes > 24*60 {
+			return Answer{}, fmt.Errorf("%w: book without a time or with %d minutes", ErrNoAnswer, a.BookMinutes)
+		}
 	case Done, Abort:
 	default:
 		return Answer{}, fmt.Errorf("%w: unknown action %q", ErrNoAnswer, textx.Truncate(a.Action, 40))
@@ -305,6 +333,10 @@ func ParseAnswer(out string) (Answer, error) {
 	} else {
 		a.Severe = false
 	}
+	if a.Action != Book {
+		a.BookStart, a.BookMinutes = "", 0
+	}
+	a.BookStart = strings.TrimSpace(a.BookStart)
 	if utf8.RuneCountInString(a.Text) > MaxText {
 		return Answer{}, fmt.Errorf("%w: a text of more than %d characters", ErrNoAnswer, MaxText)
 	}
@@ -320,16 +352,18 @@ func ParseAnswer(out string) (Answer, error) {
 var schema = map[string]any{
 	"type":                 "object",
 	"additionalProperties": false,
-	"required":             []string{"action", "text", "summary", "question", "reason", "note", "severe", "stop"},
+	"required":             []string{"action", "text", "summary", "question", "reason", "note", "severe", "stop", "book_start", "book_minutes"},
 	"properties": map[string]any{
-		"action":   map[string]any{"type": "string", "enum": []string{Reply, Done, AskOwner, Abort}},
-		"text":     map[string]any{"type": "string"},
-		"summary":  map[string]any{"type": "string"},
-		"question": map[string]any{"type": "string"},
-		"reason":   map[string]any{"type": "string"},
-		"note":     map[string]any{"type": "string"},
-		"severe":   map[string]any{"type": "boolean"},
-		"stop":     map[string]any{"type": "boolean"},
+		"action":       map[string]any{"type": "string", "enum": []string{Reply, Done, AskOwner, Abort, Book}},
+		"book_start":   map[string]any{"type": "string"},
+		"book_minutes": map[string]any{"type": "integer"},
+		"text":         map[string]any{"type": "string"},
+		"summary":      map[string]any{"type": "string"},
+		"question":     map[string]any{"type": "string"},
+		"reason":       map[string]any{"type": "string"},
+		"note":         map[string]any{"type": "string"},
+		"severe":       map[string]any{"type": "boolean"},
+		"stop":         map[string]any{"type": "boolean"},
 	},
 }
 

@@ -28,6 +28,24 @@ const MODES = {
   forward: 'Passes it on to you',
 };
 
+// The most errands with someone may do with your calendar.
+/** @type {Record<string, string>} */
+const CALENDAR = {
+  '': 'As brain.json allows',
+  off: 'Not at all',
+  offer: 'Offer your free times',
+  book_after_yes: 'Book after your yes',
+  book: 'Book',
+};
+
+// An errand's booking, as its page says it.
+/** @type {Record<string, string>} */
+const BOOKING = {
+  asking: 'Waiting for your yes',
+  booking: 'Being booked',
+  booked: 'Booked',
+};
+
 const errandsResource = resource('/api/errands');
 
 // An errand's state, as its badge says it.
@@ -107,6 +125,7 @@ function editButton(c) {
     small: true, icon: 'edit',
     onClick: async () => {
       const mode = select(Object.entries(MODES), c.mode);
+      const calendar = select(Object.entries(CALENDAR), c.calendar || '');
       const brief = h('textarea', { rows: 5, maxLength: MAX_BRIEF, placeholder: 'e.g. Alex is my brother: tell him about my plans freely.' });
       brief.value = c.brief || '';
       const saved = await openDialog({
@@ -115,10 +134,12 @@ function editButton(c) {
           field({ label: 'When they write and nothing is open', control: mode,
             help: 'Talks with them: Fridolin answers by itself, with the errands’ rules and limits, and tells you how it went. Passes it on: you get their message and decide.' }),
           field({ label: 'What Fridolin may always tell them about you', control: brief,
-            help: 'On top of brain.json’s errands.profile and each errand’s brief. They can read it: someone who pushes can get Fridolin to repeat it.' })),
+            help: 'On top of brain.json’s errands.profile and each errand’s brief. They can read it: someone who pushes can get Fridolin to repeat it.' }),
+          field({ label: 'Your calendar', control: calendar,
+            help: 'The most Fridolin may do with your calendar in errands with them, never more than brain.json’s errands.calendar allows.' })),
         actions: [
           { label: 'Cancel', value: null },
-          { label: 'Save', kind: 'primary', onClick: async () => { await put(`/api/errand-contacts/${encodeURIComponent(c.number)}`, { mode: mode.value, brief: brief.value }); return true; } },
+          { label: 'Save', kind: 'primary', onClick: async () => { await put(`/api/errand-contacts/${encodeURIComponent(c.number)}`, { mode: mode.value, brief: brief.value, calendar: calendar.value }); return true; } },
         ],
       });
       if (saved) { toast('Saved', 'ok', { timeout: 2000 }); await errandsResource.refresh(); }
@@ -241,6 +262,7 @@ export default /** @satisfies {PageModule} */ ({
             ['Opened', timeAgo(d.created)],
             [d.live ? 'Ends' : 'Ended', timeAgo(d.live ? d.deadline : (d.closed || d.deadline))],
             ['Messages', `${d.sent} from Fridolin, at most ${d.max_messages}`],
+            ['Booking', d.booking ? h('span', BOOKING[d.booking] || d.booking, ': ', timeAgo(d.booking_from || ''), d.booking_to ? h('span.muted', ' (until ', timeAgo(d.booking_to), ')') : null) : null],
             ['How it ended', d.outcome ? longText(d.outcome, { limit: 320, lines: 6 }) : null],
           ]),
           d.live ? h('div.actions', stopButton(d, refresh)) : null),

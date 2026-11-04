@@ -10,6 +10,18 @@ for compatibility.
 
 ### Added
 
+- **Errands can arrange a time in your calendar.** With
+  `errands.calendar` in the core brain's brain.json (`mode` `offer`,
+  `book_after_yes` or `book`, and the days, hours, days ahead and longest
+  booking), the conversing run is handed your free times, worked out by
+  the bridge from the busy times of the brain's calendar, never an event.
+  It can ask to book one: the bridge checks the time is one of them,
+  still free and the errand's first booking, then books it as "<name>
+  (arranged by Fridolin)", or first asks you in a poll with
+  `book_after_yes`. A person (People → Edit, `errand_contact`) and an
+  errand (`contact_person`'s `calendar`) may narrow it. bridge.db's
+  `errands` and `errand_contacts` get columns; an older bridge ignores
+  them. [docs/BRAINS.md](docs/BRAINS.md#calendar-in-errands)
 - **Fridolin talks with the people it knows.** Once Fridolin has written
   to someone (with your approval the first time), what they write while
   nothing is open with them begins a conversation of its own: Fridolin

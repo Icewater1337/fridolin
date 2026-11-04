@@ -696,6 +696,16 @@ errandWarnedNotice
 	I said no and warned them: a second try within 30 days ends the conversation and blocks them. `errand_stop` ends it now.
 errandWarnedHistory
 	⚠️ Alex tried to make me do what I must not (errand e1a2b3c4), and I warned them. Why, and their message, are left out here: `errands` with id e1a2b3c4 shows them, as their words. A second try within 30 days ends the conversation and blocks them.
+errandBookedNotice
+	📅 Booked Fri 2026-11-06 14:00–15:00 with Alex in your calendar (errand e1a2b3c4).
+errandBookingDraft
+	📅 Alex would like to meet Fri 2026-11-06 14:00–15:00. Shall I put it in your calendar (errand e1a2b3c4)?
+errandBookingFailedNotice
+	⚠️ I could not put Fri 2026-11-06 14:00–15:00 with Alex in your calendar (errand e1a2b3c4): the calendar did not take it. I told them you will come back to them about it.
+errandBookingQuestion
+	📅 They want to meet, but the time they agreed on could not be booked. Not booked: Fri 2026-11-06 14:00–15:00 is not one of the free times. What should I tell them?
+errandBookingCheckMessage
+	📅 Let me check the time with Sam, and I'll get back to you.
 unblockedReply
 	✅ +15551234567 is unblocked. What they write comes to you again; ask me in this chat to write to them, or to talk with them by myself again.
 notBlockedReply
