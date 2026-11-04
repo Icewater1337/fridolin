@@ -15,7 +15,7 @@
 
 ARG GO_IMAGE=golang:1.26.8-bookworm
 ARG NODE_IMAGE=node:26.12.0-bookworm-slim
-ARG RUNTIME_IMAGE=debian:bookworm-20261020-slim
+ARG RUNTIME_IMAGE=debian:bookworm-20261027-slim
 
 # ── the bridge ────────────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS build
@@ -63,7 +63,7 @@ ARG LITESTREAM_VERSION=0.5.17
 # renovate: datasource=github-releases depName=cli/cli
 ARG GH_VERSION=2.103.3
 # renovate: datasource=github-releases depName=cloudflare/cloudflared
-ARG CLOUDFLARED_VERSION=2026.10.3
+ARG CLOUDFLARED_VERSION=2026.10.5
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
