@@ -1059,7 +1059,7 @@ the `node` service:
 | `fridolin-box-data` at `/data`, `fridolin-box-home` at `/var/lib/fridolin` | the core's data dir and its home (the credentials folder a move brings, never in an export); named apart from a core container's `fridolin-data`, so a machine that runs both never shares one |
 | `127.0.0.1:8765` and `127.0.0.1:8780` on the host (`FRIDOLIN_BOX_DASHBOARD_PORT`, `FRIDOLIN_BOX_SITE_PORT` in `.env`) | the dashboard and the site, as a core container publishes them. The core listens on the container's loopback (`fridolin run --container --box`), and the agent forwards the published ports to it, refusing FrIDE's address on the box network |
 | the core container's seccomp profile and `systempaths=unconfined` | bubblewrap gives each brain's run its own user, mount and PID namespaces ([CORE.md](CORE.md#the-brains-sandbox-in-the-container)) |
-| `FRIDOLIN_BOX_CORE=1`, `mem_limit` `FRIDOLIN_BOX_CORE_MEMORY` (8g), `stop_grace_period` 45s | the agent may run the core; room for it; a clean stop |
+| `FRIDOLIN_BOX_CORE=1`, `mem_limit` `FRIDOLIN_BOX_CORE_MEMORY` (8g), `pids_limit` 4096, `stop_grace_period` 45s | the agent may run the core; room for it; a clean stop |
 
 On **Linux with AppArmor** (Ubuntu), which confines the user namespaces
 bubblewrap makes, load the core's profile once (`sudo fridolin core
