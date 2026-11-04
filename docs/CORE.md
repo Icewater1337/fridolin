@@ -125,7 +125,7 @@ Use a volume of its own for that, never `fridolin-data`.
 
 `container/compose.yaml` defines the service `core` (container
 `fridolin-core`, restart `unless-stopped`, memory limit
-`FRIDOLIN_MEMORY_LIMIT`, default `8g`) and the volume. The compose file is
+`FRIDOLIN_MEMORY_LIMIT`, default `8g`, process limit 4096) and the volume. The compose file is
 compiled into the binary, and the host commands write it to
 `<user config dir>/fridolin/compose.yaml` (on macOS
 `~/Library/Application Support/fridolin/compose.yaml`) before each run, so

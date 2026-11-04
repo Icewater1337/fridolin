@@ -228,6 +228,27 @@ func TestBoxFrideNeverSeesTheCore(t *testing.T) {
 	}
 }
 
+// Without a limit a brain's run can fork until the bridge cannot start
+// anything (#492). A box's node may run the core, so its overlay needs the
+// core's limit too.
+func TestComposeFilesLimitProcesses(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		data []byte
+		key  string
+		want string
+	}{
+		{"compose.yaml", container.Compose, "services.core.pids_limit", "4096"},
+		{"box.yaml", container.Box, "services.node.pids_limit", "1024"},
+		{"box.yaml", container.Box, "services.fride.pids_limit", "4096"},
+		{"box-core.yaml", container.BoxCore, "services.node.pids_limit", "4096"},
+	} {
+		if got := composeTree(t, c.data)[c.key]; !slices.Equal(got, []string{c.want}) {
+			t.Errorf("%s: %s is %q, want %s", c.name, c.key, got, c.want)
+		}
+	}
+}
+
 // compose merges box-core.yaml's security options into box.yaml's and
 // refuses one that is then there twice, which stopped every compose
 // command of a box: with FRIDOLIN_BOX_APPARMOR unset, the last line

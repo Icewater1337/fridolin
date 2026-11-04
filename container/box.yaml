@@ -47,6 +47,7 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: ${FRIDOLIN_BOX_NODE_MEMORY:-1g}
+    pids_limit: 1024
     stop_grace_period: 15s
 
   fride:
@@ -66,6 +67,7 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: ${FRIDOLIN_BOX_FRIDE_MEMORY:-8g}
+    pids_limit: 4096
     stop_grace_period: 30s
 
 # The box's own network: the node reaches FrIDE as fride, FrIDE the node

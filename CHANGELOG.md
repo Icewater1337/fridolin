@@ -205,6 +205,11 @@ for compatibility.
 
 ### Fixed
 
+- **A brain's run can no longer fork-bomb a container.** The containers
+  now have a process limit: 4096 for the core, FrIDE and a box that can
+  hold the core, 1024 for a box's node without that overlay. It applies
+  the next time the container is created, and a run that forks without
+  end fails at the limit.
 - **Cron `*/n` in a day field.** A day-of-month or day-of-week field that
   starts with `*` (`*/2`) no longer counts as restricted, so `0 9 */2 * 1-5`
   runs on odd weekdays, not odd days or weekdays, and `0 9 */2 * *` skips
