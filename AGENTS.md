@@ -180,13 +180,19 @@ Windows `%ProgramFiles%\fridolin`).
 
 **A box** instead (docs/NODES.md, "Node in a box"), the fallback where
 Docker Sandboxes cannot run, such as a machine without virtualization:
-Docker and one line, no Tailscale on the host, no service of its own.
+Docker, a signed-in `gh` and one line, no Tailscale on the host, no
+service of its own.
 
 1. **Docker**: Windows `winget install --id Docker.DockerDesktop -e`
    (UAC prompt; open Docker Desktop once for its terms, and turn on
    "Start when you sign in"); macOS `brew install --cask orbstack` or
    Docker Desktop; Linux Docker Engine with the compose plugin.
-   `docker info` must answer.
+   `docker info` must answer. Also a current GitHub CLI, which checks the
+   images' provenance: Windows `winget install --id GitHub.cli -e`, macOS
+   `brew install gh`, Linux from GitHub's apt repository
+   (<https://cli.github.com>); the person signs in with `gh auth login`.
+   Do not pass `--insecure-skip-provenance` unless they ask for it and
+   accept the trade-off.
 2. **The line**: ask the person to send `!join` to Fridolin in their
    own WhatsApp chat and paste the line for a box it replies with (sh,
    or PowerShell on Windows). Run it in a terminal the person sees: it

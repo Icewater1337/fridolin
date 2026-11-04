@@ -1,7 +1,8 @@
 #!/bin/sh
 # box.sh — make this machine a node of a fridolin core, as a node in a box
 # (docs/NODES.md, "Node in a box"): two containers from the images CI
-# publishes, with nothing installed on the host but Docker.
+# publishes, with nothing on the host but Docker and GitHub's CLI (gh),
+# signed in, which checks where the images came from.
 #
 # The core's !join reply has the line to paste, with this script of the
 # core's own version:
@@ -34,9 +35,11 @@
 #                      gets the core's settings (core.yaml)
 #   --no-updater       do not install the box's updater, which applies the
 #                      updates the core asks for (docs/NODES.md, "Box updates")
+#   --insecure-skip-provenance
+#                      start images whose build provenance was not checked
 set -eu
 
-registry="" version="" core="" code="" name="" backups="" fride=1 yes=0 update=0 no_updater=0
+registry="" version="" core="" code="" name="" backups="" fride=1 yes=0 update=0 no_updater=0 skip_provenance=0
 answer="" git_name="" git_email=""
 dir="${FRIDOLIN_BOX_DIR:-$HOME/.fridolin-box}"
 
@@ -65,7 +68,8 @@ while [ $# -gt 0 ]; do
 	--yes) yes=1; shift ;;
 	--update) update=1; shift ;;
 	--no-updater) no_updater=1; shift ;;
-	-h | --help) sed -n '2,34p' "$0" 2>/dev/null || true; exit 0 ;;
+	--insecure-skip-provenance) skip_provenance=1; shift ;;
+	-h | --help) sed -n '2,39p' "$0" 2>/dev/null || true; exit 0 ;;
 	*) die "unknown option $1 (--help lists them)" ;;
 	esac
 done
@@ -121,6 +125,9 @@ say "Checking Docker"
 command -v docker >/dev/null 2>&1 || die "docker is not installed (Docker Desktop on macOS and Windows, Docker Engine on Linux)"
 docker compose version >/dev/null 2>&1 || die "docker compose is missing (it comes with Docker Desktop; on Linux the docker-compose-plugin package)"
 docker info >/dev/null 2>&1 || die "Docker does not answer: start Docker Desktop (or the docker service) and run this again"
+if [ "$skip_provenance" != 1 ] && ! { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }; then
+	die "gh is missing or not signed in, so the images' build provenance cannot be checked: install GitHub's CLI (https://cli.github.com), run gh auth login, and run this again. --insecure-skip-provenance starts them unchecked"
+fi
 
 say "Pulling the images"
 pin() {
@@ -136,19 +143,19 @@ if [ "$fride" = 1 ]; then
 	fride_image=$(pin "$fride_ref")
 	echo "fride: $fride_image"
 fi
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+if [ "$skip_provenance" = 1 ]; then
+	echo "WARNING: --insecure-skip-provenance: the images' build provenance is not checked, so nothing says these images are the project's; each later update is checked in the box."
+else
 	repo="${registry#ghcr.io/}/fridolin"
 	# The registry's name is lowercase and GitHub's need not be, while gh
 	# compares --signer-workflow exactly: take GitHub's own spelling.
 	named=$(gh api "repos/$repo" --jq .full_name 2>/dev/null) || named=""
 	if [ -n "$named" ]; then repo=$named; fi
 	for img in $node_image $fride_image; do
-		gh attestation verify "oci://$img" --repo "$repo" --signer-workflow "$repo/.github/workflows/image.yml" >/dev/null ||
-			die "$img has no valid build provenance from $repo; not starting it"
+		gh attestation verify "oci://$img" --repo "$repo" --signer-workflow "$repo/.github/workflows/image.yml" --source-ref refs/heads/main >/dev/null ||
+			die "$img has no valid build provenance from $repo's main branch, or this gh is too old to check it (https://cli.github.com); not starting it"
 	done
 	echo "Build provenance checked with gh."
-else
-	echo "note: gh is not signed in here, so the images' provenance is not checked now; each later update is checked in the box."
 fi
 
 say "Writing $dir"

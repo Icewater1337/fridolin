@@ -146,6 +146,15 @@ for compatibility.
 
 ### Changed
 
+- **A box needs a signed-in `gh` to start.** `box.sh` and `box.ps1` went on
+  without checking the images' build provenance when `gh` was missing or
+  not signed in, and when they did check, took an image built from any
+  branch. They now accept only images built on `main`, as the box's
+  updater does, and stop before pulling when they cannot check:
+  install GitHub's CLI and run `gh auth login`, for `--update` (`-Update`)
+  too. A `gh` too old for `--source-ref` (Ubuntu 24.04's) needs replacing.
+  `--insecure-skip-provenance` (`-InsecureSkipProvenance`) goes on
+  unchecked, with a warning.
 - **The core image installs its npm CLIs from a lockfile.** Claude Code,
   Codex and the Plaud CLI, and every package beneath them, come from
   `container/npm/package-lock.json` with their hashes, so each build of

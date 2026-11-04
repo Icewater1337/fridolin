@@ -1,6 +1,7 @@
 # box.ps1 — make this Windows machine a node of a fridolin core, as a node
 # in a box (docs/NODES.md, "Node in a box"): two containers in Docker
-# Desktop, from the images CI publishes, with nothing else installed.
+# Desktop, from the images CI publishes, with nothing else installed but
+# GitHub's CLI (gh), signed in, which checks where the images came from.
 #
 # The core's !join reply has the line to paste into PowerShell, with this
 # script of the core's own version:
@@ -28,7 +29,9 @@ param(
     [switch]$Update,
     # Do not install the box's updater, which applies the updates the core
     # asks for (docs/NODES.md, "Box updates").
-    [switch]$NoUpdater
+    [switch]$NoUpdater,
+    # Start images whose build provenance was not checked.
+    [switch]$InsecureSkipProvenance
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,6 +98,11 @@ Quiet docker @("compose", "version")
 if ($LASTEXITCODE -ne 0) { Die "docker compose is missing (it comes with Docker Desktop)" }
 Quiet docker @("info")
 if ($LASTEXITCODE -ne 0) { Die "Docker does not answer: start Docker Desktop and run this again" }
+if (-not $InsecureSkipProvenance) {
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($gh) { Quiet gh @("auth", "status") }
+    if (-not $gh -or $LASTEXITCODE -ne 0) { Die "gh is missing or not signed in, so the images' build provenance cannot be checked: winget install --id GitHub.cli -e, run gh auth login, and run this again. -InsecureSkipProvenance starts them unchecked" }
+}
 
 Say "Pulling the images"
 function Pin([string]$ref) {
@@ -112,21 +120,19 @@ if ($fride) {
     $frideImage = Pin $frideRef
     Write-Host "fride: $frideImage"
 }
-$gh = Get-Command gh -ErrorAction SilentlyContinue
-if ($gh) { Quiet gh @("auth", "status") }
-if ($gh -and $LASTEXITCODE -eq 0) {
+if ($InsecureSkipProvenance) {
+    Write-Host "WARNING: -InsecureSkipProvenance: the images' build provenance is not checked, so nothing says these images are the project's; each later update is checked in the box." -ForegroundColor Yellow
+} else {
     $repo = $Registry.Substring("ghcr.io/".Length) + "/fridolin"
     # The registry's name is lowercase and GitHub's need not be, while gh
     # compares --signer-workflow exactly: take GitHub's own spelling.
     $named = & { $ErrorActionPreference = "Continue"; gh api "repos/$repo" --jq .full_name 2>$null }
     if ($LASTEXITCODE -eq 0 -and $named) { $repo = "$named".Trim() }
     foreach ($img in @($nodeImage) + $(if ($fride) { @($frideImage) } else { @() })) {
-        gh attestation verify "oci://$img" --repo $repo --signer-workflow "$repo/.github/workflows/image.yml" | Out-Null
-        if ($LASTEXITCODE -ne 0) { Die "$img has no valid build provenance from $repo; not starting it" }
+        gh attestation verify "oci://$img" --repo $repo --signer-workflow "$repo/.github/workflows/image.yml" --source-ref refs/heads/main | Out-Null
+        if ($LASTEXITCODE -ne 0) { Die "$img has no valid build provenance from $repo's main branch, or this gh is too old to check it (https://cli.github.com); not starting it" }
     }
     Write-Host "Build provenance checked with gh."
-} else {
-    Write-Host "note: gh is not signed in here, so the images' provenance is not checked now; each later update is checked in the box."
 }
 
 Say "Writing $Dir"
