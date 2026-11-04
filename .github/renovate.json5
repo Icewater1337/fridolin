@@ -111,6 +111,18 @@
       matchPackageNames: ["golang"],
       allowedVersions: "<1.27",
     },
+    // Go patch releases carry the standard library's security fixes (1.26.8
+    // missed 1.26.9 and 1.26.10): they come on their own, as soon as they
+    // are out, and not in the container group's weekly-aged PR.
+    {
+      matchFileNames: ["container/Dockerfile"],
+      matchDatasources: ["docker"],
+      matchPackageNames: ["golang"],
+      matchUpdateTypes: ["patch"],
+      groupName: "Go toolchain image",
+      minimumReleaseAge: null,
+      labels: ["dependencies", "security"],
+    },
     // debian:bookworm-YYYYMMDD-slim: a newer snapshot of the same release,
     // which the versioning calls a major one; it goes with the container
     // group all the same.

@@ -13,7 +13,7 @@
 # were chosen; the downloaded tools are pinned to a version and checked
 # against the SHA-256 their release publishes.
 
-ARG GO_IMAGE=golang:1.26.8-bookworm
+ARG GO_IMAGE=golang:1.26.10-bookworm
 ARG NODE_IMAGE=node:26.12.0-bookworm-slim
 ARG RUNTIME_IMAGE=debian:bookworm-20261027-slim
 
