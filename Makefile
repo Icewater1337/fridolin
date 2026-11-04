@@ -219,6 +219,7 @@ test-sh: ## tests for the personal-data, action-pin, notices, release, OS-test a
 	scripts/test-check-action-pins.sh
 	scripts/test-third-party-notices.sh
 	scripts/test-build-release.sh
+	scripts/test-dockerfile-go-version.sh
 	scripts/test-makefile.sh
 	scripts/test-test-shard.sh
 	scripts/test-os-tests.sh
