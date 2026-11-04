@@ -28,12 +28,13 @@ Each image comes with build provenance: a signed statement, made with
 GitHub's attestations (Sigstore), that this repository's
 `.github/workflows/image.yml` built that digest from that commit on
 `main`. Machines take an image by its digest, never by a tag, and check
-the provenance before they run it: with GitHub's CLI, which needs no
-login for it,
+the provenance before they run it: with GitHub's CLI, signed in (with
+`--bundle` it needs no login),
 
 ```bash
 gh attestation verify oci://ghcr.io/OWNER/fridolin-core@sha256:DIGEST \
-  --repo OWNER/fridolin --signer-workflow OWNER/fridolin/.github/workflows/image.yml
+  --repo OWNER/fridolin --signer-workflow OWNER/fridolin/.github/workflows/image.yml \
+  --source-ref refs/heads/main
 ```
 
 An SBOM and buildx's own provenance are attached to each platform's

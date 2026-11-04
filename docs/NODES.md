@@ -892,6 +892,12 @@ node ids.
    own packages), and Docker for the user who runs the line (`sudo
    usermod -aG docker $USER`, then log in again; or run it as root).
    OrbStack works on macOS. The host needs no Tailscale.
+   And GitHub's CLI, current and signed in (`gh auth login`), which checks
+   the images' build provenance: `brew install gh`, `winget install --id
+   GitHub.cli -e`, on Linux from GitHub's apt repository
+   (<https://cli.github.com>; Ubuntu 24.04's own `gh` is too old). The
+   script refuses to start without it; `--insecure-skip-provenance`
+   (`-InsecureSkipProvenance`) goes on unchecked, with a warning.
 2. **The line from `!join`.** The owner sends `!join` to fridolin in
    their WhatsApp chat. A core that knows where its box script is
    published (an image CI built, or `fridolin core build` of a clean
@@ -918,8 +924,8 @@ node ids.
 3. **What the script does**, after saying so and asking:
    - pulls both images and pins them by digest in `.env`, beside the
      compose file it writes from the image (`fridolin box compose`), in
-     `~/.fridolin-box` (Windows `%LOCALAPPDATA%\fridolin-box`); with `gh`
-     signed in on the machine it also checks their build provenance
+     `~/.fridolin-box` (Windows `%LOCALAPPDATA%\fridolin-box`), once `gh`
+     checked their build provenance, on `main`
      ([CORE.md](CORE.md#on-ghcr));
    - signs the box in to the tailnet (`fridolin node tailnet`): it
      prints a Tailscale link the owner opens and signs in to with the
