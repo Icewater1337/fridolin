@@ -36,6 +36,7 @@ type LiveHub struct {
 
 	mu   sync.Mutex
 	turn chan string // the armed turn's answer; nil without one
+	took bool        // the session picked up an event since Begin
 
 	connected     chan struct{}
 	connectedOnce sync.Once
@@ -58,6 +59,9 @@ func (h *LiveHub) Next(ctx context.Context, wait time.Duration) (LiveEvent, bool
 	defer t.Stop()
 	select {
 	case ev := <-h.events:
+		h.mu.Lock()
+		h.took = true
+		h.mu.Unlock()
 		return ev, true
 	case <-t.C:
 	case <-ctx.Done():
@@ -75,6 +79,7 @@ func (h *LiveHub) Begin() (<-chan string, error) {
 		return nil, ErrLiveBusy
 	}
 	h.turn = make(chan string, 1)
+	h.took = false
 	return h.turn, nil
 }
 
@@ -97,11 +102,13 @@ func (h *LiveHub) Deliver(ev LiveEvent) error {
 
 // End is the session's Stop hook: the model finished a turn, whose last
 // text was text. It reports whether a turn waited for it; a stop nobody
-// waits for, such as one a background task caused, is not an answer.
+// waits for, such as one a background task caused, is not an answer. A
+// turn whose event the session has not picked up yet is not waiting: the
+// stop is the previous turn's late output.
 func (h *LiveHub) End(text string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.turn == nil {
+	if h.turn == nil || !h.took {
 		return false
 	}
 	h.turn <- text

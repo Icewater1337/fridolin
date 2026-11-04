@@ -124,3 +124,27 @@ func TestLiveArgs(t *testing.T) {
 		t.Errorf("inheriting the user's config: %s", got)
 	}
 }
+
+func TestLiveHubLateStopDoesNotEndNextTurn(t *testing.T) {
+	h := NewLiveHub()
+	answer, err := h.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Deliver(LiveEvent{Content: "three"}); err != nil {
+		t.Fatal(err)
+	}
+	// The previous turn's late output stops before the session took "three".
+	if h.End("old summary") {
+		t.Fatal("a stop before the session picked up the message ended the turn")
+	}
+	if _, ok := h.Next(context.Background(), time.Second); !ok {
+		t.Fatal("no event")
+	}
+	if !h.End("answer") {
+		t.Fatal("the stop after pickup found no turn")
+	}
+	if got := <-answer; got != "answer" {
+		t.Errorf("answer %q", got)
+	}
+}
