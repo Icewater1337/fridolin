@@ -331,10 +331,11 @@ func (s *Store) LiveErrandWith(ctx context.Context, contact string) (Errand, err
 	return scanErrand(s.db.QueryRowContext(ctx, `SELECT `+errandColumns+` FROM errands WHERE contact = ? AND state IN (?, ?) ORDER BY created_at DESC LIMIT 1`, contact, ErrandAsking, ErrandOpen))
 }
 
-// ErrandCallsSince counts the errands by call made since t.
-func (s *Store) ErrandCallsSince(ctx context.Context, t time.Time) (int, error) {
+// ErrandCallsSince counts the errands by call made since t, except the one
+// with id except: those still asking or declined made no call.
+func (s *Store) ErrandCallsSince(ctx context.Context, t time.Time, except string) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE mode = ? AND created_at >= ? AND state != ?`, ErrandByCall, t.UTC(), ErrandDeclined).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE mode = ? AND created_at >= ? AND state NOT IN (?, ?) AND id != ?`, ErrandByCall, t.UTC(), ErrandDeclined, ErrandAsking, except).Scan(&n)
 	return n, err
 }
 
@@ -389,6 +390,27 @@ func (s *Store) AddErrandLine(ctx context.Context, id string, l ErrandLine, mine
 		}
 	}
 	return tx.Commit()
+}
+
+// AddErrandLineWhileOpen adds one of Fridolin's messages to errand id's
+// conversation in the one statement that checks the errand is still open,
+// and counts it. It reports false, and adds nothing, once the errand ended.
+func (s *Store) AddErrandLineWhileOpen(ctx context.Context, id string, l ErrandLine) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE errands SET sent = sent + 1 WHERE id = ? AND state = ?`, id, ErrandOpen)
+	if err != nil {
+		return false, errors.Join(err, tx.Rollback())
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return false, tx.Rollback()
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO errand_lines (errand, sender, text, at) VALUES (?, ?, ?, ?)`, id, l.Sender, l.Text, l.At.UTC()); err != nil {
+		return false, errors.Join(err, tx.Rollback())
+	}
+	return true, tx.Commit()
 }
 
 // ErrandLines is errand id's conversation, oldest first.

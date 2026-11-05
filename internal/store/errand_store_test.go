@@ -186,3 +186,37 @@ func TestErrandConversations(t *testing.T) {
 		t.Errorf("earlier lines: %+v %v", lines, err)
 	}
 }
+
+func TestErrandCallsSince(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	add := func(id, state, mode string) {
+		t.Helper()
+		e := Errand{ID: id, Brain: "core", Contact: "1555000" + id, Name: "Alex", Message: "Hi", State: state, Mode: mode, Days: 1, CreatedAt: now, Deadline: now.Add(time.Hour)}
+		if err := s.AddErrand(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, st := range []string{ErrandDone, ErrandOpen, ErrandStopped, ErrandExpired} {
+		add(string(rune('a'+i)), st, ErrandByCall)
+	}
+	add("w", ErrandAsking, ErrandByCall)   // not yet approved: no call made
+	add("x", ErrandDeclined, ErrandByCall) // refused: no call made
+	add("y", ErrandDone, ErrandByMessage)  // not a call
+	since := now.Add(-time.Hour)
+	if n, err := s.ErrandCallsSince(ctx, since, ""); err != nil || n != 4 {
+		t.Fatalf("before the 5th: %d %v, want 4", n, err)
+	}
+	add("e", ErrandOpen, ErrandByCall) // the 5th, as startErrand has stored it
+	if n, _ := s.ErrandCallsSince(ctx, since, "e"); n != 4 {
+		t.Errorf("the errand starting counts itself: %d, want 4", n)
+	}
+	if n, _ := s.ErrandCallsSince(ctx, since, "a"); n != 4 {
+		t.Errorf("the next one after 5: %d, want 4 (the 5 made, minus itself)", n)
+	}
+	if n, _ := s.ErrandCallsSince(ctx, since, ""); n != 5 {
+		t.Errorf("five calls made: %d, want 5", n)
+	}
+}
