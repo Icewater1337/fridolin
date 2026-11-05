@@ -118,7 +118,7 @@ func folderItems(f Folder, logf func(string, ...any)) ([]item, FolderInfo, error
 		case d.IsDir():
 			items = append(items, item{rel: name, src: p, dir: true, mode: st.Mode().Perm(), mtime: st.ModTime()})
 		case st.Mode().IsRegular():
-			items = append(items, item{rel: name, src: p, mode: st.Mode().Perm(), mtime: st.ModTime()})
+			items = append(items, item{rel: name, src: p, mode: st.Mode().Perm(), mtime: st.ModTime(), size: st.Size()})
 			info.Files++
 			info.Bytes += st.Size()
 		default:

@@ -429,3 +429,52 @@ func TestExportNeedsRecipientsAndDB(t *testing.T) {
 		t.Error("exported a missing data dir")
 	}
 }
+
+func TestExportLiveFileChangesDuringExport(t *testing.T) {
+	grow := func(t *testing.T, src string) func() {
+		return func() {
+			fh, err := os.OpenFile(filepath.Join(src, "audit", "live.log"), os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer fh.Close()
+			fh.WriteString("appended while the export runs")
+		}
+	}
+	id := identity(t)
+	export := func(t *testing.T, src string, st *memStore, after func()) error {
+		_, err := Export(context.Background(), src, []age.Recipient{id.Recipient()}, st, ExportOptions{DB: sqliteDB{}, Now: func() time.Time { return t0 }, afterMeasure: after})
+		return err
+	}
+
+	t.Run("grown file imports", func(t *testing.T) {
+		src := dataDir(t)
+		write(t, src, "audit/live.log", "first lines\n", 0o600)
+		st := newMemStore()
+		if err := export(t, src, st, grow(t, src)); err != nil {
+			t.Fatal(err)
+		}
+		staging := filepath.Join(t.TempDir(), "core", "import", "1")
+		if _, err := Import(context.Background(), st, []age.Identity{id}, staging, ImportOptions{DB: sqliteDB{}}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(staging, "audit", "live.log"))
+		if err != nil || string(got) != "first lines\n" {
+			t.Errorf("imported %q, %v", got, err)
+		}
+	})
+
+	t.Run("shrunk file fails the export", func(t *testing.T) {
+		src := dataDir(t)
+		write(t, src, "audit/live.log", "first lines\n", 0o600)
+		st := newMemStore()
+		err := export(t, src, st, func() { os.WriteFile(filepath.Join(src, "audit", "live.log"), []byte("x"), 0o600) })
+		if err == nil || !strings.Contains(err.Error(), "shrank") {
+			t.Fatalf("err %v", err)
+		}
+		if _, ok := st.objs[LatestKey]; ok {
+			t.Error("latest was moved to a broken archive")
+		}
+	})
+}

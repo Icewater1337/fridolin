@@ -126,6 +126,8 @@ type ExportOptions struct {
 	DeviceID, Move string
 	Now            func() time.Time
 	Logf           func(format string, args ...any)
+	// afterMeasure, for tests, runs once the manifest has counted the sizes.
+	afterMeasure func()
 }
 
 // ExportResult is what Export wrote.
@@ -142,6 +144,8 @@ type item struct {
 	dir      bool
 	mode     fs.FileMode
 	mtime    time.Time
+	// size is what the manifest counted; the tar entry carries exactly it.
+	size int64
 }
 
 // EncryptionState is the one file of core/ an export carries.
@@ -332,12 +336,13 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 			opts.Logf("Leaving out %d files and folders of brain folder %s (%s), as its backup settings do on its way here", n, f.Dir, f.ID)
 		}
 	}
-	for _, it := range items {
-		if !it.dir {
-			st, err := os.Stat(it.src)
+	for i := range items {
+		if !items[i].dir {
+			st, err := os.Stat(items[i].src)
 			if err != nil {
 				return ExportResult{}, err
 			}
+			items[i].size = st.Size()
 			m.Files++
 			m.Bytes += st.Size()
 		}
@@ -363,6 +368,9 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 		m.Format = formatFolders
 	}
 
+	if opts.afterMeasure != nil {
+		opts.afterMeasure()
+	}
 	key := ExportKey(now)
 	pr, pw := io.Pipe()
 	counted := &countingWriter{w: pw}
@@ -394,7 +402,7 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if err := writeItem(tw, dataPrefix+it.rel, it.src, it.dir, it.mode, it.mtime); err != nil {
+				if err := writeItem(tw, dataPrefix+it.rel, it); err != nil {
 					return err
 				}
 			}
@@ -402,7 +410,7 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if err := writeItem(tw, it.rel, it.src, it.dir, it.mode, it.mtime); err != nil {
+				if err := writeItem(tw, it.rel, it); err != nil {
 					return err
 				}
 			}
@@ -440,27 +448,23 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func writeItem(tw *tar.Writer, name, src string, dir bool, mode fs.FileMode, mtime time.Time) error {
-	if dir {
-		return tw.WriteHeader(&tar.Header{Name: name + "/", Mode: int64(mode), ModTime: mtime, Typeflag: tar.TypeDir, Format: tar.FormatPAX})
+func writeItem(tw *tar.Writer, name string, it item) error {
+	if it.dir {
+		return tw.WriteHeader(&tar.Header{Name: name + "/", Mode: int64(it.mode), ModTime: it.mtime, Typeflag: tar.TypeDir, Format: tar.FormatPAX})
 	}
-	f, err := os.Open(src)
+	f, err := os.Open(it.src)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: int64(it.mode), Size: it.size, ModTime: it.mtime, Typeflag: tar.TypeReg, Format: tar.FormatPAX}); err != nil {
 		return err
 	}
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: int64(mode), Size: st.Size(), ModTime: mtime, Typeflag: tar.TypeReg, Format: tar.FormatPAX}); err != nil {
-		return err
-	}
-	// A file that grew since the Stat would break the tar: copy what was
-	// measured, and refuse one that shrank.
-	n, err := io.Copy(tw, io.LimitReader(f, st.Size()))
-	if err == nil && n != st.Size() {
-		err = fmt.Errorf("%s shrank while it was exported", src)
+	// Copy what the manifest counted: a file that grew gives its first
+	// bytes (the rest is in the next export), one that shrank fails.
+	n, err := io.Copy(tw, io.LimitReader(f, it.size))
+	if err == nil && n != it.size {
+		err = fmt.Errorf("%s shrank while it was exported", it.src)
 	}
 	return err
 }
