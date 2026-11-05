@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,9 +25,8 @@ func (d dropsWhileSpeaking) Say(pcm []byte) <-chan struct{} {
 
 // openerHarness opens a call errand; placing the call runs before, then
 // returns what call makes.
-func openerHarness(t *testing.T, before func(h *harness, e store.Errand), call func(number string) whatsapp.Call) *harness {
+func openerHarness(t *testing.T, req errandRequest, before func(h *harness, e store.Errand), call func(number string) whatsapp.Call) *harness {
 	t.Helper()
-	useFakeAI(t)
 	optionsOf(t).waits.callRing = 200 * time.Millisecond
 	placed := make(chan struct{})
 	var h *harness
@@ -42,7 +42,7 @@ func openerHarness(t *testing.T, before func(h *harness, e store.Errand), call f
 	h.setConnectionKeys()
 	ctx := context.Background()
 	_ = h.b.store.SaveErrandContact(ctx, store.ErrandContact{Contact: errandNumber, Name: "Alex", Brain: "core", State: store.ContactKnown, UpdatedAt: time.Now()})
-	c := dinner
+	c := req
 	c.Call = true
 	if _, err := h.b.openErrand(ctx, h.ownerRun(), c); err != nil {
 		t.Fatal(err)
@@ -63,7 +63,8 @@ func openerHarness(t *testing.T, before func(h *harness, e store.Errand), call f
 // else goes out.
 func TestCallOpenerFailureEndsTheErrand(t *testing.T) {
 	t.Parallel()
-	h := openerHarness(t, nil, func(number string) whatsapp.Call {
+	useFakeAI(t)
+	h := openerHarness(t, dinner, nil, func(number string) whatsapp.Call {
 		return dropsWhileSpeaking{&fakeCall{peer: types.NewJID(number, types.DefaultUserServer), pickUp: true}}
 	})
 	e := h.onlyErrand()
@@ -84,7 +85,8 @@ func TestCallOpenerFailureEndsTheErrand(t *testing.T) {
 func TestCallOpenerAfterTheEndSaysNothing(t *testing.T) {
 	t.Parallel()
 	var fc *fakeCall
-	h := openerHarness(t, func(h *harness, e store.Errand) {
+	useFakeAI(t)
+	h := openerHarness(t, dinner, func(h *harness, e store.Errand) {
 		if ended, err := h.b.store.EndErrand(context.Background(), e.ID, store.ErrandStopped, "the owner stopped it", time.Now()); err != nil || !ended {
 			t.Errorf("ending: %v %v", ended, err)
 		}
@@ -100,5 +102,40 @@ func TestCallOpenerAfterTheEndSaysNothing(t *testing.T) {
 	}
 	if got := h.SentTo(harnessDM); len(got) != 0 {
 		t.Errorf("to the owner: %q", got)
+	}
+}
+
+// TestCallRecordsWhatWasSpoken: a long first message is cut when read
+// aloud, and the recorded opener is what the call spoke; a reply that is
+// only markup is neither recorded nor counted as sent.
+func TestCallRecordsWhatWasSpoken(t *testing.T) {
+	t.Parallel()
+	runs := &errandRuns{}
+	optionsOf(t).hooks.errandRun = runs.run
+	runs.say(`{"action":"reply","text":"[POLL]\nA\nB\n[/POLL]"}`, `{"action":"done","text":"Bye!","summary":"Done."}`)
+	long := dinner
+	long.Message = strings.Repeat("This is one more sentence of the long message. ", 33)
+	ai := useFakeAI(t)
+	var fc *fakeCall
+	h := openerHarness(t, long, nil, func(number string) whatsapp.Call {
+		fc = &fakeCall{peer: types.NewJID(number, types.DefaultUserServer), pickUp: true}
+		return fc
+	})
+	h.WaitFor("the opener", func() bool { return fc.spoke() >= 1 })
+	fc.speak()
+	h.WaitFor("the markup reply", func() bool { return len(runs.handed()) >= 1 })
+	fc.speak()
+	h.WaitFor("the end", fc.isOver)
+	e := h.onlyErrand()
+	h.WaitFor("the errand done", func() bool { return h.errandOf(e.ID).State == store.ErrandDone })
+	lines, _ := h.b.store.ErrandLines(context.Background(), e.ID)
+	ai.mu.Lock()
+	spoken := append([]string(nil), ai.spoken...)
+	ai.mu.Unlock()
+	if len(spoken) < 2 || len(lines) != 4 || lines[0].Text != spoken[0] || len([]rune(spoken[0])) > maxSpoken {
+		t.Fatalf("recorded %d lines %q, spoke %q", len(lines), lines, spoken)
+	}
+	if lines[3].Text != "Bye!" || h.errandOf(e.ID).Sent != 2 {
+		t.Errorf("lines %q, sent %d", lines, h.errandOf(e.ID).Sent)
 	}
 }
