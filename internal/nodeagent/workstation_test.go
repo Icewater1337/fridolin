@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -358,6 +359,75 @@ func TestTerminalIdleTimeout(t *testing.T) {
 		tm, perr := a.terminalByID(term.ID)
 		return perr == nil && tm.isClosed()
 	})
+}
+
+// fakePTY is a shell whose exit and whose output are the test's to time.
+type fakePTY struct {
+	output chan string
+	exit   chan int
+	closed chan struct{}
+	close  sync.Once
+}
+
+func newFakePTY() *fakePTY {
+	return &fakePTY{output: make(chan string), exit: make(chan int), closed: make(chan struct{})}
+}
+
+func (p *fakePTY) Read(b []byte) (int, error) {
+	select {
+	case s, ok := <-p.output:
+		if !ok {
+			return 0, errEndOfOutput
+		}
+		return copy(b, s), nil
+	case <-p.closed:
+		return 0, os.ErrClosed
+	}
+}
+func (p *fakePTY) Write(b []byte) (int, error) { return len(b), nil }
+func (p *fakePTY) Resize(cols, rows int) error { return nil }
+func (p *fakePTY) Kill()                       {}
+func (p *fakePTY) Wait() int                   { return <-p.exit }
+func (p *fakePTY) Close()                      { p.close.Do(func() { close(p.closed) }) }
+
+func TestTerminalIsClosedOnlyAfterItsOutputWasRead(t *testing.T) {
+	p := newFakePTY()
+	tm := &terminal{id: "x", proc: p, wake: make(chan struct{}), drained: make(chan struct{}), tmp: t.TempDir()}
+	go tm.readLoop()
+	go tm.waitLoop()
+	p.exit <- 7
+	waitFor(t, "the exit to be seen", func() bool { return !tm.shellRunning() })
+	p.output <- "the last words"
+	if tm.isClosed() {
+		t.Fatal("closed with output still to come")
+	}
+	select {
+	case <-p.closed:
+		t.Fatal("the PTY was closed with output still to come")
+	default:
+	}
+	close(p.output)
+	waitFor(t, "the terminal to close", tm.isClosed)
+	<-p.closed
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if out := tm.outputLocked(0); string(out.Data) != "the last words" || !out.Closed || out.ExitCode == nil || *out.ExitCode != 7 {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestTerminalClosesAfterTheGraceWhenTheOutputDoesNotEnd(t *testing.T) {
+	p := newFakePTY()
+	tm := &terminal{id: "x", proc: p, wake: make(chan struct{}), drained: make(chan struct{}), tmp: t.TempDir()}
+	go tm.readLoop()
+	go tm.waitLoop()
+	p.exit <- 3
+	start := time.Now()
+	waitFor(t, "the terminal to close", tm.isClosed)
+	if took := time.Since(start); took < terminalDrainGrace/2 {
+		t.Fatalf("closed after %v with a grace of %v", took, terminalDrainGrace)
+	}
+	<-tm.drained // closing ended the read
 }
 
 func TestTerminalOutputBufferDrops(t *testing.T) {
