@@ -172,7 +172,7 @@ func (h *liveHost) run(r *commandRunner, ctx context.Context, spec brain.RunSpec
 		return claudecli.Result{}, false
 	}
 	if !h.eligible(spec) {
-		h.endIfAnswersInChat(spec)
+		h.endIfAnswersInChat(spec.ID, spec.Message.JID)
 		return claudecli.Result{}, false
 	}
 	s := h.ready(r, spec)
@@ -186,11 +186,14 @@ func (h *liveHost) run(r *commandRunner, ctx context.Context, spec brain.RunSpec
 // to answer in the chat it serves: its later turns only get the new message,
 // so they would never see this exchange. The next message starts a session
 // that is given the chat's history.
-func (h *liveHost) endIfAnswersInChat(spec brain.RunSpec) {
+func (h *liveHost) endIfAnswersInChat(brainID, jid string) {
+	if h == nil {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if s := h.sess[spec.ID]; s != nil && !s.stopped && !s.busy && s.chat == spec.Message.JID {
-		log.Printf("brain %s: ending the live session, as a one-off run answers in its chat", spec.ID)
+	if s := h.sess[brainID]; s != nil && !s.stopped && !s.busy && s.chat == jid {
+		log.Printf("brain %s: ending the live session, as a one-off run answers in its chat", brainID)
 		h.stopLocked(s)
 	}
 }
