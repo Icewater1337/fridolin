@@ -331,10 +331,11 @@ func (s *Store) LiveErrandWith(ctx context.Context, contact string) (Errand, err
 	return scanErrand(s.db.QueryRowContext(ctx, `SELECT `+errandColumns+` FROM errands WHERE contact = ? AND state IN (?, ?) ORDER BY created_at DESC LIMIT 1`, contact, ErrandAsking, ErrandOpen))
 }
 
-// ErrandCallsSince counts the errands by call made since t.
-func (s *Store) ErrandCallsSince(ctx context.Context, t time.Time) (int, error) {
+// ErrandCallsSince counts the errands by call made since t, except the one
+// with id except: those still asking or declined made no call.
+func (s *Store) ErrandCallsSince(ctx context.Context, t time.Time, except string) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE mode = ? AND created_at >= ? AND state != ?`, ErrandByCall, t.UTC(), ErrandDeclined).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE mode = ? AND created_at >= ? AND state NOT IN (?, ?) AND id != ?`, ErrandByCall, t.UTC(), ErrandDeclined, ErrandAsking, except).Scan(&n)
 	return n, err
 }
 

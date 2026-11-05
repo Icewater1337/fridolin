@@ -270,7 +270,7 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		if !known {
 			return "", errors.New("only someone Fridolin wrote to before is called: write to them first (call: false)")
 		}
-		if err := b.errandCallsReady(ctx, cfg); err != nil {
+		if err := b.errandCallsReady(ctx, cfg, ""); err != nil {
 			return "", err
 		}
 	}
@@ -418,7 +418,7 @@ func (b *App) startErrand(ctx context.Context, e store.Errand) error {
 			_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, "Fridolin calls only someone it wrote to before", now)
 			return errors.New("only someone Fridolin wrote to before is called")
 		}
-		if err := b.errandCallsReady(ctx, b.cfgs.Get()); err != nil {
+		if err := b.errandCallsReady(ctx, b.cfgs.Get(), e.ID); err != nil {
 			_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, err.Error(), now)
 			return err
 		}

@@ -358,15 +358,16 @@ func (b *App) placeCallTo(ctx context.Context, number string) (whatsapp.Call, er
 	return b.placeCall(ctx, number)
 }
 
-// errandCallsReady says why errand e cannot call now; nil when it can.
-func (b *App) errandCallsReady(ctx context.Context, cfg *config.Settings) error {
+// errandCallsReady says why a call errand cannot call now; nil when it can.
+// self is the errand being started, left out of the count ("" before it exists).
+func (b *App) errandCallsReady(ctx context.Context, cfg *config.Settings, self string) error {
 	if err := b.callsOn(cfg); err != nil {
 		return err
 	}
 	if b.hooks.placeCall == nil && b.placeCall == nil {
 		return errors.New("calls need WhatsApp: this bridge runs without it")
 	}
-	n, err := b.store.ErrandCallsSince(ctx, time.Now().Add(-24*time.Hour))
+	n, err := b.store.ErrandCallsSince(ctx, time.Now().Add(-24*time.Hour), self)
 	if err != nil {
 		return err
 	}
