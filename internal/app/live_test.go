@@ -18,6 +18,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/ghapp/ghapptest"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/sched"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
@@ -570,30 +571,44 @@ func TestLiveSessionReady(t *testing.T) {
 	}
 }
 
-// TestOneOffRunInTheSessionsChatEndsIt: a scheduled agent's run, or any
-// other one-off, that answers in the chat a session serves ends the session,
-// as its later turns would never see that exchange; another chat's does not.
-func TestOneOffRunInTheSessionsChatEndsIt(t *testing.T) {
+// TestScheduledReportInTheSessionsChatEndsIt: a scheduled agent's run has
+// the JID schedule:<name>, not the chat it reports to; its result, or its
+// failure notice, sent into the chat a session serves ends the session, as
+// its later turns would never see it. A run that sends nothing does not.
+func TestScheduledReportInTheSessionsChatEndsIt(t *testing.T) {
 	t.Parallel()
-	b := &App{waits: defaultWaits()}
-	h := newLiveHost(b)
-	t.Cleanup(h.Stop)
-	s := &liveSession{brain: "main", chat: harnessDM, hub: claudecli.NewLiveHub(), ready: true}
-	h.mu.Lock()
-	h.sess["main"] = s
-	h.mu.Unlock()
+	fakeRuns(t)
+	h, _ := liveHarness(t, manifest.LiveSessionOwnerDM, nil)
+	if w := h.Do("PUT", "/api/schedules/main/inbox", map[string]any{"when": "every 6h", "prompt": "Check the inbox folder.", "report": "worth"}); w.Code != 200 {
+		t.Fatalf("PUT: %d", w.Code)
+	}
+	h.WaitFor("the agent", func() bool { return len(h.schedules().Agents) == 1 })
+	h.Answer(inbound{JID: harnessDM, Text: "one"})
 	stopped := func() bool {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		return s.stopped
+		h.b.live.mu.Lock()
+		defer h.b.live.mu.Unlock()
+		s := h.b.live.sess["main"]
+		return s == nil || s.stopped
 	}
-	spec := brain.RunSpec{ID: "main", Settings: &brain.Settings{}, Message: chat.Inbound{JID: "15557654321@s.whatsapp.net", Source: chat.SourceScheduled}} // personal-data:ignore (a placeholder number)
-	h.run(&commandRunner{}, t.Context(), spec, claudecli.Callbacks{}, nil)
-	if stopped() {
-		t.Fatal("a one-off run in another chat ended the session")
+	run := func(n int) sched.Run {
+		h.waitLive("main")
+		if w := h.Do("POST", "/api/schedules/main/inbox/run", nil); w.Code != 200 {
+			t.Fatalf("run now: %d %s", w.Code, w.Body.String())
+		}
+		return h.waitRunEnded("main", "inbox", n)
 	}
-	spec.Message.JID = harnessDM
-	if _, ok := h.run(&commandRunner{}, t.Context(), spec, claudecli.Callbacks{}, nil); ok || !stopped() {
-		t.Errorf("a one-off run in the session's chat: taken = %v, stopped = %v", ok, stopped())
+	setenv(t, "FRIDOLIN_FAKE_RESULT", `{"type":"result","result":"NOTHING_TO_REPORT"}`)
+	if r := run(1); r.Sent || stopped() {
+		t.Fatalf("a run with nothing to report ended the session: %+v", r)
+	}
+	setenv(t, "FRIDOLIN_FAKE_RESULT", "")
+	if r := run(2); !r.Sent || !stopped() {
+		t.Fatalf("a result sent into the session's chat: sent = %v, stopped = %v", r.Sent, stopped())
+	}
+	h.Answer(inbound{JID: harnessDM, Text: "again"})
+	h.waitLive("main")
+	setenv(t, "FRIDOLIN_FAKE_RESULT", `{"type":"result","is_error":true,"result":"overloaded"}`)
+	if r := run(3); !r.Sent || !stopped() {
+		t.Fatalf("a failure notice sent into the session's chat: sent = %v, stopped = %v", r.Sent, stopped())
 	}
 }
