@@ -303,3 +303,60 @@ func TestSweepPassesOnWhatTheyWroteLast(t *testing.T) {
 		})
 	}
 }
+
+// TestHeardLimitWhileOpen: past a day's messages, what someone writes in a
+// conversation they began goes to the owner, unrecorded and unanswered, and
+// the conversation stays open. An errand the owner started has no such limit.
+func TestHeardLimitWhileOpen(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	addLines := func(t *testing.T, h *harness, id string, n int) {
+		t.Helper()
+		for range n {
+			if err := h.b.store.AddErrandLine(ctx, id, store.ErrandLine{Sender: errand.FromThem, Text: "more", At: time.Now()}, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Run("they began it", func(t *testing.T) {
+		t.Parallel()
+		h, runs := errandHarness(t)
+		h.knowAlex()
+		runs.say(`{"action":"reply","text":"Right."}`)
+		now := time.Now()
+		if err := h.b.store.AddErrand(ctx, store.Errand{ID: "echat", Brain: "core", Contact: errandNumber, Name: "Alex", State: store.ErrandOpen, Chat: harnessDM,
+			Days: 1, CreatedAt: now, Deadline: now.Add(time.Hour), Mode: store.ErrandByMessage, OpenedBy: store.OpenedByThem}); err != nil {
+			t.Fatal(err)
+		}
+		addLines(t, h, "echat", errandHeardPerDay-1)
+		h.theyWrite("The last one heard")
+		h.WaitSent(errandJID, "Right.")
+		h.theyWrite("One too many")
+		h.WaitSent(harnessDM, outboundmsg.ErrandForwardNotice("Alex", errandNumber, "One too many"))
+		lines, err := h.b.store.ErrandLines(ctx, "echat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.ContainsFunc(lines, func(l store.ErrandLine) bool { return l.Text == "One too many" }) {
+			t.Error("a message past the limit was recorded")
+		}
+		if got := h.errandOf("echat"); got.State != store.ErrandOpen {
+			t.Errorf("the conversation past the limit: %+v", got)
+		}
+		if len(runs.handed()) != 1 {
+			t.Errorf("%d runs, want 1", len(runs.handed()))
+		}
+	})
+	t.Run("the owner started it", func(t *testing.T) {
+		t.Parallel()
+		h, runs := errandHarness(t)
+		h.knowAlex()
+		if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+			t.Fatal(err)
+		}
+		addLines(t, h, h.onlyErrand().ID, errandHeardPerDay)
+		runs.say(`{"action":"reply","text":"Noted."}`)
+		h.theyWrite("Still heard")
+		h.WaitSent(errandJID, "Noted.")
+	})
+}
