@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/files"
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
 // Changing files on the Files page and the wiki (docs/FILES.md, "Changing
@@ -245,6 +246,11 @@ func (n nodeFileInfo) ModTime() time.Time { return time.Time{} }
 func (n nodeFileInfo) IsDir() bool        { return false }
 func (n nodeFileInfo) Sys() any           { return nil }
 
+func isNodeNotFound(err error) bool {
+	pe, ok := errors.AsType[*nodeproto.Error](err)
+	return ok && pe.Code == nodeproto.CodeNotFound
+}
+
 // nodeWrite replaces (or, with sha "", creates) a file of a node's folder.
 func (a *FilesAPI) nodeWrite(ctx context.Context, root files.Root, rel string, data []byte, sha string, s files.Scope) (fs.FileInfo, error) {
 	if err := root.CanWrite(rel, s); err != nil {
@@ -259,6 +265,9 @@ func (a *FilesAPI) nodeWrite(ctx context.Context, root files.Root, rel string, d
 	cur, _, truncated, err := a.Nodes.Read(ctx, root.Node, nodePath(root, rel), maxNodeFileOpen)
 	switch {
 	case err != nil && sha != "":
+		return nil, err
+	case err != nil && !isNodeNotFound(err):
+		// A create goes ahead only when the file is known to be missing.
 		return nil, err
 	case err == nil && sha == "":
 		return nil, files.ErrExists
