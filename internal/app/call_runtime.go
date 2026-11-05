@@ -384,6 +384,21 @@ func (b *App) errandOpen(ctx context.Context, id string) bool {
 	return err == nil && e.State == store.ErrandOpen
 }
 
+// errandAfterCall schedules a turn by message for errand id after its call,
+// when it is still open and its last line is not Fridolin's: a line that
+// came in during the call, or that ended it. quiet is the number of lines
+// when the owner was asked (-1 if not): then only a newer line counts.
+func (b *App) errandAfterCall(id string, quiet int) {
+	ctx := context.Background()
+	lines, err := b.store.ErrandLines(ctx, id)
+	if err != nil || len(lines) == 0 || lines[len(lines)-1].Sender == errand.FromYou || len(lines) <= quiet {
+		return
+	}
+	if b.errandOpen(ctx, id) {
+		b.errands.soon(id, b.waits.errandGather, b.errandTurn)
+	}
+}
+
 // callErrand calls errand e's person and carries the errand by voice:
 // Fridolin opens with its introduction, that it is an AI, and the
 // errand's first message, and each thing they say goes to the errand's
@@ -392,7 +407,15 @@ func (b *App) errandOpen(ctx context.Context, id string) bool {
 // not ended goes on by message.
 func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	b.errands.setCalling(e.ID, true)
-	defer b.errands.setCalling(e.ID, false)
+	// followUp: the call got past its opener. quiet: the owner holds a
+	// question or a failure notice, so no turn follows unless more arrives.
+	followUp, quiet := false, -1
+	defer func() {
+		b.errands.setCalling(e.ID, false)
+		if followUp {
+			b.errandAfterCall(e.ID, quiet)
+		}
+	}()
 	cfg := b.cfgs.Get()
 	ring := b.waits.callRing
 	if ring <= 0 {
@@ -457,6 +480,7 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		log.Printf("errand %s: opening the call: %v", e.ID, err)
 		return
 	}
+	followUp = true
 	until := time.Now().Add(errandCallMax)
 	goesOn := true
 	for goesOn {
@@ -490,11 +514,17 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 				_ = v.say(ctx, errandCallLater)
 			}
 			b.tellErrandOwner(ctx, e, outboundmsg.ErrandFailedNotice(e.Name, e.ID, err.Error()))
+			followUp = false // the owner was told; a turn would only fail again
 			return
 		}
 		goesOn = b.errandAct(ctx, e, ans, lines, ch)
 		if !goesOn && ans.Action == errand.AskOwner {
 			// The owner has the question; the call has done what it can.
+			if l, err := b.store.ErrandLines(ctx, e.ID); err == nil {
+				quiet = len(l)
+			} else {
+				followUp = false
+			}
 			if b.errandOpen(ctx, e.ID) {
 				_ = v.say(ctx, errandCallLater)
 			}
