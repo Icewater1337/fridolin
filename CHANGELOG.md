@@ -205,6 +205,13 @@ for compatibility.
 
 ### Fixed
 
+- **A very long line from a node's agent session no longer stalls its turn.**
+  A stream line over 8 MiB, such as a tool printing a large file, left the
+  session hanging until its maximum runtime (2 hours by default), and the
+  turn's result was lost. The line is now skipped and the turn goes on to its
+  result; if none arrives, the turn fails at once with an error that names
+  the long line.
+
 - **An errand that runs out of time no longer loses what the person wrote last.**
   When the minute check (or a restart) ends an errand whose time ran out,
   what they wrote that Fridolin had not answered now goes on, once: to you,
