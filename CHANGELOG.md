@@ -205,6 +205,12 @@ for compatibility.
 
 ### Fixed
 
+- **A node terminal keeps the shell's last output.** The terminal closed its
+  side as soon as the shell exited, so what the shell wrote just before could
+  be lost, and a read could say "closed" before the last output arrived. It now
+  reports closed only once the output was read to its end. A background job that
+  keeps the terminal open gets 2 seconds; then it closes without that job's output.
+
 - **The 40 messages a day now also count while a conversation is open.**
   Someone in a conversation they began could write any number of messages:
   the limit was only checked when one began. Past 40, what they write goes
