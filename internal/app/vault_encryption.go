@@ -129,6 +129,11 @@ func (s vaultSecretSource) ensureLayers(c *vaultCreds) error {
 // disaster loses.
 var liteMirrorEvery = time.Minute
 
+// liteSyncTimeout bounds one tick's sync. Generous on purpose: Litestream's
+// daily snapshot of bridge.db must still finish on a slow line, while a hung
+// upload ends and is retried at the next tick.
+var liteSyncTimeout = 15 * time.Minute
+
 // runLiteMirror uploads the local replicas until ctx ends, and once more
 // as it ends so that a clean stop leaves the cloud current.
 func (s *vaultService) runLiteMirror(ctx context.Context, m *cloud.Mirror) {
@@ -144,7 +149,9 @@ func (s *vaultService) runLiteMirror(ctx context.Context, m *cloud.Mirror) {
 			return
 		case <-t.C:
 		}
-		_, err := m.Sync(ctx, time.Now())
+		syncCtx, cancel := context.WithTimeout(ctx, liteSyncTimeout)
+		_, err := m.Sync(syncCtx, time.Now())
+		cancel()
 		switch {
 		case err != nil && !failing && ctx.Err() == nil:
 			s.log.Warn("vault: uploading Litestream's replicas failed; retrying each minute", "err", err)
