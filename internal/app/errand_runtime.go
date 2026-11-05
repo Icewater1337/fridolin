@@ -536,7 +536,8 @@ func (b *App) errandClaims(sender types.JID) bool {
 
 // errandInbound takes a message from someone the errands claimed: the
 // next line of their open errand, passed on to the owner while none is
-// open, or nothing at all from someone Fridolin stopped listening to.
+// open or past a day's messages in a conversation they began, or nothing
+// at all from someone Fridolin stopped listening to.
 func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 	if !b.intake.Enter() {
 		log.Printf("errand: a message from %s came in as the bridge stopped; it is lost", logx.MaskJID(m.Sender, "", ""))
@@ -559,9 +560,10 @@ func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 	b.errands.begin.Lock()
 	e, err := b.store.LiveErrandWith(ctx, contact.Contact)
 	switch {
-	case err == nil && e.State == store.ErrandOpen:
+	case err == nil && e.State == store.ErrandOpen && !b.heardEnough(ctx, e):
+		err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromThem, Text: text, At: m.At}, false)
 		b.errands.begin.Unlock()
-		if err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromThem, Text: text, At: m.At}, false); err != nil {
+		if err != nil {
 			log.Printf("errand %s: recording their message: %v", e.ID, err)
 			return
 		}
@@ -575,8 +577,8 @@ func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 			return
 		}
 	default:
-		// One that waits for the owner's approval, or a store that cannot
-		// tell: the owner hears of it.
+		// One that waits for the owner's approval, a conversation past the
+		// day's messages, or a store that cannot tell: the owner hears of it.
 		b.errands.begin.Unlock()
 	}
 	if !b.errands.forward(contact.Contact, time.Now()) {
@@ -592,6 +594,25 @@ func (b *App) errandInbound(ctx context.Context, m chat.Inbound) {
 	if err := b.outbox.Notice(ctx, contact.Brain, target, notice, history, errandForwardRef+contact.Contact, b.cfgs.Get().MaxChunkSize); err != nil {
 		log.Printf("errand: passing on a message from %s: %v", logx.MaskJID(contact.Contact, "", ""), err)
 	}
+}
+
+// heardEnough reports whether the person in e, a conversation they began,
+// reached a day's messages, or the store cannot tell. Errands the owner
+// started have no such limit: the owner asked for that conversation.
+func (b *App) heardEnough(ctx context.Context, e store.Errand) bool {
+	if e.OpenedBy != store.OpenedByThem {
+		return false
+	}
+	heard, err := b.store.ErrandLinesFromSince(ctx, e.Contact, errand.FromThem, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		log.Printf("errand %s: counting the messages of %s: %v", e.ID, logx.MaskJID(e.Contact, "", ""), err)
+		return true
+	}
+	if heard >= errandHeardPerDay {
+		log.Printf("errand %s: %s wrote again after %d messages today: passed on to the owner", e.ID, logx.MaskJID(e.Contact, "", ""), heard)
+		return true
+	}
+	return false
 }
 
 // beginConversation begins a conversation with contact, who wrote text
