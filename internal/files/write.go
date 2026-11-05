@@ -374,13 +374,29 @@ func (r Root) Create(dir, name string, body io.Reader, max int64, s Scope) (stri
 	if err != nil {
 		return "", 0, err
 	}
-	// The body streams in without the lock: O_EXCL already made the name ours.
-	size, err := copyAtMost(f, body, max)
+	own, err := f.Stat()
 	if err != nil {
+		_ = f.Close()
 		_ = root.Remove(rel)
 		return "", 0, err
 	}
+	// The body streams in without the lock: O_EXCL already made the name ours.
+	size, err := copyAtMost(f, body, max)
+	if err != nil {
+		r.removeIfSame(root, rel, own)
+		return "", 0, err
+	}
 	return rel, size, nil
+}
+
+// removeIfSame removes rel only while it is still own: the name may have
+// been renamed away and taken by another file since the upload began. A
+// half file that was renamed stays, under its new name.
+func (r Root) removeIfSame(root *os.Root, rel string, own fs.FileInfo) {
+	defer lockRoot(r.Path)()
+	if cur, err := root.Lstat(rel); err == nil && os.SameFile(cur, own) {
+		_ = root.Remove(rel)
+	}
 }
 
 // reserve creates the empty file for Create under the root's lock.
