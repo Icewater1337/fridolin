@@ -205,6 +205,11 @@ for compatibility.
 
 ### Fixed
 
+- **An errand that runs out of time no longer loses what the person wrote last.**
+  When the minute check (or a restart) ends an errand whose time ran out,
+  what they wrote that Fridolin had not answered now goes on, once: to you,
+  or to a conversation of its own, as it already did when a run ended it.
+
 - **A call errand answers what came in during or at the end of the call.**
   When a call ends and the errand is still open with the person's words
   (or your answer) as its last line, Fridolin now goes on by message
