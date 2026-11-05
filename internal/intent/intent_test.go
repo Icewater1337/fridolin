@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -141,5 +142,52 @@ func TestJobLast(t *testing.T) {
 	}
 	if last, ok := s.JobLast("main", "memory-consolidation"); !ok || !last.Equal(ran) {
 		t.Errorf("JobLast = %v %v", last, ok)
+	}
+}
+
+// An intent whose firing cannot be recorded must not fire, or it fires
+// again at every tick.
+func TestUnrecordedDoesNotFire(t *testing.T) {
+	s := newStore(t)
+	loc := time.UTC
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, loc)
+	for _, r := range []Request{
+		{Text: "dentist", When: "2026-10-21T09:00"},
+		{Text: "tell about the boat", Match: []string{"boat"}},
+	} {
+		in, err := Compile(r, dm, "15551234567", now, loc)
+		if err == nil {
+			_, err = s.Add("main", in)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := filepath.Dir(s.path("main"))
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	if f, err := os.CreateTemp(dir, "probe"); err == nil {
+		f.Close()
+		t.Skip("read-only folders are not enforced here (root?)")
+	}
+
+	later := time.Date(2026, 10, 21, 9, 30, 0, 0, loc)
+	for range 2 {
+		if due, err := s.Due("main", later); err == nil || len(due) != 0 {
+			t.Errorf("Due: %+v, %v", due, err)
+		}
+		if got, err := s.Matching("main", "the boat", later, nil); err == nil || len(got) != 0 {
+			t.Errorf("Matching: %+v, %v", got, err)
+		}
+	}
+
+	os.Chmod(dir, 0o700)
+	if due, err := s.Due("main", later); err != nil || len(due) != 1 {
+		t.Errorf("Due after the write works: %+v, %v", due, err)
+	}
+	if got, err := s.Matching("main", "the boat", later, nil); err != nil || len(got) != 1 {
+		t.Errorf("Matching after the write works: %+v, %v", got, err)
 	}
 }
