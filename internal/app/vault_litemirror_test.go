@@ -27,6 +27,7 @@ func (h *hangStore) Put(ctx context.Context, _ string, _ io.Reader) error {
 }
 
 func TestRunLiteMirrorEndsAHungSync(t *testing.T) {
+	// Serial: shortens the package-level liteMirrorEvery and liteSyncTimeout.
 	oldEvery, oldTimeout := liteMirrorEvery, liteSyncTimeout
 	liteMirrorEvery, liteSyncTimeout = 10*time.Millisecond, 50*time.Millisecond
 	t.Cleanup(func() { liteMirrorEvery, liteSyncTimeout = oldEvery, oldTimeout })
