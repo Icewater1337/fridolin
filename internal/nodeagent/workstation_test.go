@@ -2,7 +2,9 @@ package nodeagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -545,5 +548,63 @@ func TestResumeIDs(t *testing.T) {
 		if resumeID.MatchString(id) != ok {
 			t.Errorf("%q: got %v, want %v", id, !ok, ok)
 		}
+	}
+}
+
+// parse must read to the end whatever a line's length, or the CLI blocks on
+// its stdout until the session's maximum runtime (an io.Pipe's write blocks
+// the same way, until it is read).
+func TestParseSkipsAnOversizeStreamLine(t *testing.T) {
+	longLine := func(n int) string { // a JSON object of n bytes, newline included
+		const head, tail = `{"type":"assistant","x":"`, "\"}\n"
+		return head + strings.Repeat("a", n-len(head)-len(tail)) + tail
+	}
+	const result = `{"type":"result","result":"all done"}` + "\n"
+	const text = `{"type":"assistant","message":{"content":[{"type":"text","text":"kept"}]}}` + "\n"
+
+	for _, tc := range []struct {
+		name, stream, wantText, wantErr string
+		wantFinished                    bool
+	}{
+		{name: "a result after it still counts", stream: longLine(maxStreamLine+1) + result, wantText: "all done", wantFinished: true},
+		{name: "many times the limit", stream: longLine(3*maxStreamLine) + text + result, wantText: "all done", wantFinished: true},
+		{name: "no result names it", stream: text + longLine(maxStreamLine+1), wantText: "kept", wantErr: "over 8 MiB"},
+		{name: "a line at the limit is read", stream: longLine(maxStreamLine) + strings.TrimSuffix(result, "\n"), wantText: "all done", wantFinished: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &agentSession{a: &Agent{Logf: t.Logf}, id: "s1", provider: nodeproto.ProviderClaude}
+			pr, pw := io.Pipe()
+			wrote := make(chan error, 1)
+			go func() {
+				_, err := io.WriteString(pw, tc.stream)
+				wrote <- err
+				_ = pw.Close()
+			}()
+			res := s.parse(pr)
+			if err := <-wrote; err != nil {
+				t.Fatal(err)
+			}
+			if res.text != tc.wantText || res.finished != tc.wantFinished {
+				t.Errorf("got text %q, finished %v", res.text, res.finished)
+			}
+			if tc.wantErr == "" && res.errMsg != "" || !strings.Contains(res.errMsg, tc.wantErr) {
+				t.Errorf("got error %q, want %q", res.errMsg, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseReadError(t *testing.T) {
+	boom := errors.New("boom")
+	s := &agentSession{a: &Agent{Logf: t.Logf}, id: "s1", provider: nodeproto.ProviderClaude}
+
+	res := s.parse(iotest.ErrReader(boom))
+	if !strings.Contains(res.errMsg, "boom") {
+		t.Errorf("a read error should be the turn's error, got %q", res.errMsg)
+	}
+
+	res = s.parse(io.MultiReader(strings.NewReader(`{"type":"result","result":"all done"}`+"\n"), iotest.ErrReader(boom)))
+	if res.errMsg != "" || res.text != "all done" {
+		t.Errorf("a result that arrived should stand, got %+v", res)
 	}
 }
