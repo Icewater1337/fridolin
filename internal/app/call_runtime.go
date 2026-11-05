@@ -377,6 +377,13 @@ func (b *App) errandCallsReady(ctx context.Context, cfg *config.Settings, self s
 	return nil
 }
 
+// errandOpen reports whether errand id is open, as close to a send as
+// the caller can ask.
+func (b *App) errandOpen(ctx context.Context, id string) bool {
+	e, err := b.store.GetErrand(ctx, id)
+	return err == nil && e.State == store.ErrandOpen
+}
+
 // callErrand calls errand e's person and carries the errand by voice:
 // Fridolin opens with its introduction, that it is an AI, and the
 // errand's first message, and each thing they say goes to the errand's
@@ -413,21 +420,38 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	}
 	b.auditErrand(e, "called", "they picked up")
 	owner := strings.TrimSpace(s.OwnerName)
-	say := func(text string) error {
+	said := func(text string) error {
 		if err := v.say(ctx, text); err != nil {
+			return err
+		}
+		b.auditErrand(e, "said", fmt.Sprintf("%d characters", len([]rune(text))))
+		return nil
+	}
+	// Recorded first, in the statement that checks the errand is open.
+	say := func(text string) error {
+		ok, err := b.store.AddErrandLineWhileOpen(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()})
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errandEnded
+		}
+		return said(text)
+	}
+	sayEnding := func(text string) error {
+		if err := said(text); err != nil {
 			return err
 		}
 		if err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()}, true); err != nil {
 			log.Printf("errand %s: recording what was said: %v", e.ID, err)
 		}
-		b.auditErrand(e, "said", fmt.Sprintf("%d characters", len([]rune(text))))
 		return nil
 	}
 	// The chat's words, read aloud without their emoji.
 	unEmoji := func(s string) string {
 		return strings.TrimLeftFunc(s, func(r rune) bool { return !unicode.IsLetter(r) })
 	}
-	ch := errandChannel{say: say, abort: unEmoji(outboundmsg.ErrandAbortMessage(owner)), warn: unEmoji(outboundmsg.ErrandWarnMessage(owner))}
+	ch := errandChannel{say: say, sayEnding: sayEnding, abort: unEmoji(outboundmsg.ErrandAbortMessage(owner)), warn: unEmoji(outboundmsg.ErrandWarnMessage(owner))}
 	opener := errand.Intro(s.OwnerName, s.Intro) + " " + cfg.Calls.NoticeOrDefault() + " " + e.Message
 	if err := say(opener); err != nil {
 		log.Printf("errand %s: opening the call: %v", e.ID, err)
@@ -462,14 +486,18 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		ans, err := b.errandAsk(ctx, e, s, lines, true)
 		if err != nil {
 			log.Printf("errand %s: %v", e.ID, err)
-			_ = v.say(ctx, errandCallLater)
+			if b.errandOpen(ctx, e.ID) {
+				_ = v.say(ctx, errandCallLater)
+			}
 			b.tellErrandOwner(ctx, e, outboundmsg.ErrandFailedNotice(e.Name, e.ID, err.Error()))
 			return
 		}
 		goesOn = b.errandAct(ctx, e, ans, lines, ch)
 		if !goesOn && ans.Action == errand.AskOwner {
 			// The owner has the question; the call has done what it can.
-			_ = v.say(ctx, errandCallLater)
+			if b.errandOpen(ctx, e.ID) {
+				_ = v.say(ctx, errandCallLater)
+			}
 			return
 		}
 	}
