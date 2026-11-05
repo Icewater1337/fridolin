@@ -445,6 +445,14 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 	if s.gh != "" {
 		defer h.loginGitHub(ctx, s, spec)()
 	}
+	// Stopped while the token was minted: nothing is begun, so no message
+	// reaches the session and no Stop hook has a turn to land in.
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return claudecli.Result{Err: claudecli.TimedOut(spec.Settings.RunTimeout)}
+		}
+		return claudecli.Result{Err: claudecli.ErrInterrupted}
+	}
 	answer, err := s.hub.Begin()
 	if err != nil {
 		return claudecli.Result{Err: err}

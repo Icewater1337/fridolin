@@ -7,9 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -481,6 +486,71 @@ func TestLiveSessionLogsInToGitHubPerTurn(t *testing.T) {
 	}
 	if len(msgs) != 3 {
 		t.Errorf("turns: %d, want 3", len(msgs))
+	}
+}
+
+// TestStoppingALiveTurnWhileItsTokenIsMinted: a turn stopped while the
+// token of its gh login is minted delivers nothing: its message never
+// reaches the session, which stays and takes the next message.
+func TestStoppingALiveTurnWhileItsTokenIsMinted(t *testing.T) {
+	t.Parallel()
+	fake := ghapptest.New()
+	t.Cleanup(fake.Close)
+	setenv(t, "FRIDOLIN_FAKE_GH_API", fake.URL)
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var gate atomic.Bool
+	minting, over := make(chan struct{}, 1), make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if gate.Load() && strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			select {
+			case minting <- struct{}{}:
+			default:
+			}
+			select {
+			case <-r.Context().Done():
+			case <-over:
+			}
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(slow.Close)
+	t.Cleanup(func() { close(over) })
+	grant := &chat.GitHubGrant{Repos: []string{"you/fridolin"}, Permissions: map[string]string{"issues": "write"}}
+	h, log := liveHarnessOf(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, LiveSession: manifest.LiveSessionOwnerDM, GitHub: grant}, func(h *harness) {
+		h.b.github.client.API, h.b.github.web = slow.URL, slow.URL
+		creds, err := h.b.github.client.Convert(context.Background(), ghapptest.Code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.b.github.secrets.save(creds); err != nil {
+			t.Fatal(err)
+		}
+	})
+	h.Answer(inbound{JID: harnessDM, Text: "one"})
+	h.waitLive("main")
+	gate.Store(true)
+	h.Inject(inbound{JID: harnessDM, Text: "two"})
+	select {
+	case <-minting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never asked for a token")
+	}
+	if !h.b.brainMgr.Get("main").StopCurrent(false) {
+		t.Fatal("nothing to stop")
+	}
+	gate.Store(false)
+	if got := h.Answer(inbound{JID: harnessDM, Text: "three"}); !strings.HasPrefix(got, "live") {
+		t.Errorf("the session after the stop: %q", got)
+	}
+	for _, m := range messagesOf(log()) {
+		if strings.Contains(m.Content, "two") {
+			t.Errorf("the stopped turn's message reached the session: %+v", m)
+		}
 	}
 }
 
