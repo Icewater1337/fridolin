@@ -249,3 +249,39 @@ func TestCreateDoesNotHoldTheLockWhileTheBodyStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type failingBody struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b failingBody) Read(p []byte) (int, error) {
+	close(b.started)
+	<-b.release
+	return 0, errors.New("connection reset")
+}
+
+func TestFailedUploadKeepsTheFileThatTookItsName(t *testing.T) {
+	r, _, _ := testRoot(t)
+	body := failingBody{make(chan struct{}), make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := r.Create("docs", "x.bin", body, 10, editor)
+		done <- err
+	}()
+	<-body.started
+	if err := r.Move("docs/x.bin", "docs/y.bin", editor); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.Create("docs", "x.bin", strings.NewReader("second"), 10, editor); err != nil {
+		t.Fatal(err)
+	}
+	close(body.release)
+	if err := <-done; err == nil {
+		t.Fatal("the first upload should have failed")
+	}
+	got, err := os.ReadFile(filepath.Join(r.Path, "docs", "x.bin"))
+	if err != nil || string(got) != "second" {
+		t.Fatalf("second upload's file = %q, %v", got, err)
+	}
+}

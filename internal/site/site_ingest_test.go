@@ -402,3 +402,21 @@ func TestSpoolAnswerMarksTemporaryErrors(t *testing.T) {
 		}
 	}
 }
+
+// A fetch that finds every wait slot taken is refused as temporary, so the
+// site answers 503 and the phone's retry counts no failure toward the IP block.
+func TestDeviceWaitFullIsTemporary(t *testing.T) {
+	m := newTestSite(t)
+	for range spoolWaitLimit {
+		m.waitSlots <- struct{}{}
+	}
+	entry := strings.Repeat("w", 24)
+	dir := filepath.Join(m.spoolDir(), entry)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	m.startDeviceWait(entry)
+	if got := readSpoolAnswer(t, dir); got["ok"] != false || got["temporary"] != true {
+		t.Errorf("answer %v, want a temporary refusal", got)
+	}
+}

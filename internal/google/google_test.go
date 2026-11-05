@@ -183,3 +183,47 @@ func TestGoogleDecoderDiagnosticContracts(t *testing.T) {
 		t.Fatal("event decoder metadata lost")
 	}
 }
+
+func TestSortByStartUsesTheInstant(t *testing.T) {
+	// The night clocks go back in Zurich: 02:15+01:00 is an hour after 02:30+02:00.
+	events := func() []CalendarEvent {
+		return []CalendarEvent{
+			{ID: "bad", Start: "soon"},
+			{ID: "late", Start: "2026-10-25T02:15:00+01:00"},
+			{ID: "day", Start: "2026-10-26"},
+			{ID: "early", Start: "2026-10-25T02:30:00+02:00"},
+		}
+	}
+	ids := func(es []CalendarEvent) string {
+		var out []string
+		for _, e := range es {
+			out = append(out, e.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	es := events()
+	sortByStart(es, func(e CalendarEvent) string { return e.Start }, "Europe/Zurich")
+	if got := ids(es); got != "early,late,day,bad" {
+		t.Fatalf("order = %s", got)
+	}
+}
+
+func TestEventsOfMaxKeepsTheEarliest(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"items":[
+			{"id":"late","start":{"dateTime":"2026-10-25T02:15:00+01:00"}},
+			{"id":"early","start":{"dateTime":"2026-10-25T02:30:00+02:00"}}]}`)
+	}))
+	defer srv.Close()
+	g := New(googleTestOptions(Options{CredsDir: func() string { return t.TempDir() }}, srv))
+	from := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
+	got, err := g.EventsOf(t.Context(), &Token{Token: "x"}, []string{"primary"}, from, from.Add(24*time.Hour), "Europe/Zurich", 2)
+	if err != nil || got.Events[0].ID != "early" {
+		t.Fatalf("events = %+v, %v", got, err)
+	}
+	got, err = g.EventsOf(t.Context(), &Token{Token: "x"}, []string{"primary"}, from, from.Add(24*time.Hour), "Europe/Zurich", 1)
+	if err != nil || len(got.Events) != 1 || got.Events[0].ID != "early" || !got.Truncated {
+		t.Fatalf("max 1 = %+v, %v", got, err)
+	}
+}

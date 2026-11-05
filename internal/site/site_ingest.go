@@ -385,6 +385,12 @@ func (m *SiteManager) deviceWaits(root *os.Root, entry string) bool {
 	return json.Unmarshal(data, &req) == nil && (req.Op == "voice_reply" || req.Op == "app_apk")
 }
 
+// waitFullError is the refusal when every wait slot is taken: a retry gets
+// past it, so the site answers 503 and counts no failure toward the IP block.
+type waitFullError struct{ error }
+
+func (waitFullError) Temporary() bool { return true }
+
 // startDeviceWait answers a waiting request once, as startSpoolSearch
 // runs a search once.
 func (m *SiteManager) startDeviceWait(entry string) {
@@ -401,7 +407,7 @@ func (m *SiteManager) startDeviceWait(entry string) {
 	select {
 	case m.waitSlots <- struct{}{}:
 	default:
-		spoolAnswer(root, entry, errors.New("too many phones waiting for answers; try again in a moment"), nil)
+		spoolAnswer(root, entry, waitFullError{errors.New("too many phones waiting for answers; try again in a moment")}, nil)
 		root.Close()
 		return
 	}

@@ -241,7 +241,8 @@ func fire(in *Intent, now time.Time) bool {
 }
 
 // Due returns brain's schedule intents that fell due by now and records
-// them as fired: a one-time one is removed.
+// them as fired: a one-time one is removed. When that cannot be
+// recorded, none is returned.
 func (s *Store) Due(brain string, now time.Time) ([]Intent, error) {
 	var out []Intent
 	err := s.update(brain, func(f *File) (bool, error) {
@@ -265,13 +266,17 @@ func (s *Store) Due(brain string, now time.Time) ([]Intent, error) {
 		f.Intents = keep
 		return len(out) > 0, nil
 	})
-	return out, err
+	if err != nil {
+		// Not recorded, so not fired: it fires once the write works.
+		return nil, err
+	}
+	return out, nil
 }
 
 // Matching returns brain's keyword intents that text fires, but those
 // skip (when set) leaves alone, and records them as fired: one that does
 // not repeat is removed, one that does waits MatchCooldown before it
-// fires again.
+// fires again. When that cannot be recorded, none is returned.
 func (s *Store) Matching(brain, text string, now time.Time, skip func(Intent) bool) ([]Intent, error) {
 	var out []Intent
 	err := s.update(brain, func(f *File) (bool, error) {
@@ -289,7 +294,11 @@ func (s *Store) Matching(brain, text string, now time.Time, skip func(Intent) bo
 		f.Intents = keep
 		return len(out) > 0, nil
 	})
-	return out, err
+	if err != nil {
+		// Not recorded, so not fired: it fires once the write works.
+		return nil, err
+	}
+	return out, nil
 }
 
 // HasMatch reports whether brain has any keyword intent, so that a

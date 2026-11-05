@@ -205,6 +205,12 @@ for compatibility.
 
 ### Fixed
 
+- **A call errand answers what came in during or at the end of the call.**
+  When a call ends and the errand is still open with the person's words
+  (or your answer) as its last line, Fridolin now goes on by message
+  instead of leaving it unanswered. No turn follows when the call ended on
+  a question to you and nothing new arrived since.
+
 - **A brain's run can no longer fork-bomb a container.** The containers
   now have a process limit: 4096 for the core, FrIDE and a box that can
   hold the core, 1024 for a box's node without that overlay. It applies

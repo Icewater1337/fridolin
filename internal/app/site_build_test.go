@@ -321,3 +321,32 @@ func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
 		}
 	})
 }
+
+// A stop aimed at the build chat's run must not kill the run of another
+// chat that started after the check: the build run ended, the next began.
+func TestStopBuildRunLeavesALaterRunAlone(t *testing.T) {
+	t.Parallel()
+	mgr, d, _ := queueTestManager(t, 30000, "")
+	br := mgr.Get("a")
+	jid := buildChatJID("a", 1)
+	if _, _, _, err := mgr.Submit(brain.Inbound{Inbound: chat.Inbound{JID: jid, Sender: "dashboard", Brain: "a", Text: "build", Source: "site-build"}}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WaitFor(t, 5*time.Second, "build run", func() bool { return br.Snapshot().Running != nil })
+	stale := br.Snapshot()
+	if _, _, _, err := mgr.Submit(dm("other chat")); err != nil {
+		t.Fatal(err)
+	}
+	br.StopLane(brain.LaneChat) // the build run ends; the other chat's starts
+	testutil.WaitFor(t, 5*time.Second, "other run", func() bool {
+		r := br.Snapshot().Running
+		return r != nil && r.Chat != jid
+	})
+	if stopBuildRun(br, stale, jid) {
+		t.Error("stopBuildRun reported a stop for a run that had ended")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if r := br.Snapshot().Running; r == nil || r.Chat == jid || d.count() != 1 {
+		t.Errorf("the other chat's run was stopped: running %+v, %d delivered", r, d.count())
+	}
+}
