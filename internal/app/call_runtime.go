@@ -478,6 +478,14 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	opener := errand.Intro(s.OwnerName, s.Intro) + " " + cfg.Calls.NoticeOrDefault() + " " + e.Message
 	if err := say(opener); err != nil {
 		log.Printf("errand %s: opening the call: %v", e.ID, err)
+		if errors.Is(err, errandEnded) {
+			return
+		}
+		why := "the call failed: " + err.Error()
+		if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandExpired, why, time.Now()); ended {
+			b.auditErrand(e, "ended", store.ErrandExpired+": the call failed")
+			b.tellErrandOwner(ctx, e, outboundmsg.ErrandFailedNotice(e.Name, e.ID, why))
+		}
 		return
 	}
 	followUp = true
