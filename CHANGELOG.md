@@ -212,6 +212,12 @@ for compatibility.
   result; if none arrives, the turn fails at once with an error that names
   the long line.
 
+- **The 40 messages a day now also count while a conversation is open.**
+  Someone in a conversation they began could write any number of messages:
+  the limit was only checked when one began. Past 40, what they write goes
+  to you instead, within the usual five passed on a day, and gets no answer.
+  The conversation stays open until it ends as usual.
+
 - **An errand that runs out of time no longer loses what the person wrote last.**
   When the minute check (or a restart) ends an errand whose time ran out,
   what they wrote that Fridolin had not answered now goes on, once: to you,
