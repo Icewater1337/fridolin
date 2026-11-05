@@ -40,6 +40,12 @@ func serveNodes(t *testing.T, setup func(*Service)) *Service {
 // does, with join code, and returns the connection.
 func dialAsNode(t *testing.T, addr string, key ed25519.PrivateKey, code string) *websocket.Conn {
 	t.Helper()
+	return dialAsNodeWith(t, addr, key, code, nodeproto.Capabilities{Host: true})
+}
+
+// dialAsNodeWith is dialAsNode declaring caps.
+func dialAsNodeWith(t *testing.T, addr string, key ed25519.PrivateKey, code string, caps nodeproto.Capabilities) *websocket.Conn {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	ws, _, err := websocket.Dial(ctx, "ws://"+addr+nodeproto.Path, &websocket.DialOptions{Subprotocols: []string{nodeproto.Subprotocol}})
@@ -58,7 +64,7 @@ func dialAsNode(t *testing.T, addr string, key ed25519.PrivateKey, code string) 
 	}
 	pub := key.Public().(ed25519.PublicKey)
 	id := nodeproto.DeviceIDFor(pub)
-	send(nodeproto.TypeHello, nodeproto.Hello{DeviceID: id, PublicKey: pub, Name: "laptop", OS: "linux", Arch: "amd64", Version: "v1", Capabilities: nodeproto.Capabilities{Host: true}, JoinCode: code})
+	send(nodeproto.TypeHello, nodeproto.Hello{DeviceID: id, PublicKey: pub, Name: "laptop", OS: "linux", Arch: "amd64", Version: "v1", Capabilities: caps, JoinCode: code})
 	env, err := readEnvelope(ctx, ws)
 	if err != nil || env.Type != nodeproto.TypeChallenge {
 		t.Fatalf("the answer to hello: %+v %v", env, err)
