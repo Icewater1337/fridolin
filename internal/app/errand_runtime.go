@@ -662,23 +662,15 @@ func (b *App) errandTurn(id string) {
 	if err != nil {
 		return
 	}
-	// What they wrote that nobody answered, once it ends unanswered, goes
-	// on: to a conversation of its own, or to the owner.
-	unanswered := len(lines)
-	for unanswered > 0 && lines[unanswered-1].Sender == errand.FromThem {
-		unanswered--
-	}
 	if time.Now().After(e.Deadline) {
-		b.expireErrand(ctx, e, errandTimeUp(e))
-		b.hearLate(ctx, e, unanswered)
+		b.expireHearing(ctx, e, lines, errandTimeUp(e))
 		return
 	}
 	if len(lines) == 0 || lines[len(lines)-1].Sender == errand.FromYou {
 		return
 	}
 	if e.Sent >= errand.MaxMessages {
-		b.expireErrand(ctx, e, fmt.Sprintf("I wrote its %d messages", errand.MaxMessages))
-		b.hearLate(ctx, e, unanswered)
+		b.expireHearing(ctx, e, lines, fmt.Sprintf("I wrote its %d messages", errand.MaxMessages))
 		return
 	}
 	s, ok := b.errandSettings(e.Brain)
@@ -893,12 +885,30 @@ func (b *App) abortErrand(ctx context.Context, e store.Errand, reason string, li
 }
 
 // expireErrand ends errand e, whose time or messages ran out (why).
-func (b *App) expireErrand(ctx context.Context, e store.Errand, why string) {
+// It reports whether this call ended it.
+func (b *App) expireErrand(ctx context.Context, e store.Errand, why string) bool {
 	if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandExpired, why, time.Now()); !ended {
-		return
+		return false
 	}
 	b.auditErrand(e, "ended", store.ErrandExpired+": "+why)
 	b.tellErrandOwner(ctx, e, outboundmsg.ErrandExpiredNotice(e.Name, e.ID, why))
+	return true
+}
+
+// expireHearing ends errand e like expireErrand, and when this call
+// ended it, passes on what its person wrote that nobody answered (the
+// tail of lines they wrote), to a conversation of its own or to the
+// owner. errandTurn returns early on an ended errand, so this is the
+// only place those lines go on, once.
+func (b *App) expireHearing(ctx context.Context, e store.Errand, lines []store.ErrandLine, why string) {
+	if !b.expireErrand(ctx, e, why) {
+		return
+	}
+	unanswered := len(lines)
+	for unanswered > 0 && lines[unanswered-1].Sender == errand.FromThem {
+		unanswered--
+	}
+	b.hearLate(ctx, e, unanswered)
 }
 
 // errandAsk has errand e's run answer, on a call (call) or by message:
@@ -1064,7 +1074,13 @@ func (b *App) sweepErrands(ctx context.Context, now time.Time, resume bool) {
 	}
 	for _, e := range open {
 		if now.After(e.Deadline) {
-			b.expireErrand(ctx, e, errandTimeUp(e))
+			lines, err := b.store.ErrandLines(ctx, e.ID)
+			if err != nil {
+				// Without the lines nothing can be told apart as unanswered.
+				b.expireErrand(ctx, e, errandTimeUp(e))
+				continue
+			}
+			b.expireHearing(ctx, e, lines, errandTimeUp(e))
 			continue
 		}
 		if !resume {

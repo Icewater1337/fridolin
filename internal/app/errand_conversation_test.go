@@ -221,3 +221,85 @@ func TestErrandMessageWhileItEnds(t *testing.T) {
 		t.Errorf("the conversation's run was handed %+v", seen[len(seen)-1].Lines)
 	}
 }
+
+// lateTail opens dinner's errand with Alex, adds lines to it as they
+// were written before its deadline, and returns the harness with the
+// errand and the time past its deadline.
+func lateTail(t *testing.T, forward bool, lines ...store.ErrandLine) (*harness, *errandRuns, store.Errand, time.Time) {
+	t.Helper()
+	h, runs := errandHarness(t)
+	ctx := context.Background()
+	h.knowAlex()
+	if forward {
+		_, _ = h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", time.Now())
+	}
+	r := dinner
+	r.Days = 1
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), r); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	for _, l := range lines {
+		l.At = time.Now()
+		if err := h.b.store.AddErrandLine(ctx, e.ID, l, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return h, runs, e, time.Now().Add(25 * time.Hour)
+}
+
+// TestSweepPassesOnWhatTheyWroteLast: the sweep (or the restart's) that
+// ends an errand whose time ran out passes on what the person wrote that
+// nobody answered, once: to the owner, or to a conversation of its own.
+// The turn that was already scheduled finds the errand ended and does
+// nothing more. Nothing is passed on when the last line was Fridolin's.
+func TestSweepPassesOnWhatTheyWroteLast(t *testing.T) {
+	t.Parallel()
+	ours := store.ErrandLine{Sender: errand.FromYou, Text: "When would dinner suit you?"}
+	theirs := func(text string) store.ErrandLine { return store.ErrandLine{Sender: errand.FromThem, Text: text} }
+	for _, resume := range []bool{false, true} {
+		name := "sweep"
+		if resume {
+			name = "restart"
+		}
+		t.Run(name+"/owner", func(t *testing.T) {
+			t.Parallel()
+			h, runs, e, late := lateTail(t, true, ours, theirs("Tuesday works"), theirs("Sorry, Thursday!"))
+			h.b.sweepErrands(context.Background(), late, resume)
+			h.WaitSent(harnessDM, "Tuesday works\nSorry, Thursday!")
+			h.b.errandTurn(e.ID)
+			if n := strings.Count(strings.Join(h.SentTo(harnessDM), "\n"), "Sorry, Thursday!"); n != 1 || len(runs.handed()) != 0 {
+				t.Errorf("their lines reached the owner %d times, %d runs", n, len(runs.handed()))
+			}
+		})
+		t.Run(name+"/conversation", func(t *testing.T) {
+			t.Parallel()
+			h, runs, e, late := lateTail(t, false, ours, theirs("Tuesday works"), theirs("Sorry, Thursday!"))
+			runs.say(`{"action":"reply","text":"Thursday it is!"}`)
+			h.b.sweepErrands(context.Background(), late, resume)
+			h.WaitSent(errandJID, "Thursday it is!")
+			h.b.errandTurn(e.ID)
+			handed := runs.handed()
+			if len(handed) != 1 || len(handed[0].Lines) != 1 || handed[0].Lines[0].Text != "Tuesday works\nSorry, Thursday!" {
+				t.Errorf("the conversation's runs: %+v", handed)
+			}
+		})
+		t.Run(name+"/answered", func(t *testing.T) {
+			t.Parallel()
+			h, runs, e, late := lateTail(t, true, theirs("Tuesday works"), ours)
+			h.b.sweepErrands(context.Background(), late, resume)
+			h.b.errandTurn(e.ID)
+			if got := h.errandOf(e.ID); got.State != store.ErrandExpired {
+				t.Errorf("the errand: %+v", got)
+			}
+			for _, text := range h.SentTo(harnessDM) {
+				if strings.Contains(text, "Tuesday works") {
+					t.Errorf("an answered line was passed on: %q", text)
+				}
+			}
+			if len(runs.handed()) != 0 {
+				t.Error("a run after the errand ended")
+			}
+		})
+	}
+}
