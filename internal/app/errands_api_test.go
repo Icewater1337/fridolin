@@ -108,15 +108,16 @@ func TestErrandsDashboard(t *testing.T) {
 		{"15550000000", map[string]string{"mode": "forward", "brief": ""}, http.StatusNotFound}, // personal-data:ignore (a fictional 555 number)
 		{"Alex", map[string]string{"mode": "forward", "brief": ""}, http.StatusUnprocessableEntity},
 		{errandNumber, map[string]string{"mode": "chat", "brief": ""}, http.StatusUnprocessableEntity},
+		{errandNumber, map[string]string{"mode": "forward", "brief": "", "calendar": "always"}, http.StatusUnprocessableEntity},
 		{errandNumber, map[string]any{"mode": "forward", "brief": "", "warned": true}, http.StatusBadRequest},
 	} {
 		if w := h.Do("PUT", "/api/errand-contacts/"+c.number, c.body); w.Code != c.code {
 			t.Errorf("PUT %s %v: %d %s", c.number, c.body, w.Code, w.Body.String())
 		}
 	}
-	w := h.Do("PUT", "/api/errand-contacts/"+errandNumber, map[string]string{"mode": "converse", "brief": " Alex may know Sam is away in May. "})
+	w := h.Do("PUT", "/api/errand-contacts/"+errandNumber, map[string]string{"mode": "converse", "brief": " Alex may know Sam is away in May. ", "calendar": "offer"})
 	var p httpapi.ErrandPerson
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &p) != nil || p.Mode != store.ContactConverse || p.Brief != "Alex may know Sam is away in May." || p.State != store.ContactKnown {
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &p) != nil || p.Mode != store.ContactConverse || p.Brief != "Alex may know Sam is away in May." || p.State != store.ContactKnown || p.Calendar != "offer" {
 		t.Errorf("setting them: %d %s", w.Code, w.Body.String())
 	}
 	if l := h.auditOf("errand"); l[len(l)-1]["detail"] != "contact" || l[len(l)-1]["by"] != "dashboard" || l[len(l)-1]["outcome"] != store.ContactConverse {

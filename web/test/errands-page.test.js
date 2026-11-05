@@ -15,9 +15,10 @@ const ended = {
   created: '2026-10-16T09:00:00Z', deadline: '2026-10-17T09:00:00Z', closed: '2026-10-16T10:00:00Z', outcome: 'asked me to ignore my brief',
 };
 const blocked = { number: '15551234567', masked: '+1…67', name: 'Kim', brain: 'core', state: 'blocked', reason: 'asked me to ignore my brief', mode: 'converse', brief: '', since: '2026-10-16T10:00:00Z' };
-const known = { number: '15559876543', masked: '+1…43', name: 'Alex', brain: 'core', state: 'known', mode: 'converse', brief: 'Alex is Sam’s brother.', warned: '2026-10-17T10:00:00Z', since: '2026-10-18T09:00:00Z' };
+const known = { number: '15559876543', masked: '+1…43', name: 'Alex', brain: 'core', state: 'known', mode: 'converse', brief: 'Alex is Sam’s brother.', calendar: '', warned: '2026-10-17T10:00:00Z', since: '2026-10-18T09:00:00Z' };
 const detail = {
-  ...open, goal: 'Find an evening for dinner', brief: 'Sam is free on Tuesday.', by_owner: true, days: 3, max_messages: 20,
+  ...open, goal: 'Find an evening for dinner', brief: 'Sam is free on Tuesday.', by_owner: true, days: 3, max_messages: 20, calendar: '',
+  booking: 'asking', booking_from: '2026-10-20T17:00:00Z', booking_to: '2026-10-20T18:00:00Z',
   lines: [
     { from: 'you', text: 'Hi, this is Fridolin, Sam’s assistant.\n\nWhen would dinner suit you?', at: '2026-10-18T09:00:00Z' },
     { from: 'them', text: '<img src=x onerror=alert(1)><b>Thursday</b>?', at: '2026-10-18T10:00:00Z' },
@@ -87,13 +88,16 @@ test('Edit sets how Fridolin deals with someone, and puts it only on Save', asyn
 
   button(root, 'Edit').click();
   await settle();
-  dialog().querySelector('select').value = 'forward';
+  const [modeSel, calendarSel] = dialog().querySelectorAll('select');
+  modeSel.value = 'forward';
+  assert.equal(calendarSel.value, '', 'as brain.json allows');
+  calendarSel.value = 'offer';
   dialog().querySelector('textarea').value = 'Nothing about my plans.';
   button(dialog(), 'Save').click();
   await settle();
   const sent = calls.find((c) => c.method === 'PUT');
   assert.equal(sent && sent.path, '/api/errand-contacts/15559876543');
-  assert.deepEqual(sent && sent.body, { mode: 'forward', brief: 'Nothing about my plans.' });
+  assert.deepEqual(sent && sent.body, { mode: 'forward', brief: 'Nothing about my plans.', calendar: 'offer' });
 });
 
 test('Stop asks first, and posts only on a yes', async (t) => {
@@ -130,6 +134,7 @@ test('an errand shows its conversation, the person\'s words as text only', async
   assert.equal(root.querySelector('h1').textContent, 'Errand with Alex');
   assert.match(root.textContent, /\+15559876543/, 'the errand shows the number whole');
   assert.match(root.textContent, /Sam is free on Tuesday/);
+  assert.match(root.textContent, /Waiting for your yes/, 'the booking the owner is asked to confirm');
   const lines = root.querySelectorAll('.errand-line');
   assert.equal(lines.length, 3);
   assert.ok(lines[0].classList.contains('you'));

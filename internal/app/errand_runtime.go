@@ -219,6 +219,9 @@ type errandRequest struct {
 	Days                               int
 	// Call reaches them by a voice call instead of a message.
 	Call bool
+	// Calendar is the most the errand may do with the owner's calendar,
+	// "" for what brain.json and the person allow.
+	Calendar string
 }
 
 // openErrand starts an errand for run c: at once when the owner asked
@@ -249,6 +252,8 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		return "", fmt.Errorf("brief is what Fridolin may tell them and agree to, at most %d characters", errand.MaxBrief)
 	case message == "" || len([]rune(message)) > errand.MaxText-errand.MaxText/5:
 		return "", fmt.Errorf("message is the first message, at most %d characters", errand.MaxText-errand.MaxText/5)
+	case r.Calendar != "" && !slices.Contains(errand.CalendarModes, r.Calendar):
+		return "", errors.New("calendar is off, offer, book_after_yes, book, or \"\" for what brain.json allows")
 	case r.Days < 0 || r.Days > errand.MaxDays:
 		return "", fmt.Errorf("days is how long the errand stays open, 1 to %d (default %d)", errand.MaxDays, errand.DefaultDays)
 	case slices.ContainsFunc(cfg.AllowedNumbers, func(n string) bool { return chat.IdentityKey(n) == number }):
@@ -284,7 +289,7 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 	byOwner := errandByOwner(c.run, cfg)
 	now := time.Now()
 	e := store.Errand{ID: "e" + randomToken(7), Brain: c.run.Brain, Contact: number, Name: name, Goal: goal, Brief: brief, Message: message,
-		State: store.ErrandAsking, ByOwner: byOwner, Run: c.run.ID, Chat: target, Days: days, CreatedAt: now, Deadline: now.Add(time.Duration(days) * 24 * time.Hour), Mode: store.ErrandByMessage}
+		State: store.ErrandAsking, ByOwner: byOwner, Run: c.run.ID, Chat: target, Days: days, CreatedAt: now, Deadline: now.Add(time.Duration(days) * 24 * time.Hour), Mode: store.ErrandByMessage, Calendar: r.Calendar}
 	text := message
 	if !known {
 		text = errand.Intro(s.OwnerName, s.Intro) + "\n\n" + message
@@ -655,7 +660,7 @@ func (b *App) errandTurn(id string) {
 		}
 		return
 	}
-	ans, err := b.errandAsk(ctx, e, s, lines, false)
+	ans, err := b.errandRespond(ctx, e, s, lines, false)
 	if err != nil {
 		log.Printf("errand %s: %v", e.ID, err)
 		b.auditErrand(e, "answered", "no answer: "+textx.Truncate(err.Error(), 200))
@@ -692,9 +697,13 @@ type errandChannel struct {
 // a question for the owner, the end or an abort it does not.
 func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, lines []store.ErrandLine, ch errandChannel) bool {
 	switch ans.Action {
-	case errand.Reply:
-		if err := ch.say(ans.Text); err != nil {
-			log.Printf("errand %s: sending: %v", e.ID, err)
+	case errand.Reply, errand.Book:
+		// A book that got here was booked, or asked for: its text goes
+		// out as a reply.
+		if ans.Text != "" {
+			if err := ch.say(ans.Text); err != nil {
+				log.Printf("errand %s: sending: %v", e.ID, err)
+			}
 		}
 		b.passOnNote(ctx, e, ans.Note)
 		return true
@@ -861,8 +870,9 @@ func (b *App) expireErrand(ctx context.Context, e store.Errand, why string) {
 // connection, in Claude mode through `claude -p` with no tools at all.
 func (b *App) errandAsk(ctx context.Context, e store.Errand, s manifest.Errands, lines []store.ErrandLine, call bool) (errand.Answer, error) {
 	cfg := RuntimeConfig(b.cfgs)
-	doc := errand.Errand{Owner: strings.TrimSpace(s.OwnerName), Name: e.Name, Goal: e.Goal, Brief: e.Brief, Now: time.Now().In(cfg.Location()), Deadline: e.Deadline, Call: call,
-		Persona: s.Persona, Profile: s.Profile}
+	now := time.Now()
+	doc := errand.Errand{Owner: strings.TrimSpace(s.OwnerName), Name: e.Name, Goal: e.Goal, Brief: e.Brief, Now: now.In(cfg.Location()), Deadline: e.Deadline, Call: call,
+		Persona: s.Persona, Profile: s.Profile, Calendar: b.errandCalendarDoc(ctx, e, s, now, cfg.Location())}
 	if c, err := b.store.ErrandContactOf(ctx, e.Contact); err == nil {
 		doc.ForThem = c.Brief
 	}

@@ -458,7 +458,7 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		if err != nil {
 			break
 		}
-		ans, err := b.errandAsk(ctx, e, s, lines, true)
+		ans, err := b.errandRespond(ctx, e, s, lines, true)
 		if err != nil {
 			log.Printf("errand %s: %v", e.ID, err)
 			_ = v.say(ctx, errandCallLater)

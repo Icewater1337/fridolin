@@ -43,13 +43,14 @@ func (b *App) registerErrandTools(r *tools.Set[mcpCaller]) {
 					"So when the owner asks you in their own chat to write to someone, call this at once with the message they want: do not show them a draft and wait for their yes first. " +
 					"Use it only when the owner asked for the person to be contacted. " + b.findContactAdvice(c),
 				InputSchema: tools.Schema(map[string]any{
-					"number":  map[string]any{"type": "string", "description": "Their phone number with the country code, e.g. +15551234567."},
-					"name":    map[string]any{"type": "string", "description": "How Fridolin calls them, e.g. their first name."},
-					"goal":    map[string]any{"type": "string", "description": "What the errand is for, e.g. agree on a date for dinner next week."},
-					"brief":   map[string]any{"type": "string", "description": "What Fridolin may tell them about the owner and agree to for this errand, e.g. which evenings the owner is free. Nothing beyond it, errands.profile and their standing brief is shared or promised; what none covers goes to the owner."},
-					"message": map[string]any{"type": "string", "description": "The first message, in the language they speak, without an introduction."},
-					"days":    map[string]any{"type": "integer", "description": fmt.Sprintf("How long the errand stays open, 1 to %d (default %d).", errand.MaxDays, errand.DefaultDays)},
-					"call":    map[string]any{"type": "boolean", "description": "Reach them by a WhatsApp voice call instead of a message (with calls on): Fridolin introduces itself, says it is an AI, says the message and talks it through. Only for someone Fridolin wrote to before; an errand that does not end on the call goes on by message."},
+					"number":   map[string]any{"type": "string", "description": "Their phone number with the country code, e.g. +15551234567."},
+					"name":     map[string]any{"type": "string", "description": "How Fridolin calls them, e.g. their first name."},
+					"goal":     map[string]any{"type": "string", "description": "What the errand is for, e.g. agree on a date for dinner next week."},
+					"brief":    map[string]any{"type": "string", "description": "What Fridolin may tell them about the owner and agree to for this errand, e.g. which evenings the owner is free. Nothing beyond it, errands.profile and their standing brief is shared or promised; what none covers goes to the owner."},
+					"message":  map[string]any{"type": "string", "description": "The first message, in the language they speak, without an introduction."},
+					"days":     map[string]any{"type": "integer", "description": fmt.Sprintf("How long the errand stays open, 1 to %d (default %d).", errand.MaxDays, errand.DefaultDays)},
+					"call":     map[string]any{"type": "boolean", "description": "Reach them by a WhatsApp voice call instead of a message (with calls on): Fridolin introduces itself, says it is an AI, says the message and talks it through. Only for someone Fridolin wrote to before; an errand that does not end on the call goes on by message."},
+					"calendar": map[string]any{"type": "string", "enum": append([]string{""}, errand.CalendarModes...), "description": "The most this errand may do with the owner's calendar: off, offer (free times), book_after_yes (the owner confirms in a poll) or book; \"\" for what brain.json's errands.calendar and the person allow, which it never exceeds. Pass what the owner asked for, e.g. book when they said to put it in their calendar."},
 				}, "number", "name", "goal", "brief", "message"),
 			}
 		},
@@ -102,12 +103,14 @@ func (b *App) registerErrandTools(r *tools.Set[mcpCaller]) {
 			return mcp.Tool{
 				Description: "See or set how Fridolin deals with someone it wrote to before, when they write while no errand with them is open. " +
 					"mode converse: Fridolin talks with them by itself, with the errands' rules and limits, and tells the owner how it went. mode forward: it passes what they write on to the owner. " +
-					"brief: what Fridolin may always tell them about the owner, on top of brain.json's errands.profile (\"\" clears it). With only number, it shows them. " +
+					"brief: what Fridolin may always tell them about the owner, on top of brain.json's errands.profile (\"\" clears it). " +
+					"calendar: the most errands with them may do with the owner's calendar, never more than brain.json's errands.calendar allows (off, offer, book_after_yes, book; \"\" for what it allows). With only number, it shows them. " +
 					"Setting needs a run that answers the owner's own message in their direct chat, with what the owner said; someone blocked needs the owner's !unblock first.",
 				InputSchema: tools.Schema(map[string]any{
-					"number": map[string]any{"type": "string", "description": "Their phone number with the country code, e.g. +15551234567."},
-					"mode":   map[string]any{"type": "string", "enum": []string{store.ContactConverse, store.ContactForward}, "description": "converse or forward."},
-					"brief":  map[string]any{"type": "string", "description": fmt.Sprintf("What Fridolin may always tell them about the owner, at most %d characters.", errand.MaxForThem)},
+					"number":   map[string]any{"type": "string", "description": "Their phone number with the country code, e.g. +15551234567."},
+					"mode":     map[string]any{"type": "string", "enum": []string{store.ContactConverse, store.ContactForward}, "description": "converse or forward."},
+					"brief":    map[string]any{"type": "string", "description": fmt.Sprintf("What Fridolin may always tell them about the owner, at most %d characters.", errand.MaxForThem)},
+					"calendar": map[string]any{"type": "string", "enum": append([]string{""}, errand.CalendarModes...), "description": "The most errands with them may do with the owner's calendar; \"\" for what brain.json allows."},
 				}, "number"),
 			}
 		},
@@ -118,12 +121,13 @@ func (b *App) registerErrandTools(r *tools.Set[mcpCaller]) {
 
 func (b *App) callErrandContact(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
 	var args struct {
-		Number string  `json:"number"`
-		Mode   *string `json:"mode"`
-		Brief  *string `json:"brief"`
+		Number   string  `json:"number"`
+		Mode     *string `json:"mode"`
+		Brief    *string `json:"brief"`
+		Calendar *string `json:"calendar"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return mcp.ErrorResult(`the arguments are {"number", "mode", "brief"}: ` + err.Error()), nil
+		return mcp.ErrorResult(`the arguments are {"number", "mode", "brief", "calendar"}: ` + err.Error()), nil
 	}
 	number, err := chat.PhoneNumber(args.Number)
 	if err != nil {
@@ -136,21 +140,24 @@ func (b *App) callErrandContact(ctx context.Context, c mcpCaller, raw json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	if args.Mode != nil || args.Brief != nil {
-		mode, brief := contact.Mode, contact.Brief
+	if args.Mode != nil || args.Brief != nil || args.Calendar != nil {
+		mode, brief, calendar := contact.Mode, contact.Brief, contact.Calendar
 		if args.Mode != nil {
 			mode = strings.TrimSpace(*args.Mode)
 		}
 		if args.Brief != nil {
 			brief = strings.TrimSpace(*args.Brief)
 		}
+		if args.Calendar != nil {
+			calendar = strings.TrimSpace(*args.Calendar)
+		}
 		if !errandByOwner(c.run, b.cfgs.Get()) {
 			return mcp.ErrorResult("only a run that answers the owner's own message in their direct chat may change how Fridolin deals with someone"), nil
 		}
-		if why, _ := checkContactWays(contact, mode, brief); why != "" {
+		if why, _ := checkContactWays(contact, mode, brief, calendar); why != "" {
 			return mcp.ErrorResult(why), nil
 		}
-		if _, err := b.store.SetErrandContactWays(ctx, number, mode, brief, time.Now()); err != nil {
+		if _, err := b.store.SetErrandContactWays(ctx, number, mode, brief, calendar, time.Now()); err != nil {
 			return nil, err
 		}
 		b.audit.Append(audit.Entry{Kind: audit.Errand, Brain: c.run.Brain, Run: c.run.ID, Chat: logx.MaskJID(number, "", ""), Detail: "contact", Outcome: mode})
@@ -173,6 +180,9 @@ func describeErrandContact(c store.ErrandContact) string {
 	default:
 		out.WriteString("; what they write goes to the owner (forward)")
 	}
+	if c.Calendar != "" {
+		fmt.Fprintf(&out, "; with the owner's calendar, errands with them may do at most: %s", c.Calendar)
+	}
 	if c.Warned(time.Now()) {
 		fmt.Fprintf(&out, "; warned on %s: a second try at misusing Fridolin blocks them", c.WarnedAt.Local().Format(time.DateOnly))
 	}
@@ -186,18 +196,19 @@ func describeErrandContact(c store.ErrandContact) string {
 
 func (b *App) callContactPerson(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
 	var args struct {
-		Number  string `json:"number"`
-		Name    string `json:"name"`
-		Goal    string `json:"goal"`
-		Brief   string `json:"brief"`
-		Message string `json:"message"`
-		Days    int    `json:"days"`
-		Call    bool   `json:"call"`
+		Number   string `json:"number"`
+		Name     string `json:"name"`
+		Goal     string `json:"goal"`
+		Brief    string `json:"brief"`
+		Message  string `json:"message"`
+		Days     int    `json:"days"`
+		Call     bool   `json:"call"`
+		Calendar string `json:"calendar"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return mcp.ErrorResult(`the arguments are {"number", "name", "goal", "brief", "message", "days", "call"}: ` + err.Error()), nil
+		return mcp.ErrorResult(`the arguments are {"number", "name", "goal", "brief", "message", "days", "call", "calendar"}: ` + err.Error()), nil
 	}
-	out, err := b.openErrand(ctx, c, errandRequest{Number: args.Number, Name: args.Name, Goal: args.Goal, Brief: args.Brief, Message: args.Message, Days: args.Days, Call: args.Call})
+	out, err := b.openErrand(ctx, c, errandRequest{Number: args.Number, Name: args.Name, Goal: args.Goal, Brief: args.Brief, Message: args.Message, Days: args.Days, Call: args.Call, Calendar: strings.TrimSpace(args.Calendar)})
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
