@@ -243,6 +243,7 @@ func (g *Auth) listEvents(ctx context.Context, tok *Token, calendar string, from
 			return nil, false, err
 		}
 		items = append(items, page.Items...)
+		sortByStart(items, func(e googleEvent) string { return e.brief().Start }, tz) // before the cut, so it keeps the earliest
 		if len(items) >= limit {
 			return items[:limit], len(items) > limit || page.NextPageToken != "", nil
 		}
@@ -279,7 +280,7 @@ func (g *Auth) EventsOf(ctx context.Context, tok *Token, calendars []string, fro
 			out.Events = append(out.Events, e)
 		}
 	}
-	sort.SliceStable(out.Events, func(i, j int) bool { return eventStart(out.Events[i]) < eventStart(out.Events[j]) })
+	sortByStart(out.Events, func(e CalendarEvent) string { return e.Start }, tz)
 	if len(out.Events) > limit {
 		out.Events, out.Truncated = out.Events[:limit], true
 	}
@@ -287,14 +288,32 @@ func (g *Auth) EventsOf(ctx context.Context, tok *Token, calendars []string, fro
 	return out, nil
 }
 
-// eventStart is a key that sorts events by when they start: an all-day
-// event at the start of its day. Every time is in the zone asked for, so
-// the text sorts like the time.
-func eventStart(e CalendarEvent) string {
-	if len(e.Start) == len("2006-01-02") {
-		return e.Start + "T00:00:00"
+// sortByStart orders events by their start instant, not their text: the
+// text of two offsets (02:30+02:00 and 02:15+01:00) does not sort like the
+// time. An all-day event starts at midnight in tz (UTC if tz is empty or
+// unknown). Ties keep their order; an event whose start does not parse
+// goes after the parsed ones, in its original order.
+func sortByStart[E any](events []E, start func(E) string, tz string) {
+	loc, err := time.LoadLocation(tz)
+	if err != nil || tz == "" {
+		loc = time.UTC
 	}
-	return e.Start
+	at := func(e E) (time.Time, bool) {
+		s := start(e)
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t, true
+		}
+		t, err := time.ParseInLocation(time.DateOnly, s, loc)
+		return t, err == nil
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		ti, oki := at(events[i])
+		tj, okj := at(events[j])
+		if oki != okj {
+			return oki
+		}
+		return oki && ti.Before(tj)
+	})
 }
 
 // NewEvent is POST /brain/calendar/events: an event to create.
