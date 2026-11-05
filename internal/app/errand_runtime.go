@@ -386,7 +386,7 @@ func (b *App) startErrand(ctx context.Context, e store.Errand) error {
 		_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, "Fridolin stopped listening to them", time.Now())
 		return fmt.Errorf("+%s was blocked meanwhile", e.Contact)
 	case err != nil && !errors.Is(err, store.ErrNoErrand):
-		return err
+		return b.endUnstarted(ctx, e, err)
 	}
 	first := err != nil
 	text := e.Message
@@ -396,9 +396,9 @@ func (b *App) startErrand(ctx context.Context, e store.Errand) error {
 	now := time.Now()
 	if opened, err := b.store.OpenErrand(ctx, e.ID, now.Add(time.Duration(e.Days)*24*time.Hour)); err != nil || !opened {
 		if err == nil {
-			err = errors.New("it does not wait for its start any more")
+			return errors.New("it does not wait for its start any more")
 		}
-		return err
+		return b.endUnstarted(ctx, e, err)
 	}
 	// Known before the message goes out, so that an answer that comes at
 	// once is the errand's and not a stranger's.
@@ -435,6 +435,16 @@ func (b *App) startErrand(ctx context.Context, e store.Errand) error {
 	}
 	b.auditErrand(e, "opened", "the first message went out")
 	return nil
+}
+
+// endUnstarted ends errand e as declined after a store error kept it from
+// starting, so that it does not stay asking and block its person for good.
+// Nothing goes to the person; it returns cause.
+func (b *App) endUnstarted(ctx context.Context, e store.Errand, cause error) error {
+	if _, err := b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, "could not start: "+cause.Error(), time.Now()); err != nil {
+		log.Printf("errand %s: ending it after %v: %v", e.ID, cause, err)
+	}
+	return cause
 }
 
 // errandEnded is the error of a send to the person of an errand that

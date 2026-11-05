@@ -558,3 +558,48 @@ func TestErrandNobodyApproved(t *testing.T) {
 		t.Errorf("sent to them: %q", got)
 	}
 }
+
+// TestErrandStartStoreErrorEndsIt: a store error while an errand starts
+// (reading the person, opening the errand) ends it declined, with
+// nothing sent to the person, instead of leaving it asking, where it
+// would refuse every later contact_person to them.
+func TestErrandStartStoreErrorEndsIt(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, break_, mend string }{
+		{"reading the person", `ALTER TABLE errand_contacts RENAME TO errand_contacts_away`, `ALTER TABLE errand_contacts_away RENAME TO errand_contacts`},
+		{"opening the errand", `CREATE TRIGGER refuse_open BEFORE UPDATE ON errands WHEN NEW.state = 'open' BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`, `DROP TRIGGER refuse_open`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h, _ := errandHarness(t)
+			ctx := context.Background()
+			now := time.Now()
+			e := store.Errand{ID: "e" + randomToken(7), Brain: "core", Contact: errandNumber, Name: "Alex", Goal: dinner.Goal, Message: dinner.Message,
+				State: store.ErrandAsking, ByOwner: true, Chat: harnessDM, Days: 1, CreatedAt: now, Deadline: now.Add(24 * time.Hour), Mode: store.ErrandByMessage}
+			if err := h.b.store.AddErrand(ctx, e); err != nil {
+				t.Fatal(err)
+			}
+			db := testStoreSQL(t, h.b.cfgs.Get().DBPath)
+			if _, err := db.Exec(tc.break_); err != nil {
+				t.Fatal(err)
+			}
+			err := h.b.startErrand(ctx, e)
+			if _, mendErr := db.Exec(tc.mend); mendErr != nil {
+				t.Fatal(mendErr)
+			}
+			if err == nil {
+				t.Fatal("startErrand succeeded")
+			}
+			got := h.errandOf(e.ID)
+			if got.State != store.ErrandDeclined || !strings.HasPrefix(got.Outcome, "could not start: ") {
+				t.Errorf("errand is %q (%q), want declined with \"could not start: …\"", got.State, got.Outcome)
+			}
+			if sent := h.SentTo(errandJID); len(sent) != 0 {
+				t.Errorf("something went to the person: %q", sent)
+			}
+			if out, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil || !strings.Contains(out, "waits for the owner's approval") {
+				t.Errorf("a later contact_person: %q %v", out, err)
+			}
+		})
+	}
+}
