@@ -149,3 +149,5 @@ func (p *winPTY) Wait() int {
 	})
 	return int(int32(code))
 }
+
+func (p *winPTY) Close() { _ = p.out.Close() }

@@ -53,7 +53,6 @@ func (p *unixPTY) Kill() {
 
 func (p *unixPTY) Wait() int {
 	err := p.cmd.Wait()
-	_ = p.f.Close()
 	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		return ee.ExitCode()
 	}
@@ -62,3 +61,5 @@ func (p *unixPTY) Wait() int {
 	}
 	return 0
 }
+
+func (p *unixPTY) Close() { _ = p.f.Close() }
