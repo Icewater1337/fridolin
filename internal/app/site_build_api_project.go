@@ -34,16 +34,20 @@ func (b *App) buildAPI(mux *http.ServeMux) {
 		},
 		NewThread: func(id string) error { return b.site.NewBuildThread(id) },
 		StopCurrent: func(br *brain.Brain) bool {
-			ch := b.site.BuildChat(br.ID())
-			rt := br.Snapshot()
-			if rt.Running == nil || rt.Running.Chat != buildChatJID(br.ID(), ch.Thread) {
-				return false
-			}
-			// The chat lane's run only: the brain's scheduled agents go on.
-			br.StopLane(brain.LaneChat)
-			return true
+			return stopBuildRun(br, br.Snapshot(), buildChatJID(br.ID(), b.site.BuildChat(br.ID()).Thread))
 		},
 	}).Register(mux)
+}
+
+// stopBuildRun stops the chat lane's run in rt if it serves the build chat
+// jid, and only that run: one that started after rt was taken stays.
+func stopBuildRun(br *brain.Brain, rt brain.Runtime, jid string) bool {
+	if rt.Running == nil || rt.Running.Chat != jid {
+		return false
+	}
+	// The chat lane's run only: the brain's scheduled agents go on.
+	_, err := br.StopLaneRun(brain.LaneChat, rt.Running.Started)
+	return err == nil
 }
 
 func (b *App) buildChatView(br *brain.Brain) httpapi.BuildChatResponse {

@@ -516,3 +516,50 @@ func TestDenySurvivesItemLeavingTheList(t *testing.T) {
 		t.Error("a deny older than dismissedKeptFor was kept")
 	}
 }
+
+// TestOldDenySurvivesOneMissingTick: a !deny older than dismissedKeptFor
+// whose item is still listed is kept when the item is missing for one
+// tick, and the item is not announced again when it returns (#498).
+func TestOldDenySurvivesOneMissingTick(t *testing.T) {
+	t.Parallel()
+	fakeRuns(t)
+	h := newHarness(t, "")
+	dir := h.AddBrain(manifest.Manifest{ID: "taxes", Name: "Taxes", Routing: manifest.Routing{HandlesDMs: true}})
+	skill := filepath.Join(dir, "skills", "taxes-de", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skill), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte(taxesSkill), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.b.alertPendingApprovals(context.Background())
+	h.WaitSent(harnessDM, "has a new skill")
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!deny"}); !strings.Contains(got, "Turned down") {
+		t.Fatalf("!deny: %q", got)
+	}
+	// The deny is 31 days old; the item has been listed all along.
+	old := time.Now().Add(-31 * 24 * time.Hour)
+	h.b.approvals.mu.Lock()
+	for k := range h.b.approvals.state.Dismissed {
+		h.b.approvals.state.Dismissed[k] = old
+	}
+	h.b.approvals.mu.Unlock()
+	h.b.alertPendingApprovals(context.Background())
+
+	saved, err := os.ReadFile(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(skill); err != nil {
+		t.Fatal(err)
+	}
+	h.b.alertPendingApprovals(context.Background())
+	if err := os.WriteFile(skill, saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.b.alertPendingApprovals(context.Background())
+	// Still turned down: not waiting, so not announced again.
+	if w := h.b.waiting(context.Background()); len(w) != 0 {
+		t.Errorf("the denied skill waits again: %d items", len(w))
+	}
+}

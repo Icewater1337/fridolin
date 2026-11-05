@@ -512,6 +512,7 @@ func (a *agents) deliver(ar *agentRun, brain, text string) {
 		return
 	}
 	ar.run.Sent, ar.run.SentTo = true, ar.chat
+	a.b.live.endIfAnswersInChat(brain, ar.chat)
 	ar.log.Line("Sent to " + ar.chat)
 }
 
@@ -536,6 +537,7 @@ func (a *agents) complete(ar *agentRun, status, result, why string, usage claude
 			log.Printf("brain %s: scheduled agent %s: telling the chat it failed: %v", r.Brain, r.Agent, err)
 		} else {
 			r.Sent, r.SentTo = true, ar.chat
+			a.b.live.endIfAnswersInChat(r.Brain, ar.chat)
 		}
 	}
 	line := fmt.Sprintf("■ %s after %s", status, (time.Duration(r.DurationMS) * time.Millisecond).Round(time.Second))

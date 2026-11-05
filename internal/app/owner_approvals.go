@@ -801,8 +801,15 @@ func (b *App) alertPendingApprovals(ctx context.Context) {
 	}
 	// A deny outlives the item leaving the list (a brain restarting hides
 	// its files for a tick); a real change has a new key anyway.
+	// The time kept is when the item was last listed, so it is pruned by how
+	// long it has been gone, not by how old the deny is. A day's grain
+	// spares a write every tick.
 	for k, at := range st.Dismissed {
-		if !current[k] && now.Sub(at) > dismissedKeptFor {
+		switch {
+		case current[k] && now.Sub(at) > 24*time.Hour:
+			st.Dismissed[k] = now
+			changed = true
+		case !current[k] && now.Sub(at) > dismissedKeptFor:
 			delete(st.Dismissed, k)
 			changed = true
 		}

@@ -270,7 +270,7 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		if !known {
 			return "", errors.New("only someone Fridolin wrote to before is called: write to them first (call: false)")
 		}
-		if err := b.errandCallsReady(ctx, cfg); err != nil {
+		if err := b.errandCallsReady(ctx, cfg, ""); err != nil {
 			return "", err
 		}
 	}
@@ -418,7 +418,7 @@ func (b *App) startErrand(ctx context.Context, e store.Errand) error {
 			_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, "Fridolin calls only someone it wrote to before", now)
 			return errors.New("only someone Fridolin wrote to before is called")
 		}
-		if err := b.errandCallsReady(ctx, b.cfgs.Get()); err != nil {
+		if err := b.errandCallsReady(ctx, b.cfgs.Get(), e.ID); err != nil {
 			_, _ = b.store.EndErrand(ctx, e.ID, store.ErrandDeclined, err.Error(), now)
 			return err
 		}
@@ -437,9 +437,32 @@ func (b *App) startErrand(ctx context.Context, e store.Errand) error {
 	return nil
 }
 
+// errandEnded is the error of a send to the person of an errand that
+// is not open (any more): nothing was sent.
+var errandEnded = errors.New("the errand has ended")
+
 // sayInErrand sends text to errand e's person and adds it to the
-// conversation.
+// conversation, only while e is open: the line is recorded first, in the
+// statement that checks that, so a stop that comes in between sends nothing.
 func (b *App) sayInErrand(ctx context.Context, e store.Errand, text string) error {
+	ok, err := b.store.AddErrandLineWhileOpen(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errandEnded
+	}
+	if err := b.outbox.Text(ctx, chat.DMJID(e.Contact), text, b.cfgs.Get().MaxChunkSize); err != nil {
+		return err
+	}
+	b.auditErrand(e, "sent", fmt.Sprintf("%d characters", len([]rune(text))))
+	return nil
+}
+
+// sayEnding sends text to errand e's person and records it without asking
+// whether e is open: for the last words of an end this code has itself
+// just made.
+func (b *App) sayEnding(ctx context.Context, e store.Errand, text string) error {
 	if err := b.outbox.Text(ctx, chat.DMJID(e.Contact), text, b.cfgs.Get().MaxChunkSize); err != nil {
 		return err
 	}
@@ -663,9 +686,10 @@ func (b *App) errandTurn(id string) {
 		return
 	}
 	b.errandAct(ctx, e, ans, lines, errandChannel{
-		say:   func(text string) error { return b.sayInErrand(ctx, e, text) },
-		abort: outboundmsg.ErrandAbortMessage(strings.TrimSpace(s.OwnerName)),
-		warn:  outboundmsg.ErrandWarnMessage(strings.TrimSpace(s.OwnerName)),
+		say:       func(text string) error { return b.sayInErrand(ctx, e, text) },
+		sayEnding: func(text string) error { return b.sayEnding(ctx, e, text) },
+		abort:     outboundmsg.ErrandAbortMessage(strings.TrimSpace(s.OwnerName)),
+		warn:      outboundmsg.ErrandWarnMessage(strings.TrimSpace(s.OwnerName)),
 	})
 }
 
@@ -682,6 +706,9 @@ func errandTimeUp(e store.Errand) string {
 type errandChannel struct {
 	// say sends text, and adds it to the conversation as Fridolin's.
 	say func(text string) error
+	// sayEnding sends and records text without the check that the errand
+	// is open: the last words of an end already made.
+	sayEnding func(text string) error
 	// abort is the bridge's own last words when the run aborts; warn its
 	// words when the person is warned instead.
 	abort, warn string
@@ -695,6 +722,7 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 	case errand.Reply:
 		if err := ch.say(ans.Text); err != nil {
 			log.Printf("errand %s: sending: %v", e.ID, err)
+			return !errors.Is(err, errandEnded)
 		}
 		b.passOnNote(ctx, e, ans.Note)
 		return true
@@ -702,7 +730,12 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 		if ans.Text != "" {
 			if err := ch.say(ans.Text); err != nil {
 				log.Printf("errand %s: sending: %v", e.ID, err)
+				if errors.Is(err, errandEnded) {
+					return false
+				}
 			}
+		} else if cur, err := b.store.GetErrand(ctx, e.ID); err != nil || cur.State != store.ErrandOpen {
+			return false
 		}
 		b.auditErrand(e, "asked the owner", textx.Truncate(ans.Question, 200))
 		b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandQuestionNotice(e.Name, e.ID, ans.Question),
@@ -719,7 +752,7 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 			return false
 		}
 		if ans.Text != "" {
-			if err := ch.say(ans.Text); err != nil {
+			if err := ch.sayEnding(ans.Text); err != nil {
 				log.Printf("errand %s: sending: %v", e.ID, err)
 			}
 		}
@@ -829,11 +862,13 @@ func (b *App) abortErrand(ctx context.Context, e store.Errand, reason string, li
 	if reason == "" {
 		reason = "they tried to make me do what I must not."
 	}
-	if err := ch.say(ch.abort); err != nil {
-		log.Printf("errand %s: sending the end: %v", e.ID, err)
-	}
-	if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandAborted, reason, time.Now()); !ended {
-		return
+	// Blocked either way; the words only go to someone whose errand this
+	// ends, since errand_stop and expiry end one without a word to them.
+	ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandAborted, reason, time.Now())
+	if ended {
+		if err := ch.sayEnding(ch.abort); err != nil {
+			log.Printf("errand %s: sending the end: %v", e.ID, err)
+		}
 	}
 	contact := store.ErrandContact{Contact: e.Contact, Name: e.Name, Brain: e.Brain, State: store.ContactBlocked, Reason: textx.Truncate(reason, 300), UpdatedAt: time.Now()}
 	if c, err := b.store.ErrandContactOf(ctx, e.Contact); err == nil {
