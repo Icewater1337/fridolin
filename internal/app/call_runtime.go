@@ -443,6 +443,7 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	}
 	b.auditErrand(e, "called", "they picked up")
 	owner := strings.TrimSpace(s.OwnerName)
+	// said speaks text, already cut to what is heard, and audits it.
 	said := func(text string) error {
 		if err := v.say(ctx, text); err != nil {
 			return err
@@ -452,6 +453,9 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	}
 	// Recorded first, in the statement that checks the errand is open.
 	say := func(text string) error {
+		if text = voice.Speakable(text, maxSpoken); text == "" {
+			return nil // nothing to hear: no line, not sent
+		}
 		ok, err := b.store.AddErrandLineWhileOpen(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()})
 		if err != nil {
 			return err
@@ -462,6 +466,9 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		return said(text)
 	}
 	sayEnding := func(text string) error {
+		if text = voice.Speakable(text, maxSpoken); text == "" {
+			return nil
+		}
 		if err := said(text); err != nil {
 			return err
 		}
