@@ -440,7 +440,12 @@ On the core: `!revoke <id>` in the owner's chat, `fridolin nodes revoke
 <id>` or **Revoke**. On the machine:
 `fridolin node stop`, `fridolin node uninstall` (Windows: elevated, with
 `--state-dir`), then delete the state dir; uninstall Tailscale if the
-owner wants. Joining again later makes a new device with a new code.
+owner wants. Joining again later makes a new device with a new code; on
+a machine with a key already, the old key and what was sealed with it or
+tied to it (`core-secrets/`, `node-secrets/`, `core-role.json`,
+`core-secrets-received.json`, `core.pub`, `core-moves/`) move into a
+`rejoined-<time>-*` folder in the state dir, which the owner may delete
+once nothing in it is needed.
 
 ### Never
 

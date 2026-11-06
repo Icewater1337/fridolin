@@ -130,6 +130,25 @@ func TestBoxScriptChecksProvenance(t *testing.T) {
 	})
 }
 
+// A running agent keeps the old key in memory and would go on sealing with
+// it, and `up -d` does not recreate an unchanged container: the scripts stop
+// the node before a join.
+func TestBoxScriptsStopTheNodeBeforeJoining(t *testing.T) {
+	for script, stop := range map[string]string{"box.sh": "docker compose stop node", "box.ps1": `"compose", "stop", "node"`} {
+		b, err := os.ReadFile(filepath.Join(repoDir, "container", script))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, j := strings.Index(string(b), stop), strings.Index(string(b), `"join"`)
+		if script == "box.sh" {
+			j = strings.Index(string(b), "node node join")
+		}
+		if s < 0 || j < 0 || s > j {
+			t.Errorf("%s does not stop the node before the join (%d, %d)", script, s, j)
+		}
+	}
+}
+
 // No PowerShell runs box.ps1 in the tests: hold it to the same check by its
 // text.
 func TestBoxPowerShellScriptChecksProvenance(t *testing.T) {
