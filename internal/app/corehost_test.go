@@ -56,6 +56,10 @@ func (h *harness) coreHostNodeWith(addr, name string, setup func(*nodeagent.Agen
 	done := make(chan struct{})
 	go func() { _ = agent.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
+	if h.stopAgent == nil {
+		h.stopAgent = map[string]context.CancelFunc{}
+	}
+	h.stopAgent[j.ID] = cancel
 	// The agent's own connection, not Join's, which may still count as
 	// online and then drop (#301).
 	h.WaitFor(name+" offering core-host", func() bool {
