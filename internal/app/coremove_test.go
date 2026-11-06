@@ -52,12 +52,15 @@ type fakeCore struct {
 	files    string
 	filesErr error
 
-	mu       sync.Mutex
-	running  bool
-	data     string
-	held     *lease.Lease
-	imported []string
-	exports  int
+	mu sync.Mutex
+	// onRehearse runs at the start of a rehearsal, the last thing a move
+	// asks a host before the handoff.
+	onRehearse func()
+	running    bool
+	data       string
+	held       *lease.Lease
+	imported   []string
+	exports    int
 }
 
 func newFakeCore(t *testing.T, name string, st cloud.ObjectStore, ready bool) *fakeCore {
@@ -267,6 +270,12 @@ func (f *fakeCore) Ready(context.Context) (bool, string) {
 }
 
 func (f *fakeCore) Rehearse(ctx context.Context, move string) (nodeproto.CoreRehearsal, error) {
+	f.mu.Lock()
+	hook := f.onRehearse
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	key, err := coreexport.Latest(ctx, f.st)
 	if err != nil {
 		return nodeproto.CoreRehearsal{}, err
@@ -699,6 +708,31 @@ func TestCoreMoveRollsBack(t *testing.T) {
 	}
 	if rec.TargetState == nil || rec.TargetState.Phase != nodeproto.MoveRolledBack || !strings.Contains(rec.TargetState.Detail, "not ready within") {
 		t.Errorf("icebase's state: %+v", rec.TargetState)
+	}
+}
+
+// TestCoreMoveReleaseNeverSent: mini is gone before core.release can be
+// sent, so it never heard of the release and still runs the core. The move
+// ends failed at once, not handed off and polling for hours with new moves
+// refused (#554).
+func TestCoreMoveReleaseNeverSent(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	m := h.moveHosts(h.b.nodes.Version(), true)
+	stopSrc := h.stopAgent[m.src]
+	m.dstCore.mu.Lock()
+	m.dstCore.onRehearse = func() {
+		stopSrc()
+		testutil.WaitFor(t, 10*time.Second, "mini to go", func() bool { return !h.b.nodes.Online(m.src) })
+	}
+	m.dstCore.mu.Unlock()
+	rec, body := h.startMove(m.src, m.dst, 2, 10)
+	if rec.State != nodes.MoveFailed || !strings.Contains(rec.Detail, "nothing changed") {
+		t.Fatalf("the move ended %s: %s", rec.State, body)
+	}
+	h.WaitFor("new moves allowed", func() bool { return h.b.nodes.MoveActive() == "" })
+	if running, data, _ := m.srcCore.state(); !running || data != "mini's data" {
+		t.Errorf("mini: running %v on %q", running, data)
 	}
 }
 

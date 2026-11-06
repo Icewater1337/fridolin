@@ -205,6 +205,12 @@ for compatibility.
 
 ### Fixed
 
+- **A core move whose source could not be asked to release ends at once.**
+  When the source was not connected as the move reached the release, the
+  move showed as handed off, refused every new move for hours and ended
+  "unknown", though nothing had changed. It now fails straight away, and the
+  core keeps running on the source.
+
 - **A very long line from a node's agent session no longer stalls its turn.**
   A stream line over 8 MiB, such as a tool printing a large file, left the
   session hanging until its maximum runtime (2 hours by default), and the
