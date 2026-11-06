@@ -205,6 +205,26 @@ for compatibility.
 
 ### Fixed
 
+- **A live session's late output no longer answers your next message.** When
+  a session went on after its answer (a background task ended) and you wrote
+  meanwhile, what it said late could go out as the answer to your new message,
+  and the real answer after it as an extra message. The session's Stop hook now
+  reads from the transcript which message the model last read, and only a Stop
+  that names the waiting message answers it; any other goes to the chat as what
+  the session said after its turn. A session whose hook cannot tell fails its
+  start-up check, and messages run `claude -p` as they do for any session that
+  does not come up.
+- **A box that is the core no longer stays without a core after a failed
+  start.** When the core could not start as the agent came up or after a
+  crash (a secret that could not be read, a failed spawn), the box only
+  logged it and never tried again. It now tries again while its role is
+  `core`, with a wait that grows to 5 minutes, and logs each failure.
+- **A core move whose source could not be asked to release ends at once.**
+  When the source was not connected as the move reached the release, the
+  move showed as handed off, refused every new move for hours and ended
+  "unknown", though nothing had changed. It now fails straight away, and the
+  core keeps running on the source.
+
 - **A box that joins again can start a core and take secrets again.** The
   new device key left the secrets sealed with the old one in place, where
   they no longer opened, so the core could not start in the box and receiving
@@ -213,6 +233,7 @@ for compatibility.
   the state dir, deleting nothing, and the box comes back as a standby box.
   `box.sh` and `box.ps1` stop the node before they join again; send it
   secrets again if it is to take the core.
+
 - **A very long line from a node's agent session no longer stalls its turn.**
   A stream line over 8 MiB, such as a tool printing a large file, left the
   session hanging until its maximum runtime (2 hours by default), and the

@@ -63,6 +63,8 @@ type harness struct {
 	cfg  string
 	// stop stops the bridge once, whether a test or the cleanup asks.
 	stop func()
+	// stopAgent stops a core host's agent (coreHostNodeWith), by node id.
+	stopAgent map[string]context.CancelFunc
 	// sentBefore is what the bridges before a Reopen sent, oldest first.
 	sentBefore []sent
 	// listen is the address the bridge answers at: config.DefaultHTTPListen,

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -276,6 +277,174 @@ func TestBoxCoreStopDropsAPendingStart(t *testing.T) {
 	}
 	if r, _ := LoadCoreRole(b.StateDir); r != RoleCore {
 		t.Errorf("a container stop stood the box down: %s", r)
+	}
+}
+
+// failingStore fails Get with an I/O error while fail is above zero.
+type failingStore struct {
+	hostsecrets.Store
+	mu   sync.Mutex
+	fail int
+}
+
+func (s *failingStore) Get(name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail > 0 {
+		s.fail--
+		return "", errors.New("input/output error")
+	}
+	return s.Store.Get(name)
+}
+
+// flakySpawn fails while the returned counter is above zero.
+func flakySpawn(sp *spawner) (func([]string, ...string) (BoxProcess, error), *atomic.Int32) {
+	fail := &atomic.Int32{}
+	return func(env []string, args ...string) (BoxProcess, error) {
+		if fail.Add(-1) >= 0 {
+			return nil, errors.New("cannot allocate memory")
+		}
+		fail.Store(0)
+		return sp.spawn(env, args...)
+	}, fail
+}
+
+// superviseBoxCore runs b's supervisor until the test ends; the returned
+// function stops it early.
+func superviseBoxCore(t *testing.T, b *BoxCore) (stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Supervise(ctx); close(done) }()
+	stop = func() { cancel(); <-done }
+	t.Cleanup(stop)
+	return stop
+}
+
+// A box that is the core and whose core did not start tries again, with a
+// growing wait, however the start failed (#557).
+func TestBoxCoreRetriesAFailedLaunchAtAgentStart(t *testing.T) {
+	sp := &spawner{}
+	b, st := testBoxCore(t, sp)
+	if err := st.Set(hostsecrets.B2VaultKey, "test-b2-value"); err != nil {
+		t.Fatal(err)
+	}
+	b.Secrets = &failingStore{Store: st, fail: 2}
+	spawn, fail := flakySpawn(sp)
+	fail.Store(1)
+	b.Spawn = spawn
+	var mu sync.Mutex
+	var logs []string
+	b.Logf = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+	if err := saveCoreRole(b.StateDir, RoleCore); err != nil {
+		t.Fatal(err)
+	}
+	superviseBoxCore(t, b)
+	waitFor(t, "the core to start", b.Running)
+
+	mu.Lock()
+	defer mu.Unlock()
+	all := strings.Join(logs, "\n")
+	for _, want := range []string{
+		"input/output error); starting it again in 10ms",
+		"input/output error); starting it again in 20ms",
+		"cannot allocate memory); starting it again in 40ms",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("the log lacks %q:\n%s", want, all)
+		}
+	}
+}
+
+// A start that fails after a crash is tried again too (#557).
+func TestBoxCoreRetriesAFailedRestart(t *testing.T) {
+	sp := &spawner{}
+	b, _ := testBoxCore(t, sp)
+	spawn, fail := flakySpawn(sp)
+	b.Spawn = spawn
+	if err := saveCoreRole(b.StateDir, RoleCore); err != nil {
+		t.Fatal(err)
+	}
+	superviseBoxCore(t, b)
+	waitFor(t, "the core to start", b.Running)
+	fail.Store(2)
+	sp.last().die()
+	waitFor(t, "the core to start again", func() bool { return sp.count() == 2 && b.Running() })
+}
+
+// A role that cannot be read for a while does not end the retries, and
+// starts nothing until it reads as core again.
+func TestBoxCoreRetriesOverAnUnreadableRole(t *testing.T) {
+	sp := &spawner{}
+	b, _ := testBoxCore(t, sp)
+	if err := saveCoreRole(b.StateDir, RoleCore); err != nil {
+		t.Fatal(err)
+	}
+	role := filepath.Join(b.StateDir, CoreRoleFile)
+	saved, err := os.ReadFile(role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The start with the agent fails, and the role breaks with it.
+	var broke atomic.Bool
+	b.Spawn = func(env []string, args ...string) (BoxProcess, error) {
+		if broke.CompareAndSwap(false, true) {
+			if err := os.WriteFile(role, []byte("{"), 0o600); err != nil {
+				t.Error(err)
+			}
+			return nil, errors.New("cannot allocate memory")
+		}
+		return sp.spawn(env, args...)
+	}
+	superviseBoxCore(t, b)
+	waitFor(t, "the first start", broke.Load)
+	time.Sleep(100 * time.Millisecond)
+	if sp.count() != 0 {
+		t.Fatal("a core started on a role that cannot be read")
+	}
+	if err := os.WriteFile(role, saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the core to start", b.Running)
+}
+
+// A Stop and the agent's stop both end the retries.
+func TestBoxCoreStopEndsTheRetries(t *testing.T) {
+	for _, how := range []string{"stand down", "agent stops"} {
+		t.Run(how, func(t *testing.T) {
+			b, _ := testBoxCore(t, nil)
+			var tries atomic.Int32
+			b.Spawn = func([]string, ...string) (BoxProcess, error) {
+				tries.Add(1)
+				return nil, errors.New("cannot allocate memory")
+			}
+			if err := saveCoreRole(b.StateDir, RoleCore); err != nil {
+				t.Fatal(err)
+			}
+			stop := superviseBoxCore(t, b)
+			waitFor(t, "a retry", func() bool { return tries.Load() >= 2 })
+			wantRole := RoleCore
+			if how == "stand down" {
+				wantRole = RoleStandby
+				if err := b.Stop(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				stop()
+			}
+			n := tries.Load()
+			time.Sleep(100 * time.Millisecond)
+			if got := tries.Load(); got != n {
+				t.Errorf("%d more tries after the stop", got-n)
+			}
+			if r, _ := LoadCoreRole(b.StateDir); r != wantRole {
+				t.Errorf("role %s, want %s", r, wantRole)
+			}
+		})
 	}
 }
 

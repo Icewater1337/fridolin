@@ -36,7 +36,8 @@ type LiveHub struct {
 
 	mu   sync.Mutex
 	turn chan string // the armed turn's answer; nil without one
-	took bool        // the session picked up an event since Begin
+	want string      // the "turn" meta of the event delivered for it
+	seen bool        // the session showed its model read that event
 
 	connected     chan struct{}
 	connectedOnce sync.Once
@@ -59,9 +60,6 @@ func (h *LiveHub) Next(ctx context.Context, wait time.Duration) (LiveEvent, bool
 	defer t.Stop()
 	select {
 	case ev := <-h.events:
-		h.mu.Lock()
-		h.took = true
-		h.mu.Unlock()
 		return ev, true
 	case <-t.C:
 	case <-ctx.Done():
@@ -79,7 +77,7 @@ func (h *LiveHub) Begin() (<-chan string, error) {
 		return nil, ErrLiveBusy
 	}
 	h.turn = make(chan string, 1)
-	h.took = false
+	h.want, h.seen = "", false
 	return h.turn, nil
 }
 
@@ -90,8 +88,14 @@ func (h *LiveHub) Abort() {
 	h.mu.Unlock()
 }
 
-// Deliver queues ev for the session's MCP server.
+// Deliver queues ev for the session's MCP server. Its "turn" meta is what
+// Ack must name for the armed turn to take a Stop.
 func (h *LiveHub) Deliver(ev LiveEvent) error {
+	h.mu.Lock()
+	if h.turn != nil {
+		h.want = ev.Meta["turn"]
+	}
+	h.mu.Unlock()
 	select {
 	case h.events <- ev:
 		return nil
@@ -100,15 +104,26 @@ func (h *LiveHub) Deliver(ev LiveEvent) error {
 	}
 }
 
+// Ack says the session's model has read the event of turn. Next cannot say
+// so: the MCP server's long poll takes an event the moment it is delivered,
+// whatever the model is doing.
+func (h *LiveHub) Ack(turn string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.turn != nil && turn != "" && turn == h.want {
+		h.seen = true
+	}
+}
+
 // End is the session's Stop hook: the model finished a turn, whose last
 // text was text. It reports whether a turn waited for it; a stop nobody
 // waits for, such as one a background task caused, is not an answer. A
-// turn whose event the session has not picked up yet is not waiting: the
+// turn whose event the model has not read yet (no Ack) is not waiting: the
 // stop is the previous turn's late output.
 func (h *LiveHub) End(text string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.turn == nil || !h.took {
+	if h.turn == nil || !h.seen {
 		return false
 	}
 	h.turn <- text

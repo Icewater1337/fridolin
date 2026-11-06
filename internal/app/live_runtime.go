@@ -398,7 +398,7 @@ func (h *liveHost) check(s *liveSession) error {
 		return err
 	}
 	defer s.hub.Abort()
-	if err := s.hub.Deliver(claudecli.LiveEvent{Content: liveProbe, Meta: map[string]string{"kind": "check"}}); err != nil {
+	if err := s.hub.Deliver(claudecli.LiveEvent{Content: liveProbe, Meta: map[string]string{"kind": "check", "turn": "0"}}); err != nil {
 		return err
 	}
 	select {
@@ -564,15 +564,17 @@ func (h *liveHost) next(ctx context.Context, token string, wait time.Duration) (
 }
 
 // end is POST /brain/live/turn-end: the Stop hook of the session whose
-// token it is. A Stop with no turn waiting is the session going on after
-// its answer, as when a background task it started ends: what it says then
-// goes to its chat, as a later message of the run would. One of a session
-// on its way out, or of its check, goes nowhere.
-func (h *liveHost) end(ctx context.Context, token, text string) error {
+// token it is, and turn the last message its model read. A Stop with no turn
+// waiting, or one before the model read the waiting turn's message, is the
+// session going on after its answer, as when a background task it started
+// ends: what it says then goes to its chat, as a later message of the run
+// would. One of a session on its way out, or of its check, goes nowhere.
+func (h *liveHost) end(ctx context.Context, token, text, turn string) error {
 	s := h.byToken(token)
 	if s == nil {
 		return apperr.New(apperr.NotFound, "this token is no live session's")
 	}
+	s.hub.Ack(turn)
 	if s.hub.End(text) {
 		return nil
 	}

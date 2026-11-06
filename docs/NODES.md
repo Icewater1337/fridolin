@@ -1054,7 +1054,10 @@ container, no Docker socket: the box's role is a file in the node's
 volume (`core-role.json`, `standby` or `core`), which the agent reads
 when it starts, so a box that is the core starts it again after a
 restart or a box update, and `docker compose stop` stops it cleanly
-(which releases the lease) without standing the box down.
+(which releases the lease) without standing the box down. A core that
+does not start (a secret that cannot be read, a failed spawn) is tried
+again while the role is `core`, with a wait that grows to 5 minutes; the
+agent's log has each failure.
 
 **The core's settings** are a second compose file beside the box's,
 `core.yaml` ([container/box-core.yaml](../container/box-core.yaml),
