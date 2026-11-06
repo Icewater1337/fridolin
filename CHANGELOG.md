@@ -205,6 +205,11 @@ for compatibility.
 
 ### Fixed
 
+- **A box's updater applies and reports the update it checked.** When the
+  core asked for a newer version while the updater was still checking or
+  applying one, the box pulled the first version's images and reported the
+  newer one as done, or threw the newer request away. The updater now takes
+  a request before checking it, and a newer one waits for its next round.
 - **A live session's late output no longer answers your next message.** When
   a session went on after its answer (a background task ended) and you wrote
   meanwhile, what it said late could go out as the answer to your new message,

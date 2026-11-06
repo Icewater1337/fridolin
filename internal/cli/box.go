@@ -38,8 +38,8 @@ Usage:
                          box-update.ps1), which box.sh and box.ps1 install
   fridolin box pending [--state-dir /node]
                          in a throwaway container of the image the box runs:
-                         check the core's pending update (signature, registry,
-                         build provenance), mark it taken and print VERSION=,
+                         mark the core's pending update taken, check it (signature,
+                         registry, build provenance) and print VERSION=,
                          NODE_IMAGE= and FRIDE_IMAGE=; exit 3 when none is pending
   fridolin box result [--state-dir /node] ok|failed [MESSAGE]
                          record how the taken update ended, for the agent to report
@@ -133,11 +133,11 @@ func runBox(args []string, stdout, stderr io.Writer, d boxDeps) int {
 	return boxResult(*dir, pos[0] == "ok", msg, stdout, stderr)
 }
 
-// boxPending checks the core's request in dir and, when it holds, marks
-// it taken and prints what the updater pulls. A request that does not
-// hold is dropped, and the agent reports why.
+// boxPending takes the core's request in dir, checks it and, when it holds,
+// prints what the updater pulls. A request that does not hold is dropped,
+// and the agent reports why.
 func boxPending(dir string, stdout, stderr io.Writer, d boxDeps) int {
-	r, err := nodeagent.ReadBoxUpdate(dir)
+	r, err := nodeagent.TakeBoxUpdate(dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fridolin box pending: %v\n", err)
 		return 1
@@ -172,10 +172,6 @@ func boxPending(dir string, stdout, stderr io.Writer, d boxDeps) int {
 		if err := d.verify(ctx, ref, repo); err != nil {
 			return refuse(err)
 		}
-	}
-	if err := nodeagent.TakeBoxUpdate(dir); err != nil {
-		fmt.Fprintf(stderr, "fridolin box pending: %v\n", err)
-		return 1
 	}
 	fmt.Fprintf(stdout, "VERSION=%s\nNODE_IMAGE=%s\nFRIDE_IMAGE=%s\n", r.Version, r.NodeImage, r.FrideImage)
 	return 0

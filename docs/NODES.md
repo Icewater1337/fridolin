@@ -1003,8 +1003,10 @@ digest, without ever reaching the box's Docker:
    `ai.fridolin.box-updater`, the systemd user timer
    `fridolin-box-updater` or cron; on Windows `update.ps1`, run by the
    Scheduled Task *fridolin box updater* while the owner is signed in)
-   asks a throwaway container **of the image the box runs now** to check
-   the request (`fridolin box pending`): the signature again, that both
+   asks a throwaway container **of the image the box runs now** to take
+   the request and check it (`fridolin box pending`), so that a newer one
+   the core asks for meanwhile waits for the next round: the signature
+   again, that both
    images are `ghcr.io/OWNER/fridolin-core@sha256:…` and
    `…/fridolin-fride@sha256:…` of the registry that image was built for,
    and their build provenance (GitHub's attestations for this
