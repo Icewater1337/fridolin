@@ -210,6 +210,14 @@ for compatibility.
   crash (a secret that could not be read, a failed spawn), the box only
   logged it and never tried again. It now tries again while its role is
   `core`, with a wait that grows to 5 minutes, and logs each failure.
+- **A box that joins again can start a core and take secrets again.** The
+  new device key left the secrets sealed with the old one in place, where
+  they no longer opened, so the core could not start in the box and receiving
+  secrets failed. Joining again now moves the old key, what was sealed with
+  it and what belonged to the old device into a `rejoined-<time>-*` folder in
+  the state dir, deleting nothing, and the box comes back as a standby box.
+  `box.sh` and `box.ps1` stop the node before they join again; send it
+  secrets again if it is to take the core.
 - **A very long line from a node's agent session no longer stalls its turn.**
   A stream line over 8 MiB, such as a tool printing a large file, left the
   session hanging until its maximum runtime (2 hours by default), and the

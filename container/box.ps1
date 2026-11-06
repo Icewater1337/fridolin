@@ -11,8 +11,14 @@
 #
 # It does what box.sh does on macOS and Linux, in the same order, and asks
 # before it starts. It needs no administrator: Docker Desktop's own
-# install is the one step that does. Running it again with a new code
-# joins again; what it made stays.
+# install is the one step that does. Running it again with a new code stops
+# the node and joins again as a new device. What it made stays: the compose
+# files, FrIDE and its workspaces, the backups, the core-host settings, the
+# core's data volume. Moved aside into rejoined-<time>-* in the node's volume,
+# never deleted: the old device key and what was sealed with it or tied to it
+# (core-secrets, node-secrets, core-role.json, the received-file records, the
+# pinned core key, core-moves). The box comes back as a standby box that can
+# take secrets and a core again.
 param(
     [Parameter(Mandatory = $true)][string]$Registry,
     [Parameter(Mandatory = $true)][string]$Version,
@@ -203,6 +209,8 @@ if ($LASTEXITCODE -ne 0) { Die "the box did not get onto the tailnet" }
 
 Say "Joining the core"
 if (-not $Code) { $Code = Read-Host "Send !join to fridolin in your WhatsApp chat and type the code it sends" }
+# A running agent would keep the old key in memory, and seal with it.
+Run docker @("compose", "stop", "node")
 $joinArgs = @("compose", "run", "--rm", "-T", "node", "node", "join", $Code, "--core", $Core, "--box", "--name", $Name, "--state-dir", "/node")
 if (-not $fride) { $joinArgs += "--box-no-fride" }
 & docker @joinArgs

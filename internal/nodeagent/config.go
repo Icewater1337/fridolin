@@ -198,7 +198,7 @@ func LoadKey(dir string) (ed25519.PrivateKey, error) {
 }
 
 // NewKey makes a device key and writes it to dir, replacing one there: a
-// node that joins again is a new device.
+// node that joins again is a new device (Join moves the old key aside first).
 func NewKey(dir string) (ed25519.PrivateKey, error) {
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
