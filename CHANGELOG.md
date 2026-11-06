@@ -205,6 +205,11 @@ for compatibility.
 
 ### Fixed
 
+- **A box that is the core no longer stays without a core after a failed
+  start.** When the core could not start as the agent came up or after a
+  crash (a secret that could not be read, a failed spawn), the box only
+  logged it and never tried again. It now tries again while its role is
+  `core`, with a wait that grows to 5 minutes, and logs each failure.
 - **A very long line from a node's agent session no longer stalls its turn.**
   A stream line over 8 MiB, such as a tool printing a large file, left the
   session hanging until its maximum runtime (2 hours by default), and the
