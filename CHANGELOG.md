@@ -205,6 +205,11 @@ for compatibility.
 
 ### Fixed
 
+- **A box that is the core no longer stays without a core after a failed
+  start.** When the core could not start as the agent came up or after a
+  crash (a secret that could not be read, a failed spawn), the box only
+  logged it and never tried again. It now tries again while its role is
+  `core`, with a wait that grows to 5 minutes, and logs each failure.
 - **A core move whose source could not be asked to release ends at once.**
   When the source was not connected as the move reached the release, the
   move showed as handed off, refused every new move for hours and ended
