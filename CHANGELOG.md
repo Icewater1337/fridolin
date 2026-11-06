@@ -224,6 +224,12 @@ for compatibility.
   crash (a secret that could not be read, a failed spawn), the box only
   logged it and never tried again. It now tries again while its role is
   `core`, with a wait that grows to 5 minutes, and logs each failure.
+- **After a failed core move you are asked about the target's secrets only
+  when it is clear where the core runs.** A move the source refused now asks
+  whether the target keeps the host secrets, as it should. A move that ended
+  "unknown", or whose source never answered the release, no longer asks, and
+  so can no longer remove the secrets of the machine that may run the core.
+
 - **A core move whose source could not be asked to release ends at once.**
   When the source was not connected as the move reached the release, the
   move showed as handed off, refused every new move for hours and ended
