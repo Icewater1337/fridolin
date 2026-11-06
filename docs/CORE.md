@@ -960,8 +960,12 @@ machine and nothing it held before ([Forgetting a former core
 host](#forgetting-a-former-core-host)): the host secrets it received
 over the node channel, the secret files they wrote, and the core's data
 dir when a move's import put it into an empty one. No vote within 24
-hours forgets them. After a move that failed once the secrets had gone
-to DST, the same poll asks about DST. Revoking a core host (`!revoke`,
+hours forgets them. After a move that clearly failed once the secrets
+had gone to DST (SRC refused to release the core or was never asked, or
+SRC says the move failed or rolled back), the same poll asks about DST.
+When it is unclear where the core runs (the move ended unknown, or SRC
+never answered the release), nothing is asked and DST keeps them.
+Revoking a core host (`!revoke`,
 the Nodes page, `fridolin nodes revoke`) has it forget them first when
 it is connected, and `!revoke` says what it forgot.
 
