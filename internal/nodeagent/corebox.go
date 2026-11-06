@@ -128,7 +128,8 @@ type BoxCore struct {
 	Spawn func(env []string, args ...string) (BoxProcess, error)
 	// StopWait is how long a stop waits for the core to end before it is
 	// killed (30s when zero); RestartWait how long the supervisor waits
-	// before it starts a core that ended by itself again (10s).
+	// before it starts a core that ended by itself or did not start again
+	// (10s).
 	StopWait, RestartWait time.Duration
 	// Probe checks that bubblewrap can make a brain's namespaces in this
 	// container; nil runs it (BwrapProbe).
@@ -138,12 +139,13 @@ type BoxCore struct {
 	proc    *boxProc
 	ctx     context.Context
 	stopped bool
-	// restart is the pending start of a core that ended by itself. The
-	// start happens only while restart is still its channel; halt and
-	// launch close it.
+	// restart is the pending start of a core that ended by itself or did
+	// not start. The start happens only while restart is still its
+	// channel; halt and launch close it.
 	restart chan struct{}
-	// watchers wait for the runs of the core (watch); Supervise waits
-	// for them, so that no core and no pending start outlive the agent.
+	// watchers wait for the runs of the core (watch) and the retries of a
+	// failed start; Supervise waits for them, so that no core and no
+	// pending start outlive the agent.
 	watchers sync.WaitGroup
 }
 
@@ -155,6 +157,9 @@ type boxProc struct {
 	stopping bool
 	started  time.Time
 }
+
+// boxRestartMaxWait is the longest wait between two tries to start the core.
+const boxRestartMaxWait = 5 * time.Minute
 
 // BoxCoreArgs are the core's arguments in a box: the container's run, its
 // dashboard and site on the loopback.
@@ -489,43 +494,58 @@ func (b *BoxCore) watch(bp *boxProc) {
 	if !again {
 		return
 	}
-	role, err := LoadCoreRole(b.StateDir)
-	if err != nil || role != RoleCore {
+	// A role that cannot be read may still be core: retryLaunch reads it again.
+	if role, err := LoadCoreRole(b.StateDir); err == nil && role != RoleCore {
 		return
 	}
 	wait := b.restartWait()
 	if time.Since(bp.started) < time.Minute {
 		wait *= 6
 	}
-	pending := make(chan struct{})
-	b.mu.Lock()
-	if b.stopped || b.proc != nil {
-		b.mu.Unlock()
-		return
-	}
-	b.cancelRestart()
-	b.restart = pending
-	b.mu.Unlock()
-	b.logf("node: box: the core ended by itself (%v); starting it again in %s", bp.err, wait)
-	t := time.NewTimer(wait)
-	defer t.Stop()
-	select {
-	case <-t.C:
-	case <-pending:
-		return
-	}
+	b.retryLaunch(fmt.Sprintf("the core ended by itself (%v)", bp.err), wait)
+}
+
+// retryLaunch starts the core after wait, and again after a growing wait
+// while that fails, until a run is up, the role is no longer core, or a
+// stop (halt) or a start comes first. why is what the first wait is for.
+func (b *BoxCore) retryLaunch(why string, wait time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.restart != pending {
-		return
-	}
-	b.restart = nil
-	// The role again, under the lock: a Stop writes it before its halt.
-	if role, err := LoadCoreRole(b.StateDir); err != nil || role != RoleCore {
-		return
-	}
-	if err := b.launchLocked(); err != nil {
-		b.logf("node: box: starting the core again: %v", err)
+	for {
+		if b.stopped || b.proc != nil {
+			return
+		}
+		b.cancelRestart()
+		pending := make(chan struct{})
+		b.restart = pending
+		b.mu.Unlock()
+		b.logf("node: box: %s; starting it again in %s", why, wait)
+		t := time.NewTimer(wait)
+		select {
+		case <-t.C:
+		case <-pending:
+		}
+		t.Stop()
+		b.mu.Lock()
+		if b.restart != pending {
+			return
+		}
+		b.restart = nil
+		// The role again, under the lock: a Stop writes it before its halt.
+		role, err := LoadCoreRole(b.StateDir)
+		switch {
+		case err != nil:
+			why = fmt.Sprintf("the box's role cannot be read (%v)", err)
+		case role != RoleCore:
+			return
+		default:
+			err = b.launchLocked()
+			if err == nil || errors.Is(err, errBoxStopping) {
+				return
+			}
+			why = fmt.Sprintf("the core did not start (%v)", err)
+		}
+		wait = min(wait*2, boxRestartMaxWait)
 	}
 }
 
@@ -575,7 +595,9 @@ func (b *BoxCore) Supervise(ctx context.Context) {
 	case role == RoleCore:
 		b.logf("node: box: this box is the core: starting it")
 		if err := b.launch(); err != nil {
-			b.logf("node: box: %v", err)
+			b.watchers.Go(func() {
+				b.retryLaunch(fmt.Sprintf("the core did not start (%v)", err), b.restartWait())
+			})
 		}
 	}
 	<-ctx.Done()
