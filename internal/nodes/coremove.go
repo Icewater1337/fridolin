@@ -530,6 +530,10 @@ func (s *Service) runMove(ctx context.Context, r *MoveRecord, o MoveOptions) {
 	// record goes into the final export as it is now.
 	s.moveStep(r, MoveReleasing, "releasing", "asking %s to release the core", r.SourceName)
 	if err := s.Call(ctx, src, nodeproto.MethodCoreRelease, signed, &accepted); err != nil {
+		if errors.Is(err, errNotSent) {
+			s.moveStep(r, MoveFailed, "release", "could not ask %s to release the core: %v; %s gives up at the deadline, nothing changed", r.SourceName, err, r.TargetName)
+			return
+		}
 		// The source may have stopped before it answered, with the core
 		// already moving: only its own word settles that (#494).
 		var ne *nodeproto.Error
