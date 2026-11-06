@@ -205,6 +205,15 @@ for compatibility.
 
 ### Fixed
 
+- **A live session's late output no longer answers your next message.** When
+  a session went on after its answer (a background task ended) and you wrote
+  meanwhile, what it said late could go out as the answer to your new message,
+  and the real answer after it as an extra message. The session's Stop hook now
+  reads from the transcript which message the model last read, and only a Stop
+  that names the waiting message answers it; any other goes to the chat as what
+  the session said after its turn. A session whose hook cannot tell fails its
+  start-up check, and messages run `claude -p` as they do for any session that
+  does not come up.
 - **A box that is the core no longer stays without a core after a failed
   start.** When the core could not start as the agent came up or after a
   crash (a secret that could not be read, a failed spawn), the box only
