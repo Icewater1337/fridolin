@@ -18,8 +18,10 @@ import (
 // sessions start it: it shows the development-channels dialog and waits
 // for Enter, starts the "fridolin" MCP server of its --mcp-config, and
 // answers each channel notification as the one-off fake answers a prompt,
-// "echo:<dir>:<from> says: <text>" (a check, "READY"), by running the Stop
-// hook of its --settings with the answer as last_assistant_message.
+// "echo:<dir>:<from> says: <text>" (a check, "READY"), by writing the
+// message to a transcript as the real CLI does when the model reads it and
+// running the Stop hook of its --settings with the answer as
+// last_assistant_message and that transcript as transcript_path.
 //
 // FRIDOLIN_FAKE_LIVE_LOG gets one JSON line per start and per message
 // (args, content, pid, and the gh login it sees: ghLogin, with the status
@@ -77,6 +79,8 @@ func fakeLive(args []string) {
 	}
 	send(map[string]any{"id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "fake-claude", "version": "1"}}})
 	hook := stopHook(args)
+	// In the session's config dir, as the real one, which the test cleans up.
+	transcript := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), fmt.Sprintf("fake-live-%d.jsonl", os.Getpid()))
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 1<<20), 8<<20)
 	for sc.Scan() {
@@ -109,6 +113,7 @@ func fakeLive(args []string) {
 			continue
 		}
 		content := m.Params.Content
+		writeTranscript(transcript, m.Params.Meta["kind"], m.Params.Meta["turn"], content)
 		gh := ghLogin()
 		logLine(map[string]any{"event": "message", "kind": m.Params.Meta["kind"], "turn": m.Params.Meta["turn"], "content": content, "gh": gh, "gh_status": ghStatus(gh)})
 		if log := os.Getenv("FRIDOLIN_FAKE_PROMPT_LOG"); log != "" {
@@ -139,12 +144,12 @@ func fakeLive(args []string) {
 		if hook == "" {
 			continue
 		}
-		runStop(hook, answer)
+		runStop(hook, transcript, answer)
 		if on := os.Getenv("FRIDOLIN_FAKE_LIVE_LATE_ON"); on != "" && m.Params.Meta["kind"] == "message" {
 			if msg := NewMessage(content); strings.Contains(msg, on) {
 				go func() {
 					time.Sleep(300 * time.Millisecond)
-					runStop(hook, "later: "+msg)
+					runStop(hook, transcript, "later: "+msg)
 				}()
 			}
 		}
@@ -190,9 +195,18 @@ func ghStatus(tok string) int {
 	return resp.StatusCode
 }
 
+// writeTranscript adds the message the model reads to the transcript.
+func writeTranscript(path, kind, turn, content string) {
+	line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": fmt.Sprintf("<channel source=%q kind=%q turn=%q>\n%s\n</channel>", "fridolin", kind, turn, content)}})
+	if f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		fmt.Fprintf(f, "%s\n", line)
+		f.Close()
+	}
+}
+
 // runStop runs the Stop hook with answer as the turn's last message.
-func runStop(hook, answer string) {
-	body, _ := json.Marshal(map[string]any{"hook_event_name": "Stop", "last_assistant_message": answer})
+func runStop(hook, transcript, answer string) {
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "Stop", "last_assistant_message": answer, "transcript_path": transcript})
 	h := exec.Command("sh", "-c", hook)
 	h.Env = append(os.Environ(), "FRIDOLIN_TEST_RUN_MAIN=1")
 	h.Stdin = strings.NewReader(string(body))
