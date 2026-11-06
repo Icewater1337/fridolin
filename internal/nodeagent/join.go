@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -51,9 +52,36 @@ type Joined struct {
 	State nodeproto.State
 }
 
+// rejoinAside is what a new device key leaves behind: the stores sealed
+// with the old key, and the state of the old device. node.key goes last,
+// so that a move that fails half way is finished by joining again.
+var rejoinAside = []string{coreSecretsDir, nodeSecretsDir, CoreRoleFile, coreReceivedFile, CoreKeyFile, coreMovesDir, KeyFile}
+
+// moveAsideForRejoin moves rejoinAside into a new dated folder in dir when
+// the node has a key already. Never deleted: the old key still opens them.
+func moveAsideForRejoin(dir string, logf func(string, ...any)) error {
+	if _, err := os.Lstat(filepath.Join(dir, KeyFile)); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	aside, err := os.MkdirTemp(dir, "rejoined-"+time.Now().Format("20060102-150405")+"-")
+	if err != nil {
+		return fmt.Errorf("making the folder for the old device's files: %w", err)
+	}
+	for _, name := range rejoinAside {
+		if err := os.Rename(filepath.Join(dir, name), filepath.Join(aside, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("moving the old device's %s aside to %s: %w", name, aside, err)
+		}
+	}
+	(&Agent{Logf: logf}).logf("node: joining again as a new device: the old key and what was sealed with it or tied to it are in %s", aside)
+	return nil
+}
+
 // Join makes the node a new device of the core: a new key, node.json, and
 // one connection that hands the core the join code. The device then waits
-// for the owner's approval on the core, which the agent (Run) hears.
+// for the owner's approval on the core, which the agent (Run) hears. A node
+// that has a key moves the old device's files aside first (rejoinAside).
 func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	if o.Code == "" {
 		return Joined{}, errors.New("the join code is missing: send !join to the bridge in your WhatsApp chat, or run fridolin nodes join-code on the core")
@@ -63,6 +91,9 @@ func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 		return Joined{}, err
 	}
 	if err := os.MkdirAll(o.Dir, 0o700); err != nil {
+		return Joined{}, err
+	}
+	if err := moveAsideForRejoin(o.Dir, o.Logf); err != nil {
 		return Joined{}, err
 	}
 	key, err := NewKey(o.Dir)
