@@ -16,7 +16,13 @@
 # own device (a link to open, or TS_AUTHKEY), joins the core with the code,
 # starts the box, and pairs FrIDE with the node: the Claude token for
 # FrIDE's agents is typed without echo, never put on a command line.
-# Running it again with a new code joins again; what it made stays.
+# Running it again with a new code stops the node and joins again as a new
+# device. What it made stays: the compose files, FrIDE and its workspaces,
+# the backups, the core-host settings, the core's data volume. Moved aside
+# into rejoined-<time>-* in the node's volume, never deleted: the old device
+# key and what was sealed with it or tied to it (core-secrets, node-secrets,
+# core-role.json, the received-file records, the pinned core key, core-moves).
+# The box comes back as a standby box that can take secrets and a core again.
 #
 # Options:
 #   --registry REG     the images' registry, ghcr.io/OWNER (required)
@@ -266,6 +272,8 @@ if [ -z "$code" ]; then
 fi
 nofride=""
 [ "$fride" = 1 ] || nofride="--box-no-fride"
+# A running agent would keep the old key in memory, and seal with it.
+docker compose stop node
 # shellcheck disable=SC2086 # nofride is one flag or none
 if ! docker compose run --rm -T node node join "$code" --core "$core" --box --name "$name" --state-dir /node $nofride; then
 	die "joining failed. A code works once, within 10 minutes: send !join again, then run this again with --code NEWCODE"
