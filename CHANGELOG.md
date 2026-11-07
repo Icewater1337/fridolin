@@ -213,6 +213,10 @@ for compatibility.
   on one approval (two `check_approval`s, or `node_exec` and `check_approval`),
   only one got the answer and the other hung for good, even after its run was
   stopped. Now each gets it, and a call whose run is stopped ends at once.
+- **What someone asks to pass on reaches you even when the reply fails.**
+  When an errand was stopped while its run was thinking, or the reply could
+  not be sent, the note that came with the reply was dropped without a
+  trace. It now reaches you either way, on a chat and on a call.
 - **An errand's reply that could not be sent no longer counts as said.**
   When someone hung up while Fridolin answered, or the answer could not be
   queued, the conversation kept a reply they never got, and what they said

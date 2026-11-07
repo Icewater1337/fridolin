@@ -41,12 +41,16 @@ type errandRuns struct {
 	mu      sync.Mutex
 	answers []string
 	seen    []errand.Errand
+	during  func() // if set, what happens while a run thinks
 }
 
 func (r *errandRuns) run(e errand.Errand) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seen = append(r.seen, e)
+	if r.during != nil {
+		r.during()
+	}
 	if len(r.answers) == 0 {
 		return "", errors.New("no answer left")
 	}
