@@ -87,6 +87,9 @@ type waits struct {
 	// callRing is how long an errand's call rings before it counts as not
 	// picked up (call_runtime.go).
 	callRing time.Duration
+	// errandCallIdle is how long a silence on an errand's call ends it
+	// (call_runtime.go).
+	errandCallIdle time.Duration
 }
 
 // defaultWaits are the waits of the binary's bridge.
@@ -119,6 +122,7 @@ func defaultWaits() waits {
 		errandGather:        20 * time.Second,
 		errandSweep:         time.Minute,
 		callRing:            45 * time.Second,
+		errandCallIdle:      45 * time.Second,
 	}
 }
 

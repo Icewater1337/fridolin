@@ -43,11 +43,10 @@ const (
 	// silence ends it.
 	ownerCallMax  = 15 * time.Minute
 	ownerCallIdle = 2 * time.Minute
-	// An errand's calls: how long one lasts at most, how long a silence
-	// ends it, and how many calls errands make a day (how long one rings
-	// is waits.callRing).
+	// An errand's calls: how long one lasts at most and how many calls
+	// errands make a day (how long one rings is waits.callRing, how long a
+	// silence ends it waits.errandCallIdle).
 	errandCallMax     = 10 * time.Minute
-	errandCallIdle    = 45 * time.Second
 	errandCallsPerDay = 5
 	// callReadyWait is how long an answered call may take until its
 	// audio flows.
@@ -491,9 +490,9 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	until := time.Now().Add(errandCallMax)
 	goesOn := true
 	for goesOn {
-		text, err := v.listen(ctx, errandCallIdle)
+		text, err := v.listen(ctx, b.waits.errandCallIdle)
 		if err != nil {
-			if errors.Is(err, errCallIdle) {
+			if errors.Is(err, errCallIdle) && b.errandOpen(ctx, e.ID) {
 				_ = v.say(ctx, errandCallLater)
 			}
 			break

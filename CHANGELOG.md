@@ -205,6 +205,10 @@ for compatibility.
 
 ### Fixed
 
+- **A silent call no longer promises a message after its errand was stopped.**
+  When someone stayed silent on an errand's call and the errand was stopped
+  meanwhile, the call still told them Fridolin would get back to them on
+  WhatsApp, which it would not. Now the call ends without a word.
 - **Every call waiting on an approval gets the answer.** When two calls waited
   on one approval (two `check_approval`s, or `node_exec` and `check_approval`),
   only one got the answer and the other hung for good, even after its run was
