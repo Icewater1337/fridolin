@@ -394,23 +394,48 @@ func (s *Store) AddErrandLine(ctx context.Context, id string, l ErrandLine, mine
 
 // AddErrandLineWhileOpen adds one of Fridolin's messages to errand id's
 // conversation in the one statement that checks the errand is still open,
-// and counts it. It reports false, and adds nothing, once the errand ended.
-func (s *Store) AddErrandLineWhileOpen(ctx context.Context, id string, l ErrandLine) (bool, error) {
+// and counts it. It reports false, and adds nothing, once the errand ended;
+// line is what TakeBackErrandLine takes.
+func (s *Store) AddErrandLineWhileOpen(ctx context.Context, id string, l ErrandLine) (line int64, ok bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE errands SET sent = sent + 1 WHERE id = ? AND state = ?`, id, ErrandOpen)
 	if err != nil {
-		return false, errors.Join(err, tx.Rollback())
+		return 0, false, errors.Join(err, tx.Rollback())
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return false, tx.Rollback()
+		return 0, false, tx.Rollback()
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO errand_lines (errand, sender, text, at) VALUES (?, ?, ?, ?)`, id, l.Sender, l.Text, l.At.UTC()); err != nil {
-		return false, errors.Join(err, tx.Rollback())
+	res, err = tx.ExecContext(ctx, `INSERT INTO errand_lines (errand, sender, text, at) VALUES (?, ?, ?, ?)`, id, l.Sender, l.Text, l.At.UTC())
+	if err != nil {
+		return 0, false, errors.Join(err, tx.Rollback())
 	}
-	return true, tx.Commit()
+	if line, err = res.LastInsertId(); err != nil {
+		return 0, false, errors.Join(err, tx.Rollback())
+	}
+	return line, true, tx.Commit()
+}
+
+// TakeBackErrandLine undoes AddErrandLineWhileOpen for a message that could
+// not be sent: the line goes, and no longer counts.
+func (s *Store) TakeBackErrandLine(ctx context.Context, id string, line int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM errand_lines WHERE id = ? AND errand = ?`, line, id)
+	if err != nil {
+		return errors.Join(err, tx.Rollback())
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return tx.Rollback()
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE errands SET sent = sent - 1 WHERE id = ?`, id); err != nil {
+		return errors.Join(err, tx.Rollback())
+	}
+	return tx.Commit()
 }
 
 // ErrandLines is errand id's conversation, oldest first.
