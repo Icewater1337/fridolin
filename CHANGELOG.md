@@ -211,6 +211,13 @@ for compatibility.
   blocks of noise went to transcription, and the call could not go idle. Now a
   level that stays put for about 3 s becomes the line's noise, and only sound
   well above it counts.
+- **`fridolin doctor` no longer calls an old lockdown "off".** Doctor only
+  read the last two monthly audit files, so a lockdown started longer ago
+  showed as off while the bridge still refused write work. It now looks back
+  through every month on disk until it finds the last lockdown or unlock.
+  With the vault on, past months are in the cold tier and doctor does not
+  bring them back: if it finds nothing on disk, it says those months were
+  not read instead of a plain "off".
 - **A silent call no longer promises a message after its errand was stopped.**
   When someone stayed silent on an errand's call and the errand was stopped
   meanwhile, the call still told them Fridolin would get back to them on
@@ -219,6 +226,10 @@ for compatibility.
   on one approval (two `check_approval`s, or `node_exec` and `check_approval`),
   only one got the answer and the other hung for good, even after its run was
   stopped. Now each gets it, and a call whose run is stopped ends at once.
+- **What someone asks to pass on reaches you even when the reply fails.**
+  When an errand was stopped while its run was thinking, or the reply could
+  not be sent, the note that came with the reply was dropped without a
+  trace. It now reaches you either way, on a chat and on a call.
 - **An errand's reply that could not be sent no longer counts as said.**
   When someone hung up while Fridolin answered, or the answer could not be
   queued, the conversation kept a reply they never got, and what they said

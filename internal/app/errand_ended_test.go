@@ -84,3 +84,102 @@ func TestErrandEndedWhileTheRunThinks(t *testing.T) {
 		})
 	}
 }
+
+// TestErrandNoteSurvivesAFailedReply: what the person asked to pass on
+// reaches the owner once, whether or not the reply that came with it could
+// be sent.
+func TestErrandNoteSurvivesAFailedReply(t *testing.T) {
+	t.Parallel()
+	const reply, note = "I'll tell Sam.", "Alex will be 20 minutes late."
+	for name, c := range map[string]struct {
+		sent    bool
+		breakIt func(t *testing.T, h *harness, runs *errandRuns, e store.Errand)
+	}{
+		"sent": {sent: true, breakIt: func(*testing.T, *harness, *errandRuns, store.Errand) {}},
+		"stopped while the run thinks": {breakIt: func(t *testing.T, h *harness, runs *errandRuns, e store.Errand) {
+			runs.during = func() {
+				if ended, err := h.b.store.EndErrand(context.Background(), e.ID, store.ErrandStopped, "the owner stopped it", time.Now()); err != nil || !ended {
+					t.Errorf("stopping: %v %v", ended, err)
+				}
+			}
+		}},
+		"send refused": {breakIt: func(t *testing.T, h *harness, _ *errandRuns, _ store.Errand) {
+			// Only the person's: the owner's notice takes the same outbox.
+			db := testStoreSQL(t, h.b.cfgs.Get().DBPath)
+			if _, err := db.Exec(`CREATE TRIGGER refuse_person BEFORE INSERT ON outbox WHEN NEW.chat_jid = '` + errandJID + `' BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, runs := errandHarness(t)
+			ctx := context.Background()
+			h.knowAlex()
+			if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+				t.Fatal(err)
+			}
+			e := h.onlyErrand()
+			if err := h.b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromThem, Text: "Tell Sam I'll be late", At: time.Now()}, false); err != nil {
+				t.Fatal(err)
+			}
+			c.breakIt(t, h, runs, e)
+			runs.say(`{"action":"reply","text":"` + reply + `","note":"` + note + `"}`)
+			h.b.errandTurn(e.ID)
+
+			notice := outboundmsg.ErrandNoteNotice("Alex", e.ID, note)
+			h.WaitSent(harnessDM, notice)
+			if got := countOf(h.SentTo(harnessDM), notice); got != 1 {
+				t.Errorf("the owner got the note %d times", got)
+			}
+			if got := passedOnLines(h); got != 1 {
+				t.Errorf("%d passed on lines in the audit log", got)
+			}
+			if c.sent {
+				h.WaitSent(errandJID, reply)
+			} else if got := countOf(h.SentTo(errandJID), reply); got != 0 {
+				t.Errorf("the reply went out %d times", got)
+			}
+		})
+	}
+}
+
+// TestErrandNoteSurvivesACallOutOfTime: a call whose time ran out while
+// Fridolin spoke fails the send with its context, which must not take the
+// note with it.
+func TestErrandNoteSurvivesACallOutOfTime(t *testing.T) {
+	t.Parallel()
+	h, _ := errandHarness(t)
+	h.knowAlex()
+	if _, err := h.b.openErrand(context.Background(), h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	const note = "Alex will be 20 minutes late."
+	h.b.errandAct(ctx, e, errand.Answer{Action: errand.Reply, Text: "I'll tell Sam.", Note: note}, nil, errandChannel{say: func(string) error { return ctx.Err() }})
+	h.WaitSent(harnessDM, outboundmsg.ErrandNoteNotice("Alex", e.ID, note))
+}
+
+// countOf is how many of texts contain substr.
+func countOf(texts []string, substr string) int {
+	n := 0
+	for _, text := range texts {
+		if strings.Contains(text, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+// passedOnLines is how many notes the audit log says were passed on.
+func passedOnLines(h *harness) int {
+	n := 0
+	for _, l := range h.auditOf("errand") {
+		if l["detail"] == "passed on" {
+			n++
+		}
+	}
+	return n
+}
