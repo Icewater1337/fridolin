@@ -451,19 +451,11 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		b.auditErrand(e, "said", fmt.Sprintf("%d characters", len([]rune(text))))
 		return nil
 	}
-	// Recorded first, in the statement that checks the errand is open.
 	say := func(text string) error {
 		if text = voice.Speakable(text, maxSpoken); text == "" {
 			return nil // nothing to hear: no line, not sent
 		}
-		ok, err := b.store.AddErrandLineWhileOpen(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()})
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return errandEnded
-		}
-		return said(text)
+		return b.recordAndSend(ctx, e.ID, text, func() error { return said(text) })
 	}
 	sayEnding := func(text string) error {
 		if text = voice.Speakable(text, maxSpoken); text == "" {
