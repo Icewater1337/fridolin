@@ -205,6 +205,12 @@ for compatibility.
 
 ### Fixed
 
+- **Steady background noise on a call is no longer taken for speech.** A car,
+  a café or a fan loud enough counted as talking for the whole call: each turn
+  waited for the 30 s cut instead of ending 0.9 s after the caller stopped,
+  blocks of noise went to transcription, and the call could not go idle. Now a
+  level that stays put for about 3 s becomes the line's noise, and only sound
+  well above it counts.
 - **`fridolin doctor` no longer calls an old lockdown "off".** Doctor only
   read the last two monthly audit files, so a lockdown started longer ago
   showed as off while the bridge still refused write work. It now looks back
