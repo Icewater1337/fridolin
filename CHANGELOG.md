@@ -205,6 +205,12 @@ for compatibility.
 
 ### Fixed
 
+- **Steady background noise on a call is no longer taken for speech.** A car,
+  a café or a fan loud enough counted as talking for the whole call: each turn
+  waited for the 30 s cut instead of ending 0.9 s after the caller stopped,
+  blocks of noise went to transcription, and the call could not go idle. Now a
+  level that stays put for about 3 s becomes the line's noise, and only sound
+  well above it counts.
 - **A silent call no longer promises a message after its errand was stopped.**
   When someone stayed silent on an errand's call and the errand was stopped
   meanwhile, the call still told them Fridolin would get back to them on

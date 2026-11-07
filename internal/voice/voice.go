@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
+	"slices"
 )
 
 // SampleRate is the call's sample rate, in Hz.
@@ -30,10 +31,16 @@ const (
 	DefaultMinLevel = 0.01
 )
 
+// noiseWindow is how many frames (just over 3 s) a level must stay up to
+// become the line's noise: longer than speech goes without a dip.
+const noiseWindow = 51
+
 // Segmenter finds the utterances in a stream of frames with a simple
 // energy detector: a frame is speech when its level is well above the
-// line's noise (which it keeps learning from the quiet frames) and above
-// a floor; an utterance starts with speech and ends after a pause.
+// line's noise (which it keeps learning from the quiet frames and from
+// the lowest level of the last seconds, so that a level that stays put is
+// noise) and above a floor; an utterance starts with speech and ends after
+// a pause.
 type Segmenter struct {
 	// Silence, MinSpeech and MaxUtterance are in milliseconds; MinLevel
 	// is an RMS level (0 to 1). Zero takes the default.
@@ -41,6 +48,8 @@ type Segmenter struct {
 	MinLevel                         float64
 
 	noise   float64
+	levels  [noiseWindow]float64 // the last frames' levels, a ring
+	frames  int                  // frames seen, which places the next in levels
 	buf     []float32
 	speech  int // samples of speech in buf
 	quiet   int // samples of quiet since the last speech
@@ -74,6 +83,20 @@ func (s *Segmenter) Feed(frame []float32) ([]float32, bool) {
 		floor = DefaultMinLevel
 	}
 	level := Level(frame)
+	s.levels[s.frames%noiseWindow] = level
+	s.frames++
+	if s.frames >= noiseWindow {
+		// A level that stayed up the whole window is the line's noise, even
+		// if it was never quiet enough to learn from below.
+		if low := slices.Min(s.levels[:]); low > s.noise {
+			s.noise = low
+			// All that is held came within a window this flat: it was noise,
+			// not speech. Speech from before the window stays.
+			if slices.Max(s.levels[:]) <= 3*low && len(s.buf) < noiseWindow*len(frame) {
+				s.Reset()
+			}
+		}
+	}
 	speech := level > floor && level > 3*s.noise
 	if !speech {
 		// The line's noise, learned slowly from what is not speech.
