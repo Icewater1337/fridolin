@@ -191,7 +191,7 @@ test-web: ## syntax-check the dashboard JS and run its unit tests
 # allows, and runs none of their install scripts. Renovate moves the pin
 # through the comment above it. It needs Node 20.19+, 22.13+ or 24+.
 # renovate: datasource=npm depName=eslint
-ESLINT_VERSION := 10.13.0
+ESLINT_VERSION := 10.14.0
 NPX    ?= npx
 ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
 lint-web: ## ESLint on the dashboard's JS (npx fetches it)
