@@ -12,7 +12,7 @@ require (
 	github.com/mdp/qrterminal/v4 v4.0.0
 	github.com/purpshell/meowcaller v0.0.0-20260811012811-27a3c6b18657
 	github.com/rs/zerolog v1.35.1
-	github.com/yuin/goldmark v1.8.7
+	github.com/yuin/goldmark/v2 v2.1.13
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
