@@ -220,3 +220,31 @@ func TestErrandCallsSince(t *testing.T) {
 		t.Errorf("five calls made: %d, want 5", n)
 	}
 }
+
+func TestTakeBackErrandLine(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now()
+	if err := s.AddErrand(ctx, Errand{ID: "e1", Contact: "15551234567", State: ErrandOpen, Deadline: now.Add(time.Hour), CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	line, ok, err := s.AddErrandLineWhileOpen(ctx, "e1", ErrandLine{Sender: "you", Text: "unsent", At: now})
+	if err != nil || !ok {
+		t.Fatalf("add: %v %v", ok, err)
+	}
+	// A line that came in meanwhile stays.
+	if err := s.AddErrandLine(ctx, "e1", ErrandLine{Sender: "them", Text: "Hi!", At: now}, false); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // only the first counts
+		if err := s.TakeBackErrandLine(ctx, "e1", line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines, _ := s.ErrandLines(ctx, "e1")
+	got, _ := s.GetErrand(ctx, "e1")
+	if len(lines) != 1 || lines[0].Text != "Hi!" || got.Sent != 0 {
+		t.Errorf("lines %+v, sent %d", lines, got.Sent)
+	}
+}

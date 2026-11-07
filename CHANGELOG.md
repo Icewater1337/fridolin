@@ -205,6 +205,13 @@ for compatibility.
 
 ### Fixed
 
+- **An errand's reply that could not be sent no longer counts as said.**
+  When someone hung up while Fridolin answered, or the answer could not be
+  queued, the conversation kept a reply they never got, and what they said
+  last went unanswered. The line is now taken out of the conversation and
+  no longer counts towards the errand's messages, so a turn by message
+  answers them after a call. A warning that could not be sent no longer
+  counts as their warning.
 - **A box's updater applies and reports the update it checked.** When the
   core asked for a newer version while the updater was still checking or
   applying one, the box pulled the first version's images and reported the
