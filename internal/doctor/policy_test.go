@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +61,7 @@ func TestPolicyChecks(t *testing.T) {
 	}
 }
 
-// TestPolicyChecksAuditLog: only the last two months' files are read, and
+// TestPolicyChecksAuditLog: approvals read only the last two months' files, and
 // a log that cannot be read warns; without the config nothing is read.
 func TestPolicyChecksAuditLog(t *testing.T) {
 	env := healthyMac().doctorEnv(testConfig(nil), nil)
@@ -88,4 +89,99 @@ func TestPolicyChecksAuditLog(t *testing.T) {
 			t.Errorf("without the config: %+v", r)
 		}
 	}
+}
+
+// TestLockdownOlderMonths: a lockdown lasts until an unlock, however many
+// monthly files lie between; approvals still look at the last two files.
+func TestLockdownOlderMonths(t *testing.T) {
+	const (
+		lockdown = `{"ts":"2026-08-03T09:00:00Z","kind":"lockdown","by":"15551234567"}` + "\n"
+		unlock   = `{"ts":"2026-10-03T09:00:00Z","kind":"unlock","by":"dashboard"}` + "\n"
+		relock   = `{"ts":"2026-08-04T09:00:00Z","kind":"lockdown","by":"dashboard"}` + "\n"
+		asked    = `{"ts":"2026-08-03T10:00:00Z","kind":"approval_requested","id":"a1"}` + "\n"
+		cold     = `{"files":[{"name":"2026-08.jsonl"}]}`
+	)
+	const dir = "/home/you/.fridolin/audit/"
+	for _, tc := range []struct {
+		name   string
+		files  map[string]string
+		status string
+		detail string
+		read   string // the files read, when it matters
+	}{
+		{name: "old lockdown, empty months after it", files: map[string]string{"2026-08.jsonl": lockdown, "2026-10.jsonl": "", "2026-11.jsonl": ""},
+			status: Warn, detail: "on since 2026-08-03T09:00:00Z (by 15551234567)"},
+		{name: "unlock in a later file", files: map[string]string{"2026-08.jsonl": lockdown, "2026-10.jsonl": unlock, "2026-11.jsonl": ""},
+			status: OK, detail: "off"},
+		{name: "last line of a file wins", files: map[string]string{"2026-08.jsonl": lockdown + unlock + relock},
+			status: Warn, detail: "on since 2026-08-04T09:00:00Z (by dashboard)"},
+		{name: "stops at the newest file with a line", files: map[string]string{"2026-08.jsonl": lockdown, "2026-10.jsonl": unlock, "2026-11.jsonl": ""},
+			status: OK, detail: "off", read: "2026-11.jsonl 2026-10.jsonl"},
+		{name: "older months only in the cold tier", files: map[string]string{"2026-11.jsonl": "", ".cold.json": cold},
+			status: OK, detail: "1 older month(s)"},
+		{name: "a line on disk needs no cold months", files: map[string]string{"2026-11.jsonl": unlock, ".cold.json": cold},
+			status: OK, detail: "off"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := healthyMac().doctorEnv(testConfig(nil), nil)
+			var read []string
+			env.Glob = func(string) ([]string, error) {
+				var out []string
+				for name := range tc.files {
+					if strings.HasSuffix(name, ".jsonl") {
+						out = append(out, dir+name)
+					}
+				}
+				return out, nil
+			}
+			env.ReadFile = func(p string) ([]byte, error) {
+				name := strings.TrimPrefix(p, dir)
+				data, ok := tc.files[name]
+				if !ok {
+					return nil, fs.ErrNotExist
+				}
+				if name != ".cold.json" {
+					read = append(read, name)
+				}
+				return []byte(data), nil
+			}
+			r := checkLockdown(context.Background(), env)
+			if r.Status != tc.status || !strings.Contains(r.Detail, tc.detail) {
+				t.Errorf("%s %q", r.Status, r.Detail)
+			}
+			if tc.read != "" && strings.Join(read, " ") != tc.read {
+				t.Errorf("read %q, want %q", read, tc.read)
+			}
+		})
+	}
+
+	t.Run("approvals older than the last two files do not count", func(t *testing.T) {
+		env := healthyMac().doctorEnv(testConfig(nil), nil)
+		env.Glob = func(string) ([]string, error) {
+			return []string{dir + "2026-08.jsonl", dir + "2026-10.jsonl", dir + "2026-11.jsonl"}, nil
+		}
+		env.ReadFile = func(p string) ([]byte, error) {
+			if strings.HasSuffix(p, "2026-08.jsonl") {
+				return []byte(asked), nil
+			}
+			return nil, nil
+		}
+		if r := checkPendingApprovals(context.Background(), env); r.Status != OK || r.Detail != "none waiting" {
+			t.Errorf("%+v", r)
+		}
+	})
+
+	t.Run("an unreadable older file warns, it does not say off", func(t *testing.T) {
+		env := healthyMac().doctorEnv(testConfig(nil), nil)
+		env.Glob = func(string) ([]string, error) { return []string{dir + "2026-08.jsonl", dir + "2026-11.jsonl"}, nil }
+		env.ReadFile = func(p string) ([]byte, error) {
+			if strings.HasSuffix(p, "2026-08.jsonl") {
+				return nil, errors.New("permission denied")
+			}
+			return nil, nil
+		}
+		if r := checkLockdown(context.Background(), env); r.Status != Warn || !strings.Contains(r.Detail, "permission denied") {
+			t.Errorf("%+v", r)
+		}
+	})
 }
