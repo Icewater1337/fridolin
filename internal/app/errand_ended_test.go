@@ -3,10 +3,15 @@ package app
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/audit"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/errand"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -182,4 +187,85 @@ func passedOnLines(h *harness) int {
 		}
 	}
 	return n
+}
+
+// approvalDecidedOf is the audit log's approval_decided lines for id.
+func (h *harness) approvalDecidedOf(id string) []map[string]any {
+	h.t.Helper()
+	var out []map[string]any
+	for _, l := range h.auditOf(string(audit.ApprovalDecided)) {
+		if l["id"] == id {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// TestStoppingAnErrandThatAsksLogsTheDenial: an errand stopped while it
+// waits on the owner's approval logs the denial, so doctor no longer calls
+// it waiting, and nobody hears of it: not the brain, the owner or the person.
+func TestStoppingAnErrandThatAsksLogsTheDenial(t *testing.T) {
+	t.Parallel()
+	h, runs := errandHarness(t)
+	ctx := context.Background()
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	h.waitPoll(harnessDM, "Write to Alex")
+	e := h.onlyErrand()
+	sent := len(h.Outbox())
+
+	if err := h.b.stopErrand(ctx, "core", e.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := h.approvalDecidedOf(e.Approval)
+	if len(lines) != 1 || lines[0]["outcome"] != store.ApprovalDenied || lines[0]["by"] != "bridge" {
+		t.Errorf("approval_decided lines: %v", lines)
+	}
+	if a, err := h.b.store.ApprovalByID(ctx, e.Approval); err != nil || a.Status != store.ApprovalDenied {
+		t.Errorf("the approval: %+v %v", a, err)
+	}
+	time.Sleep(100 * time.Millisecond) // errandDecided and a brain's run would start on their own
+	if got := h.Outbox(); len(got) != sent {
+		t.Errorf("sent after the stop: %+v", got[sent:])
+	}
+	if h.Running("core") || h.b.waiters.wentLate(e.Approval) || len(runs.handed()) != 0 {
+		t.Error("the denial went on to the brain")
+	}
+	if got := h.errandOf(e.ID); got.State != store.ErrandStopped {
+		t.Errorf("the errand: %+v", got)
+	}
+
+	// Past the hour after which doctor warns about an approval still waiting.
+	env := &doctor.Env{Config: h.b.cfgs.Get(), Glob: filepath.Glob, ReadFile: os.ReadFile,
+		Now: func() time.Time { return time.Now().Add(2 * time.Hour) }}
+	i := slices.IndexFunc(doctor.OwnerChecks(), func(c doctor.Check) bool { return c.ID == "approvals" })
+	if r := doctor.OwnerChecks()[i].Run(ctx, env); r.Status != doctor.OK || r.Detail != "none waiting" {
+		t.Errorf("doctor: %+v", r)
+	}
+}
+
+// TestStoppingARunningErrandDecidesNothing: an errand that runs has its
+// approval behind it, and stopping it logs no second decision.
+func TestStoppingARunningErrandDecidesNothing(t *testing.T) {
+	t.Parallel()
+	h, _ := errandHarness(t)
+	ctx := context.Background()
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	h.vote(h.waitPoll(harnessDM, "Write to Alex").ID, "15551234567", outboundmsg.ApprovalYes)
+	h.WaitSent(errandJID, "When would dinner")
+	e := h.onlyErrand()
+	if got := h.approvalDecidedOf(e.Approval); len(got) != 1 || got[0]["outcome"] != store.ApprovalApproved {
+		t.Fatalf("the owner's yes: %v", got)
+	}
+
+	if err := h.b.stopErrand(ctx, "core", e.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.approvalDecidedOf(e.Approval); len(got) != 1 {
+		t.Errorf("approval_decided lines after the stop: %v", got)
+	}
 }

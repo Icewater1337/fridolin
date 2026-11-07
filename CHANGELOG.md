@@ -205,6 +205,12 @@ for compatibility.
 
 ### Fixed
 
+- **Stopping an errand that waits on your approval no longer leaves
+  `fridolin doctor` warning about it.** The approval was denied without an
+  `approval_decided` line in the audit log, so an hour later doctor said
+  "1 waiting for an answer" and asked you to vote in a poll that no longer
+  meant anything, for up to about two months. The denial is now logged
+  (outcome denied, by bridge) and doctor shows nothing waiting.
 - **Steady background noise on a call is no longer taken for speech.** A car,
   a café or a fan loud enough counted as talking for the whole call: each turn
   waited for the 30 s cut instead of ending 0.9 s after the caller stopped,

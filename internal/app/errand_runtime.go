@@ -1238,7 +1238,9 @@ func (b *App) stopErrandFor(ctx context.Context, brain, id, why string) error {
 		return fmt.Errorf("errand %s ended already (%s)", id, e.State)
 	}
 	if e.Approval != "" && e.State == store.ErrandAsking {
-		_, _ = b.store.DecideApproval(ctx, e.Approval, store.ApprovalDenied, "", "bridge", time.Now())
+		// callerAnswers: no call waits on an errand's approval, so the
+		// denial goes nowhere and errandDecided never hears of it.
+		b.decide(ctx, e.Approval, store.ApprovalDenied, "", "bridge", callerAnswers)
 	}
 	b.auditErrand(e, "ended", store.ErrandStopped)
 	return nil
