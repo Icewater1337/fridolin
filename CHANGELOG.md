@@ -205,6 +205,10 @@ for compatibility.
 
 ### Fixed
 
+- **Every call waiting on an approval gets the answer.** When two calls waited
+  on one approval (two `check_approval`s, or `node_exec` and `check_approval`),
+  only one got the answer and the other hung for good, even after its run was
+  stopped. Now each gets it, and a call whose run is stopped ends at once.
 - **An errand's reply that could not be sent no longer counts as said.**
   When someone hung up while Fridolin answered, or the answer could not be
   queued, the conversation kept a reply they never got, and what they said
