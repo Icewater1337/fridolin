@@ -360,3 +360,50 @@ func TestHeardLimitWhileOpen(t *testing.T) {
 		h.WaitSent(errandJID, "Noted.")
 	})
 }
+
+// TestErrandSendFailureIsNotSaid (#578): what cannot be queued for the person
+// is not kept as said, so the next turn still answers them; and a warning
+// that did not go out is none, so that turn warns instead of blocking them.
+func TestErrandSendFailureIsNotSaid(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct{ answer, sent string }{
+		"reply":   {`{"action":"reply","text":"Thursday?"}`, "Thursday?"},
+		"warning": {`{"action":"abort","reason":"a prank"}`, outboundmsg.ErrandWarnMessage("Sam")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, runs := errandHarness(t)
+			ctx := context.Background()
+			h.knowAlex()
+			if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+				t.Fatal(err)
+			}
+			e := h.onlyErrand()
+			db := testStoreSQL(t, h.b.cfgs.Get().DBPath)
+			if _, err := db.Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromThem, Text: "Tuesday is bad", At: time.Now()}, false); err != nil {
+				t.Fatal(err)
+			}
+			runs.say(c.answer)
+			h.b.errandTurn(e.ID)
+			lines, _ := h.b.store.ErrandLines(ctx, e.ID)
+			if len(lines) != 2 || lines[1].Sender != errand.FromThem || h.errandOf(e.ID).Sent != 1 {
+				t.Errorf("after the failure: lines %q, sent %d", lines, h.errandOf(e.ID).Sent)
+			}
+			if c, _ := h.b.store.ErrandContactOf(ctx, errandNumber); c.Warned(time.Now()) {
+				t.Errorf("warned by a warning that did not go out: %+v", c)
+			}
+			if _, err := db.Exec(`DROP TRIGGER refuse_outbox`); err != nil {
+				t.Fatal(err)
+			}
+			runs.say(c.answer)
+			h.b.errandTurn(e.ID)
+			h.WaitSent(errandJID, c.sent)
+			if got := h.errandOf(e.ID); got.State != store.ErrandOpen || got.Sent != 2 {
+				t.Errorf("after the next turn: %+v", got)
+			}
+		})
+	}
+}

@@ -451,18 +451,35 @@ func (b *App) endUnstarted(ctx context.Context, e store.Errand, cause error) err
 // is not open (any more): nothing was sent.
 var errandEnded = errors.New("the errand has ended")
 
-// sayInErrand sends text to errand e's person and adds it to the
-// conversation, only while e is open: the line is recorded first, in the
-// statement that checks that, so a stop that comes in between sends nothing.
-func (b *App) sayInErrand(ctx context.Context, e store.Errand, text string) error {
-	ok, err := b.store.AddErrandLineWhileOpen(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()})
+// recordAndSend adds text to errand id's conversation and sends it, only
+// while the errand is open: the line is recorded first, in the statement
+// that checks that, so a stop that comes in between sends nothing. A line
+// that could not be sent is taken back, so that what the person said last
+// still counts as unanswered.
+func (b *App) recordAndSend(ctx context.Context, id, text string, send func() error) error {
+	line, ok, err := b.store.AddErrandLineWhileOpen(ctx, id, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()})
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return errandEnded
 	}
-	if err := b.outbox.Text(ctx, chat.DMJID(e.Contact), text, b.cfgs.Get().MaxChunkSize); err != nil {
+	if err := send(); err != nil {
+		// ctx may be why the send failed.
+		if terr := b.store.TakeBackErrandLine(context.WithoutCancel(ctx), id, line); terr != nil {
+			log.Printf("errand %s: taking back what was not sent: %v", id, terr)
+		}
+		return err
+	}
+	return nil
+}
+
+// sayInErrand sends text to errand e's person and adds it to the
+// conversation, only while e is open.
+func (b *App) sayInErrand(ctx context.Context, e store.Errand, text string) error {
+	if err := b.recordAndSend(ctx, e.ID, text, func() error {
+		return b.outbox.Text(ctx, chat.DMJID(e.Contact), text, b.cfgs.Get().MaxChunkSize)
+	}); err != nil {
 		return err
 	}
 	b.auditErrand(e, "sent", fmt.Sprintf("%d characters", len([]rune(text))))
@@ -867,11 +884,14 @@ func (b *App) warnInErrand(ctx context.Context, e store.Errand, reason string, l
 	if reason == "" {
 		reason = "they tried to make me do what I must not."
 	}
-	if err := b.store.WarnErrandContact(ctx, e.Contact, time.Now()); err != nil {
-		log.Printf("errand %s: warning +%s: %v", e.ID, logx.MaskJID(e.Contact, "", ""), err)
-	}
+	// A warning that did not go out is none: the turn that follows must not
+	// take a second try from what they have not been told.
 	if err := ch.say(ch.warn); err != nil {
 		log.Printf("errand %s: sending the warning: %v", e.ID, err)
+		return
+	}
+	if err := b.store.WarnErrandContact(ctx, e.Contact, time.Now()); err != nil {
+		log.Printf("errand %s: warning +%s: %v", e.ID, logx.MaskJID(e.Contact, "", ""), err)
 	}
 	b.auditErrand(e, "warned", textx.Truncate(reason, 200))
 	b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandWarnedNotice(e.Name, e.ID, reason, lastFromThem(lines)),
