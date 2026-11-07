@@ -67,7 +67,7 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.9.3'
     implementation 'com.squareup.okhttp3:logging-interceptor:4.9.3'
     implementation 'com.github.tony19:logback-android:2.0.0'
-    implementation 'org.slf4j:slf4j-api:1.7.32'
+    implementation 'org.slf4j:slf4j-api:2.0.20'
     implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
     implementation 'org.conscrypt:conscrypt-android:2.5.2'
     implementation 'org.java-websocket:Java-WebSocket:1.5.1'
