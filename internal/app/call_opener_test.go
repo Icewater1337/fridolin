@@ -8,6 +8,7 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/Icewater1337/fridolin/internal/errand"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -77,6 +78,46 @@ func TestCallOpenerFailureEndsTheErrand(t *testing.T) {
 	}
 	if got := h.SentTo(errandJID); len(got) != 0 {
 		t.Errorf("to them: %q", got)
+	}
+	if lines, _ := h.b.store.ErrandLines(context.Background(), e.ID); len(lines) != 0 || h.errandOf(e.ID).Sent != 0 {
+		t.Errorf("the opener nobody heard: lines %q, sent %d", lines, h.errandOf(e.ID).Sent)
+	}
+}
+
+// dropsOnSecondSay is a call that is lost as Fridolin answers, after its
+// opener went out.
+type dropsOnSecondSay struct{ *fakeCall }
+
+func (d dropsOnSecondSay) Say(pcm []byte) <-chan struct{} {
+	played := d.fakeCall.Say(pcm)
+	if d.spoke() < 2 {
+		return played
+	}
+	d.end("lost")
+	return make(chan struct{})
+}
+
+// TestCallReplyNobodyHeardIsNotSaid (#578): the call is lost as Fridolin
+// answers; the reply is not kept, and what they said is answered by message.
+func TestCallReplyNobodyHeardIsNotSaid(t *testing.T) {
+	t.Parallel()
+	runs := &errandRuns{}
+	optionsOf(t).hooks.errandRun = runs.run
+	optionsOf(t).waits.errandGather = time.Millisecond
+	runs.say(`{"action":"reply","text":"Nobody hears this."}`, `{"action":"reply","text":"Thursday, then?"}`)
+	useFakeAI(t)
+	var fc *fakeCall
+	h := openerHarness(t, dinner, nil, func(number string) whatsapp.Call {
+		fc = &fakeCall{peer: types.NewJID(number, types.DefaultUserServer), pickUp: true}
+		return dropsOnSecondSay{fc}
+	})
+	h.WaitFor("the opener", func() bool { return fc.spoke() >= 1 })
+	fc.speak()
+	h.WaitSent(errandJID, "Thursday, then?")
+	e := h.onlyErrand()
+	lines, _ := h.b.store.ErrandLines(context.Background(), e.ID)
+	if len(lines) != 3 || lines[1].Sender != errand.FromThem || lines[2].Text != "Thursday, then?" || e.Sent != 2 {
+		t.Errorf("lines %q, sent %d", lines, e.Sent)
 	}
 }
 
