@@ -760,11 +760,13 @@ type errandChannel struct {
 func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, lines []store.ErrandLine, ch errandChannel) bool {
 	switch ans.Action {
 	case errand.Reply:
-		if err := ch.say(ans.Text); err != nil {
+		err := ch.say(ans.Text)
+		// The note goes on whether or not the reply did; ctx may be why it did not.
+		b.passOnNote(context.WithoutCancel(ctx), e, ans.Note)
+		if err != nil {
 			log.Printf("errand %s: sending: %v", e.ID, err)
 			return !errors.Is(err, errandEnded)
 		}
-		b.passOnNote(ctx, e, ans.Note)
 		return true
 	case errand.AskOwner:
 		if ans.Text != "" {
