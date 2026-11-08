@@ -205,6 +205,13 @@ for compatibility.
 
 ### Fixed
 
+- **A core move carries the secret files of up to 20 brains.** A move
+  refused a credentials folder with more than 8 secret files, so a core
+  with three or more brains that each have calendar and contacts files
+  could not move. It now carries up to 64 (16 KiB each, as before) and
+  4 local files; the sealed bundle may be 2 MiB instead of 256 KiB. Both
+  machines must run this version for a bundle over the old size.
+
 - **Stopping an errand that waits on your approval no longer leaves
   `fridolin doctor` warning about it.** The approval was denied without an
   `approval_decided` line in the audit log, so an hour later doctor said

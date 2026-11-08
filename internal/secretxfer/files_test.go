@@ -1,10 +1,14 @@
 package secretxfer
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -174,5 +178,78 @@ func TestLocalFilesTravelSealed(t *testing.T) {
 	}
 	if _, err := RemoveLocalFiles(dst, []string{"dashboard-users.json"}); err == nil {
 		t.Error("removed a file of the credentials folder")
+	}
+}
+
+// A credentials folder with several brains, each with all three files,
+// moves whole (#610), and only more than maxFiles is refused.
+func TestManyBrainsSecretFilesMove(t *testing.T) {
+	write := func(dir string, n int, body []byte) {
+		t.Helper()
+		names := []string{"google_oauth_web_credentials.json", "dashboard-users.json"}
+		for i := 0; len(names) < n; i++ {
+			for _, k := range []string{"google_calendar_credentials", "google_calendar_token", "google_contacts_token"} {
+				names = append(names, fmt.Sprintf("%s_brain%02d.json", k, i))
+			}
+		}
+		for _, name := range names[:n] {
+			if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	id, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := map[string]string{"fridolin.export.key": "k1"}
+
+	// 4 brains: 14 files, through the round trip.
+	src := t.TempDir()
+	write(src, 14, []byte(`{"t":"x"}`))
+	files, err := ReadFiles(src)
+	if err != nil || len(files) != 14 {
+		t.Fatalf("read %d files: %v", len(files), err)
+	}
+	ct, err := SealBundleFiles("mini", secrets, files, "~/credentials", id.Recipient().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, got, _, _, err := OpenBundleFiles(ct, id)
+	if err != nil || len(got) != 14 {
+		t.Fatalf("opened %d files: %v", len(got), err)
+	}
+	if stored, _, err := StoreFiles(t.TempDir(), got); err != nil || len(stored) != 14 {
+		t.Fatalf("stored %d: %v", len(stored), err)
+	}
+
+	// 65 are refused, naming the limit.
+	over := t.TempDir()
+	write(over, 65, []byte(`{"t":"x"}`))
+	if _, err := ReadFiles(over); err == nil || !strings.Contains(err.Error(), "more than 64 and 4") {
+		t.Fatalf("65 files: %v", err)
+	}
+
+	// 64 at the size limit fit every bound here: the plaintext the
+	// receiver reads and the protocol line (the node channel's bound:
+	// nodeagent's TestFullSecretFilesBundleFitsTheNodeChannel).
+	full := t.TempDir()
+	body := make([]byte, maxFileBytes)
+	for i := range body {
+		body[i] = byte('a' + i%26)
+	}
+	write(full, 64, body)
+	if files, err = ReadFiles(full); err != nil || len(files) != 64 {
+		t.Fatalf("read %d files: %v", len(files), err)
+	}
+	if ct, err = SealBundleFiles("mini", secrets, files, "~/credentials", id.Recipient().String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, got, _, _, err = OpenBundleFiles(ct, id); err != nil || len(got) != 64 {
+		t.Fatalf("opened %d files: %v", len(got), err)
+	}
+	line, err := json.Marshal(message{V: Version, Type: msgBundle, Data: base64.StdEncoding.EncodeToString(ct)})
+	if err != nil || len(line)+1 > maxLine {
+		t.Fatalf("the bundle line is %d bytes, a receiver reads %d: %v", len(line), maxLine, err)
 	}
 }

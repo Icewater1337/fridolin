@@ -53,7 +53,12 @@ const DefaultTimeout = 10 * time.Minute
 
 // Limits of what either side reads.
 const (
-	maxMessage    = 256 << 10
+	// maxMessage bounds a decrypted bundle: maxFiles files of maxFileBytes,
+	// base64 in JSON, are about 1.4 MiB (#610).
+	maxMessage = 2 << 20
+	// maxLine bounds a protocol line: the bundle message carries the
+	// ciphertext of up to maxMessage again in base64.
+	maxLine       = 3 << 20
 	maxSecrets    = 32
 	maxValueBytes = 2560 // the Windows Credential Manager's limit
 )
@@ -175,7 +180,7 @@ type conn struct {
 
 func newConn(c net.Conn) *conn {
 	sc := bufio.NewScanner(c)
-	sc.Buffer(make([]byte, 0, 4096), maxMessage)
+	sc.Buffer(make([]byte, 0, 4096), maxLine)
 	return &conn{c: c, sc: sc}
 }
 
