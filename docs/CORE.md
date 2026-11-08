@@ -809,6 +809,9 @@ blocks the move is listed under "It cannot run".
    `google_calendar_credentials_<brain>.json`,
    `google_calendar_token_<brain>.json` and
    `google_contacts_token_<brain>.json`, nothing else of the folder.
+   A move carries at most 64 such files (enough for 20 brains with all
+   three of theirs), each at most 16 KiB, and at most 4 local files;
+   more refuses the move, naming both limits.
    SRC reads them through its core's container (`fridolin core run core
    files export`), seals them and the folder's name under `~` beside the
    secrets to DST's one-time key, and DST writes them through its own

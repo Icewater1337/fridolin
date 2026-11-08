@@ -32,8 +32,10 @@ const LocalDir = "core/local-secrets"
 // the GitHub identity's commit name and email.
 var localName = regexp.MustCompile(`^local:(gitlab|github)\.json$`)
 
+// maxFiles covers the 2 global files and all 3 per brain for 20 brains
+// (#610); the export does not know the brains, so it is a constant.
 const (
-	maxFiles      = 8
+	maxFiles      = 64
 	maxLocalFiles = 4
 	maxFileBytes  = 16 << 10
 )

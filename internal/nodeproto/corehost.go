@@ -74,8 +74,9 @@ const (
 	maxCoreHostPins = 16
 	// CoreSecretsOfferTTL is how long an offer's key lives on the target.
 	CoreSecretsOfferTTL = 10 * time.Minute
-	// MaxCoreSecretsBundle bounds a bundle's ciphertext.
-	MaxCoreSecretsBundle = 256 << 10
+	// MaxCoreSecretsBundle bounds a bundle's ciphertext, in step with
+	// secretxfer's plaintext bound: 64 secret files of 16 KiB fit (#610).
+	MaxCoreSecretsBundle = 2 << 20
 )
 
 var (
