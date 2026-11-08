@@ -75,7 +75,7 @@ for you:
    tools itself). It finds them through `JAVA_HOME` and
    `ANDROID_HOME` in the service's environment, else where Homebrew and
    Android Studio put them; of several JDKs it takes the newest that the
-   app's Gradle runs on (up to 23). The first build downloads Gradle and
+   app's Gradle runs on (up to 27). The first build downloads Gradle and
    Plaud's SDK and takes a few minutes.
 
    Where this computer has neither, as the fridolin-core container

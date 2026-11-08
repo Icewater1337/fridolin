@@ -35,6 +35,7 @@ func TestPickJDK(t *testing.T) {
 	j17 := fakeJDK(t, root, "17", "17.0.9")
 	j21 := fakeJDK(t, root, "21", "21.0.5")
 	j25 := fakeJDK(t, root, "25", "25.0.2")
+	j28 := fakeJDK(t, root, "28", "28")
 	unknown := fakeJDK(t, root, "unknown", "")
 	for _, c := range []struct {
 		name  string
@@ -42,8 +43,8 @@ func TestPickJDK(t *testing.T) {
 		want  string
 		major int
 	}{
-		{"the newest Gradle runs on", []string{j25, j17, j21}, j21, 21},
-		{"only a newer one", []string{j25, j8}, j25, 25},
+		{"the newest Gradle runs on", []string{j28, j17, j25, j21}, j25, 25},
+		{"only a newer one", []string{j28, j8}, j28, 28},
 		{"none new enough", []string{j8}, "", 0},
 		{"a known one before an unknown", []string{unknown, j17}, j17, 17},
 		{"an unknown one rather than none", []string{j8, unknown}, unknown, 0},

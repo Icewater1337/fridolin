@@ -14,11 +14,11 @@ import (
 
 // The JDKs the Plaud Sync app (plaud-android/) builds with: the Android
 // Gradle plugin needs 17 or newer, and the Gradle of the app's wrapper
-// (8.10, gradle-wrapper.properties) runs on at most 23. A newer JDK is
+// (9.8, gradle-wrapper.properties) runs on at most 27. A newer JDK is
 // taken only when no JDK in that range is there.
 const (
 	MinAndroidJDK = 17
-	maxGradleJDK  = 23
+	maxGradleJDK  = 27
 )
 
 // AndroidToolchain is a JDK and an Android SDK to build an app with.
