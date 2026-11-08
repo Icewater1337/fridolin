@@ -108,7 +108,7 @@ func FindAndroidToolchain(l AndroidLookup) (AndroidToolchain, error) {
 	case tc.JavaHome == "":
 		return tc, errors.New("no JDK 17 or newer found to build the app with: install one (brew install openjdk@21), or set JAVA_HOME in the service's environment")
 	case tc.SDK == "":
-		return tc, errors.New(`no Android SDK found to build the app with: brew install --cask android-commandlinetools, then sdkmanager "platforms;android-35" "build-tools;35.0.0"; or set ANDROID_HOME in the service's environment`)
+		return tc, errors.New(`no Android SDK found to build the app with: brew install --cask android-commandlinetools, then sdkmanager "platforms;android-37.0" "build-tools;36.0.0"; or set ANDROID_HOME in the service's environment`)
 	}
 	if ents, err := os.ReadDir(filepath.Join(tc.SDK, "platforms")); err == nil {
 		for _, e := range ents {
@@ -119,7 +119,7 @@ func FindAndroidToolchain(l AndroidLookup) (AndroidToolchain, error) {
 		slices.Sort(tc.Platforms)
 	}
 	if len(tc.Platforms) == 0 {
-		return tc, errors.New(`the Android SDK at ` + tc.SDK + ` has no platform: sdkmanager "platforms;android-35" "build-tools;35.0.0"`)
+		return tc, errors.New(`the Android SDK at ` + tc.SDK + ` has no platform: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"`)
 	}
 	return tc, nil
 }
