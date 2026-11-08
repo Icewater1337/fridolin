@@ -218,6 +218,11 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			}
 			// Docker Sandboxes, where sbx is installed (and not turned off).
 			a.SandboxSbx = findSbx()
+			// The machine's Tailscale, which the agent switches on when it
+			// finds it off while the core is out of reach.
+			if p := findTailscale(); p != "" {
+				a.Tailscale = nodeagent.TailscaleCLI(p)
+			}
 		}
 		if a.Config.Box != nil {
 			if err := boxCoreRunner(a, exe, dir); err != nil {

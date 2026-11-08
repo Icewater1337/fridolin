@@ -528,6 +528,13 @@ func FrideHostNoLoginNotice(node, why string) string {
 	return fmt.Sprintf("⚠️ FrIDE instances on %s cannot log in to Claude, so the core starts none there and hands them no work: %s.\nOnce the token is stored, the core logs in the instance running there within a few minutes.", node, strings.TrimSuffix(why, "."))
 }
 
+// NodeTailscaleOnNotice tells the owner that node is connected again
+// after it switched its machine's Tailscale back on, which was off for
+// down while the core was out of its reach.
+func NodeTailscaleOnNotice(node string, down time.Duration) string {
+	return fmt.Sprintf("🔌 *%s* is connected again. Tailscale on that machine was off, so the node could not reach me for %s; it switched Tailscale back on by itself.", node, hoursMinutes(down))
+}
+
 // FridePlacedNotice says a waiting thread went to node.
 func FridePlacedNotice(thread int64, node string) string {
 	return fmt.Sprintf("🛠️ *FrIDE #%d* went to %s now.", thread, node)

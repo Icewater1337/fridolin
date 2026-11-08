@@ -109,6 +109,12 @@ type Agent struct {
 	// FrideInstancePoll is how often the agent reads the instances' state
 	// to keep their FrIDEs running (DefaultFrideInstancePoll when zero).
 	FrideInstancePoll time.Duration
+	// Tailscale is the machine's, which the agent switches on when it is
+	// off and the core out of reach for TailscaleGrace
+	// (DefaultTailscaleGrace when zero); nil leaves it alone, as in a box
+	// (tailscale.go). `node run` sets what it finds.
+	Tailscale      Tailscale
+	TailscaleGrace time.Duration
 
 	core        coreHost
 	moves       coreMoves
@@ -123,6 +129,7 @@ type Agent struct {
 	work        workstation
 	sbxSettings sbxSettingsState
 	inst        frideInstances
+	ts          tailscaleHeal
 }
 
 // Load makes the agent of the node in dir.
@@ -270,7 +277,7 @@ func (a *Agent) connect(ctx context.Context, joinCode string) (*conn, nodeproto.
 	hello := nodeproto.Hello{
 		DeviceID: nodeproto.DeviceIDFor(pub), PublicKey: pub, Name: a.Config.Name,
 		OS: runtime.GOOS, Arch: runtime.GOARCH, Version: a.Version,
-		Capabilities: a.declared(), JoinCode: joinCode,
+		Capabilities: a.declared(), JoinCode: joinCode, TailscaleOn: a.ts.report,
 	}
 	if err := c.send(hctx, nodeproto.TypeHello, "", hello); err != nil {
 		return fail(err)
@@ -359,6 +366,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		if time.Since(start) > 2*maxB {
 			backoff = minB
 		}
+		a.tailscaleHeal(ctx, err)
 		// Full jitter between half the backoff and all of it, so that
 		// nodes cut off together do not come back together.
 		wait := backoff/2 + rand.N(backoff/2+1)
@@ -380,6 +388,7 @@ func (a *Agent) session(ctx context.Context) error {
 		return err
 	}
 	defer c.ws.CloseNow()
+	a.tailscaleReached(true)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	a.setState(st)
