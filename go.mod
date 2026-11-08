@@ -19,7 +19,7 @@ require (
 	golang.org/x/term v0.47.0
 	golang.org/x/text v0.43.0
 	google.golang.org/protobuf v1.36.12
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 	rsc.io/qr v0.2.0
 	tailscale.com v1.102.5
 )
@@ -54,7 +54,7 @@ require (
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
-	github.com/nishanths/exhaustive v0.17.0 // indirect
+	github.com/nishanths/exhaustive v0.17.1 // indirect
 	github.com/petermattis/goid v0.0.0-20260713124913-97594f28f5ca // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.4 // indirect
