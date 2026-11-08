@@ -430,3 +430,77 @@ func FuzzDecodeMessage(f *testing.F) {
 		}
 	})
 }
+
+// receiveWhileConfirming runs a receiver with ctx and timeout against a
+// sender that blocks in Confirm until the test ends, calls stop once the
+// sender is in Confirm, and returns how long the receiver then took, its
+// store and its error.
+func receiveWhileConfirming(t *testing.T, ctx context.Context, timeout time.Duration, stop func()) (time.Duration, *memStore, error) {
+	t.Helper()
+	store := &memStore{m: map[string]string{}}
+	ready := make(chan string, 1)
+	errc := make(chan error, 1)
+	go func() {
+		_, err := Receive(ctx, ReceiveOptions{
+			Net: sameNet(winbox, owner), Store: store, Allowed: allowed, Timeout: timeout,
+			Ready: func(addr, code string) { ready <- addr + " " + code },
+		})
+		errc <- err
+	}()
+	addr, code, _ := strings.Cut(<-ready, " ")
+	confirming := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	go func() {
+		_, _ = Send(context.Background(), SendOptions{
+			Net: sameNet(owner, winbox), To: addr, Code: code, Secrets: sent, From: "mini", Timeout: time.Minute,
+			Confirm: func(Peer, string) (bool, error) { close(confirming); <-release; return true, nil },
+		})
+	}()
+	<-confirming
+	start := time.Now()
+	stop()
+	select {
+	case err := <-errc:
+		return time.Since(start), store, err
+	case <-time.After(10 * time.Second):
+		t.Fatal("Receive did not return")
+		return 0, nil, nil
+	}
+}
+
+func TestReceiveCancelledWhileTheSenderConfirms(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	took, store, err := receiveWhileConfirming(t, ctx, 2*time.Minute, cancel)
+	if !errors.Is(err, ErrCancelled) || errors.Is(err, ErrTimeout) {
+		t.Errorf("err = %v, want ErrCancelled", err)
+	}
+	if took > 5*time.Second {
+		t.Errorf("Receive took %s after the cancel", took)
+	}
+	if len(store.m) != 0 {
+		t.Errorf("stored %v", store.m)
+	}
+}
+
+func TestReceiveTimesOutWhileTheSenderConfirms(t *testing.T) {
+	_, store, err := receiveWhileConfirming(t, context.Background(), 2*time.Second, func() {})
+	if !errors.Is(err, ErrTimeout) || !strings.Contains(err.Error(), "did not confirm the words in time") {
+		t.Errorf("err = %v, want the words' timeout", err)
+	}
+	if len(store.m) != 0 {
+		t.Errorf("stored %v", store.m)
+	}
+}
+
+func TestReceiveCancelledBeforeASender(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := Receive(ctx, ReceiveOptions{
+		Net: sameNet(winbox, owner), Store: &memStore{m: map[string]string{}}, Allowed: allowed, Timeout: time.Minute,
+		Ready: func(string, string) { cancel() },
+	})
+	if !errors.Is(err, ErrCancelled) || errors.Is(err, ErrTimeout) {
+		t.Errorf("err = %v, want ErrCancelled", err)
+	}
+}
