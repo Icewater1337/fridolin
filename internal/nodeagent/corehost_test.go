@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -389,4 +390,25 @@ func (s *memSecrets) Delete(name string) error {
 	defer s.mu.Unlock()
 	delete(s.m, name)
 	return nil
+}
+
+// A bundle of the most secret files a move carries (64 of 16 KiB, #610)
+// fits the ciphertext bound core.secrets.receive takes.
+func TestFullSecretFilesBundleFitsTheNodeChannel(t *testing.T) {
+	body := []byte(strings.Repeat("abcdefgh", 16<<10/8))
+	files := map[string][]byte{"google_oauth_web_credentials.json": body, "dashboard-users.json": body}
+	for i := 0; len(files) < 64; i++ {
+		files[fmt.Sprintf("google_calendar_token_brain%02d.json", i)] = body
+	}
+	id, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err := secretxfer.SealBundleFiles("mini", map[string]string{"fridolin.export.key": "k1"}, files, "~/credentials", id.Recipient().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ct) > nodeproto.MaxCoreSecretsBundle {
+		t.Fatalf("the bundle is %d bytes, core.secrets.receive takes %d", len(ct), nodeproto.MaxCoreSecretsBundle)
+	}
 }

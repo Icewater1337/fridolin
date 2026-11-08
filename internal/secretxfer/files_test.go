@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"filippo.io/age"
-	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
 func TestSecretFilesTravelSealed(t *testing.T) {
@@ -231,8 +230,9 @@ func TestManyBrainsSecretFilesMove(t *testing.T) {
 		t.Fatalf("65 files: %v", err)
 	}
 
-	// 64 at the size limit fit every bound: the ciphertext the node
-	// channel takes, the plaintext the receiver reads, the protocol line.
+	// 64 at the size limit fit every bound here: the plaintext the
+	// receiver reads and the protocol line (the node channel's bound:
+	// nodeagent's TestFullSecretFilesBundleFitsTheNodeChannel).
 	full := t.TempDir()
 	body := make([]byte, maxFileBytes)
 	for i := range body {
@@ -244,9 +244,6 @@ func TestManyBrainsSecretFilesMove(t *testing.T) {
 	}
 	if ct, err = SealBundleFiles("mini", secrets, files, "~/credentials", id.Recipient().String()); err != nil {
 		t.Fatal(err)
-	}
-	if len(ct) > nodeproto.MaxCoreSecretsBundle {
-		t.Fatalf("the bundle is %d bytes, the node channel takes %d", len(ct), nodeproto.MaxCoreSecretsBundle)
 	}
 	if _, got, _, _, err = OpenBundleFiles(ct, id); err != nil || len(got) != 64 {
 		t.Fatalf("opened %d files: %v", len(got), err)
