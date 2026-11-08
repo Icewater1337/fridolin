@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -90,6 +91,19 @@ func migrateV12(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// migrateV13 adds errand_notes: what each errand passed on to the owner,
+// so that a note goes out once (#611).
+func migrateV13(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE errand_notes (
+		errand  TEXT NOT NULL,                  -- errands.id
+		key     TEXT NOT NULL,                  -- the note trimmed and lower-cased, which makes it the same note
+		text    TEXT NOT NULL,
+		at      DATETIME NOT NULL,
+		PRIMARY KEY (errand, key)
+	)`)
+	return err
 }
 
 // How an errand reaches its person.
@@ -436,6 +450,37 @@ func (s *Store) TakeBackErrandLine(ctx context.Context, id string, line int64) e
 		return errors.Join(err, tx.Rollback())
 	}
 	return tx.Commit()
+}
+
+// AddErrandNote records note as passed on to the owner in errand id. It
+// reports false, and records nothing, when the errand already passed on
+// the same note: equal after trimming, whatever the case.
+func (s *Store) AddErrandNote(ctx context.Context, id, note string, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO errand_notes (errand, key, text, at) VALUES (?, ?, ?, ?)`,
+		id, strings.ToLower(strings.TrimSpace(note)), note, at.UTC())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// ErrandNotes are the notes errand id passed on to the owner, oldest first.
+func (s *Store) ErrandNotes(ctx context.Context, id string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT text FROM errand_notes WHERE errand = ? ORDER BY at, rowid`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // ErrandLines is errand id's conversation, oldest first.

@@ -532,8 +532,8 @@ only), a **Stop** for one that has not ended (as `errand_stop`), and the
 **People** Fridolin knows: how it deals with each, with **Edit** (as
 `errand_contact`), and **Unblock** for someone blocked (as `!unblock`).
 
-The conversations are in bridge.db (`errands`, `errand_lines`,
-`errand_contacts`), never in a brain's folder or history. So are the
+The conversations are in bridge.db (`errands`, `errand_lines`, `errand_notes`
+with the notes each passed on to the owner, `errand_contacts`), never in a brain's folder or history. So are the
 WhatsApp ids of the notices that carry their words, with the version a
 run is shown (`sent_notes`, for 60 days), by which the bridge knows a
 reply that quotes one. The audit log

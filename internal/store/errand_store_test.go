@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -246,5 +247,30 @@ func TestTakeBackErrandLine(t *testing.T) {
 	got, _ := s.GetErrand(ctx, "e1")
 	if len(lines) != 1 || lines[0].Text != "Hi!" || got.Sent != 0 {
 		t.Errorf("lines %+v, sent %d", lines, got.Sent)
+	}
+}
+
+// TestAddErrandNoteOnce (#611): the same note, trimmed and in any case,
+// is recorded once per errand; another errand or another note is new.
+func TestAddErrandNoteOnce(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now()
+	for i, c := range []struct {
+		errand, note string
+		want         bool
+	}{
+		{"e1", "Alex says: late.", true},
+		{"e1", "  alex SAYS: late. \n", false},
+		{"e2", "Alex says: late.", true},
+		{"e1", "Alex says: bring wine.", true},
+	} {
+		if got, err := s.AddErrandNote(ctx, c.errand, c.note, now.Add(time.Duration(i)*time.Second)); err != nil || got != c.want {
+			t.Errorf("%d %q: %v %v, want %v", i, c.note, got, err, c.want)
+		}
+	}
+	if got, err := s.ErrandNotes(ctx, "e1"); err != nil || !slices.Equal(got, []string{"Alex says: late.", "Alex says: bring wine."}) {
+		t.Errorf("notes %q %v", got, err)
 	}
 }
