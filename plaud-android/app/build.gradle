@@ -24,7 +24,7 @@ if (!sdkAar.exists()) {
 }
 
 android {
-    namespace 'local.plaudsync'
+    namespace = 'local.plaudsync'
     compileSdk 37
 
     defaultConfig {
@@ -43,7 +43,7 @@ android {
     // update (docs/PLAUD.md, "Updates"); a build by hand keeps the versionCode above.
     if (secrets.getProperty('version_code', '').trim()) defaultConfig.versionCode = secrets.getProperty('version_code').trim().toInteger()
 
-    buildFeatures { buildConfig true }
+    buildFeatures { buildConfig = true }
 
     // Kotlin's jvmTarget follows targetCompatibility.
     compileOptions {
