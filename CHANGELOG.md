@@ -203,6 +203,18 @@ for compatibility.
   holding up the ones after it. Build the app again on the dashboard so the
   phones update. [docs/PLAUD.md](docs/PLAUD.md#voice-mode)
 
+- **Building the Plaud Sync phone app needs Android SDK Platform 37 and
+  Build-Tools 36.** The app now builds with Gradle 9.8 and the Android
+  Gradle plugin 9.5, and its libraries (OkHttp 5, Retrofit 3, Timber 5,
+  SLF4J 2 with logback-android 3, a newer androidx.core) want to be
+  compiled against API 37. Where the SDK's licences are accepted, the
+  first build fetches both itself; otherwise run `sdkmanager
+  "platforms;android-37.0" "build-tools;36.0.0"` on the computer or node
+  that builds the app. Of several JDKs, the build now takes the newest up
+  to 27 (was 23), the newest Gradle 9.8 runs on. The app on the phone
+  still targets Android 15 and behaves as before.
+  [docs/PLAUD.md](docs/PLAUD.md#without-plauds-cloud-the-phone-app)
+
 ### Fixed
 
 - **A note from a conversation reaches you once.** When a call's reply
