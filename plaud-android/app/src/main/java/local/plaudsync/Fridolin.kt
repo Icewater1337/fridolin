@@ -132,10 +132,10 @@ object Fridolin {
         return unpairedOn401(ctx) {
             download.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) {
-                    val json = runCatching { JSONObject(r.body!!.string()) }.getOrNull()
+                    val json = runCatching { JSONObject(r.body.string()) }.getOrNull()
                     throw Refused(r.code, "HTTP ${r.code}" + (json?.optString("error")?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""))
                 }
-                val input = r.body!!.byteStream()
+                val input = r.body.byteStream()
                 val header = UpdateCrypto.header(input)
                 UpdateCrypto.open(agree(header.epk), header, sha256.chunked(2).map { it.toInt(16).toByte() }.toByteArray(), input, out)
             }
@@ -208,7 +208,7 @@ object Fridolin {
         val req = Request.Builder().url(BuildConfig.SITE_URL.trimEnd('/') + path).post(body)
             .apply { if (bearer != null) header("Authorization", "Bearer $bearer") }.build()
         http.newCall(req).execute().use { r ->
-            val json = runCatching { JSONObject(r.body!!.string()) }.getOrNull()
+            val json = runCatching { JSONObject(r.body.string()) }.getOrNull()
             if (!r.isSuccessful) throw Refused(r.code, "HTTP ${r.code}" + (json?.optString("error")?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""))
             return json ?: JSONObject()
         }

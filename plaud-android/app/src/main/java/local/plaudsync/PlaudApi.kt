@@ -143,7 +143,7 @@ object PlaudApi {
         return http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw HttpError(r.code, "${req.method} ${req.url.encodedPath}: HTTP ${r.code}")
             // org.json's parse error quotes the whole body, which then would reach the log
-            runCatching { JSONObject(r.body!!.string()) }
+            runCatching { JSONObject(r.body.string()) }
                 .getOrElse { error("${req.method} ${req.url.encodedPath}: the answer is not JSON") }
         }
     }
