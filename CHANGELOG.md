@@ -205,6 +205,13 @@ for compatibility.
 
 ### Fixed
 
+- **A note from a conversation reaches you once.** When a call's reply
+  was not heard (they hung up, or its speech failed), the turn after it
+  could pass the same note on again. Fridolin now remembers the notes
+  each conversation passed on, shows them to its run, and does not send
+  the same one twice. bridge.db gets the table `errand_notes`; an older
+  bridge ignores it.
+
 - **A core move carries the secret files of up to 20 brains.** A move
   refused a credentials folder with more than 8 secret files, so a core
   with three or more brains that each have calendar and contacts files

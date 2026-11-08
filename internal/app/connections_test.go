@@ -38,6 +38,8 @@ type fakeAI struct {
 	files  [][]byte // the recordings sent
 	spoken []string // the texts sent to be read aloud
 	models int
+	// speechFails, when set, fails text-to-speech of a text containing it.
+	speechFails string
 }
 
 // useFakeAI points the connections of the bridges t makes at a fakeAI.
@@ -81,8 +83,15 @@ func (f *fakeAI) serve(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &req)
 		f.mu.Lock()
-		f.spoken = append(f.spoken, req.Text)
+		fails := f.speechFails != "" && strings.Contains(req.Text, f.speechFails)
+		if !fails {
+			f.spoken = append(f.spoken, req.Text)
+		}
 		f.mu.Unlock()
+		if fails {
+			http.Error(w, "speech failed", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "audio/mpeg")
 		_, _ = w.Write([]byte("ID3fake"))
 	default:

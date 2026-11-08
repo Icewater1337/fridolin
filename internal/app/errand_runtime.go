@@ -863,6 +863,15 @@ func (b *App) passOnNote(ctx context.Context, e store.Errand, note string) {
 	if note == "" {
 		return
 	}
+	// A note the owner already has (a turn after a reply nobody heard
+	// answers it again, #611) does not go out twice. A failed record
+	// still passes it on: better twice than lost.
+	if fresh, err := b.store.AddErrandNote(ctx, e.ID, note, time.Now()); err != nil {
+		log.Printf("errand %s: recording the note: %v", e.ID, err)
+	} else if !fresh {
+		b.auditErrand(e, "not passed on again", fmt.Sprintf("%d characters", len([]rune(note))))
+		return
+	}
 	b.auditErrand(e, "passed on", fmt.Sprintf("%d characters", len([]rune(note))))
 	b.tellErrandOwnerApart(ctx, e, outboundmsg.ErrandNoteNotice(e.Name, e.ID, note), outboundmsg.ErrandNoteHistory(e.Name, e.ID), errandNoteRef+e.ID)
 }
@@ -977,6 +986,9 @@ func (b *App) errandAsk(ctx context.Context, e store.Errand, s manifest.Errands,
 	}
 	for _, l := range lines {
 		doc.Lines = append(doc.Lines, errand.Line{From: l.Sender, Text: l.Text, At: l.At})
+	}
+	if doc.Passed, err = b.store.ErrandNotes(ctx, e.ID); err != nil {
+		log.Printf("errand %s: reading the notes passed on: %v", e.ID, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, errandRunTimeout)
 	defer cancel()
