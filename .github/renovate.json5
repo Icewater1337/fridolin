@@ -103,6 +103,16 @@
       matchPackageNames: ["tailscale.com"],
       allowedVersions: "<1.104.0",
     },
+    // goldmark v2 is a redesign of v1's API (extensions, renderers and
+    // parser priorities), which its README calls early in its release.
+    // internal/wiki/render.go hooks a [[link]] inline parser and its own
+    // renderer into v1, so moving is a planned migration (#447), not an
+    // update. v1 is still maintained; its patch releases keep coming. Drop
+    // this when that migration is planned.
+    {
+      matchPackageNames: ["github.com/yuin/goldmark"],
+      allowedVersions: "<2.0.0",
+    },
     // The core image builds the bridge with the go directive's release
     // (container/Dockerfile); it moves with go.mod, not on its own.
     {
