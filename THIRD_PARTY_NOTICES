@@ -101,7 +101,7 @@ gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8 (Apache-2.0)
 modernc.org/libc v1.79.0 (BSD-3-Clause)
 modernc.org/mathutil v1.7.1 (BSD-3-Clause)
 modernc.org/memory v1.12.1 (BSD-3-Clause)
-modernc.org/sqlite v1.61.0 (BSD-3-Clause, MIT, blessing)
+modernc.org/sqlite v1.61.1 (BSD-3-Clause, MIT, blessing)
 rsc.io/qr v0.2.0 (BSD-3-Clause)
 tailscale.com v1.102.5 (BSD-3-Clause)
 
@@ -5837,7 +5837,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ==============================================================================
-modernc.org/sqlite v1.61.0: LICENSE
+modernc.org/sqlite v1.61.1: LICENSE
 ==============================================================================
 
 Copyright (c) 2017 The Sqlite Authors. All rights reserved.
@@ -5869,7 +5869,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ==============================================================================
-modernc.org/sqlite v1.61.0: LICENSE-3RD-PARTY.md
+modernc.org/sqlite v1.61.1: LICENSE-3RD-PARTY.md
 ==============================================================================
 
 # Third-Party Licenses
@@ -7489,7 +7489,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 ==============================================================================
-modernc.org/sqlite v1.61.0: LICENSE-SQLITE
+modernc.org/sqlite v1.61.1: LICENSE-SQLITE
 ==============================================================================
 
 SQLite Is Public Domain
@@ -7520,7 +7520,7 @@ uncontaminated with licensed code from other projects.
 
 
 ==============================================================================
-modernc.org/sqlite v1.61.0: LICENSE-SQLITE_VEC
+modernc.org/sqlite v1.61.1: LICENSE-SQLITE_VEC
 ==============================================================================
 
 MIT License
