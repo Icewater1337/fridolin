@@ -21,8 +21,8 @@
 # and their SHA-256, the base images to version tags at least two weeks
 # old when they were chosen.
 
-ARG GO_IMAGE=golang:1.27.2-bookworm
-ARG NODE_IMAGE=node:26.12.0-bookworm-slim
+ARG GO_IMAGE=golang:1.27.3-bookworm
+ARG NODE_IMAGE=node:26.13.0-bookworm-slim
 
 # ── FrIDE and ponytail ────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS fride
@@ -62,7 +62,7 @@ RUN set -eu; \
 FROM ${NODE_IMAGE} AS node
 # The version the core's image has (container/Dockerfile).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.312
+ARG CLAUDE_CODE_VERSION=2.1.316
 RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
 

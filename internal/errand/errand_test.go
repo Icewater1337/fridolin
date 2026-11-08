@@ -101,6 +101,12 @@ func TestDocumentCarriesTheBriefsAndTheEarlierLines(t *testing.T) {
 	if len(d.Earlier) != MaxEarlier || d.Earlier[MaxEarlier-1].Text != earlier[len(earlier)-1].Text {
 		t.Errorf("earlier: %d lines, last %q", len(d.Earlier), d.Earlier[len(d.Earlier)-1].Text)
 	}
+	if len(d.PassedOn) != 0 || d.PassedOn == nil {
+		t.Errorf("nothing passed on: %#v", d.PassedOn)
+	}
+	if err := json.Unmarshal([]byte(Document(Errand{Passed: []string{"Alex says: late."}})), &d); err != nil || len(d.PassedOn) != 1 || d.PassedOn[0] != "Alex says: late." {
+		t.Errorf("passed on: %#v %v", d.PassedOn, err)
+	}
 	if err := json.Unmarshal([]byte(Document(Errand{Persona: "Dry and brief."})), &d); err != nil || d.Style != "Dry and brief." || d.Earlier == nil {
 		t.Errorf("a persona: %+v %v", d, err)
 	}

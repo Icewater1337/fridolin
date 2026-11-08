@@ -2,14 +2,18 @@ package nodeagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -357,6 +361,75 @@ func TestTerminalIdleTimeout(t *testing.T) {
 	})
 }
 
+// fakePTY is a shell whose exit and whose output are the test's to time.
+type fakePTY struct {
+	output chan string
+	exit   chan int
+	closed chan struct{}
+	close  sync.Once
+}
+
+func newFakePTY() *fakePTY {
+	return &fakePTY{output: make(chan string), exit: make(chan int), closed: make(chan struct{})}
+}
+
+func (p *fakePTY) Read(b []byte) (int, error) {
+	select {
+	case s, ok := <-p.output:
+		if !ok {
+			return 0, errEndOfOutput
+		}
+		return copy(b, s), nil
+	case <-p.closed:
+		return 0, os.ErrClosed
+	}
+}
+func (p *fakePTY) Write(b []byte) (int, error) { return len(b), nil }
+func (p *fakePTY) Resize(cols, rows int) error { return nil }
+func (p *fakePTY) Kill()                       {}
+func (p *fakePTY) Wait() int                   { return <-p.exit }
+func (p *fakePTY) Close()                      { p.close.Do(func() { close(p.closed) }) }
+
+func TestTerminalIsClosedOnlyAfterItsOutputWasRead(t *testing.T) {
+	p := newFakePTY()
+	tm := &terminal{id: "x", proc: p, wake: make(chan struct{}), drained: make(chan struct{}), tmp: t.TempDir()}
+	go tm.readLoop()
+	go tm.waitLoop()
+	p.exit <- 7
+	waitFor(t, "the exit to be seen", func() bool { return !tm.shellRunning() })
+	p.output <- "the last words"
+	if tm.isClosed() {
+		t.Fatal("closed with output still to come")
+	}
+	select {
+	case <-p.closed:
+		t.Fatal("the PTY was closed with output still to come")
+	default:
+	}
+	close(p.output)
+	waitFor(t, "the terminal to close", tm.isClosed)
+	<-p.closed
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if out := tm.outputLocked(0); string(out.Data) != "the last words" || !out.Closed || out.ExitCode == nil || *out.ExitCode != 7 {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestTerminalClosesAfterTheGraceWhenTheOutputDoesNotEnd(t *testing.T) {
+	p := newFakePTY()
+	tm := &terminal{id: "x", proc: p, wake: make(chan struct{}), drained: make(chan struct{}), tmp: t.TempDir()}
+	go tm.readLoop()
+	go tm.waitLoop()
+	p.exit <- 3
+	start := time.Now()
+	waitFor(t, "the terminal to close", tm.isClosed)
+	if took := time.Since(start); took < terminalDrainGrace/2 {
+		t.Fatalf("closed after %v with a grace of %v", took, terminalDrainGrace)
+	}
+	<-tm.drained // closing ended the read
+}
+
 func TestTerminalOutputBufferDrops(t *testing.T) {
 	tm := &terminal{id: "x", wake: make(chan struct{})}
 	tm.buf = []byte(strings.Repeat("a", 10))
@@ -475,5 +548,63 @@ func TestResumeIDs(t *testing.T) {
 		if resumeID.MatchString(id) != ok {
 			t.Errorf("%q: got %v, want %v", id, !ok, ok)
 		}
+	}
+}
+
+// parse must read to the end whatever a line's length, or the CLI blocks on
+// its stdout until the session's maximum runtime (an io.Pipe's write blocks
+// the same way, until it is read).
+func TestParseSkipsAnOversizeStreamLine(t *testing.T) {
+	longLine := func(n int) string { // a JSON object of n bytes, newline included
+		const head, tail = `{"type":"assistant","x":"`, "\"}\n"
+		return head + strings.Repeat("a", n-len(head)-len(tail)) + tail
+	}
+	const result = `{"type":"result","result":"all done"}` + "\n"
+	const text = `{"type":"assistant","message":{"content":[{"type":"text","text":"kept"}]}}` + "\n"
+
+	for _, tc := range []struct {
+		name, stream, wantText, wantErr string
+		wantFinished                    bool
+	}{
+		{name: "a result after it still counts", stream: longLine(maxStreamLine+1) + result, wantText: "all done", wantFinished: true},
+		{name: "many times the limit", stream: longLine(3*maxStreamLine) + text + result, wantText: "all done", wantFinished: true},
+		{name: "no result names it", stream: text + longLine(maxStreamLine+1), wantText: "kept", wantErr: "over 8 MiB"},
+		{name: "a line at the limit is read", stream: longLine(maxStreamLine) + strings.TrimSuffix(result, "\n"), wantText: "all done", wantFinished: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &agentSession{a: &Agent{Logf: t.Logf}, id: "s1", provider: nodeproto.ProviderClaude}
+			pr, pw := io.Pipe()
+			wrote := make(chan error, 1)
+			go func() {
+				_, err := io.WriteString(pw, tc.stream)
+				wrote <- err
+				_ = pw.Close()
+			}()
+			res := s.parse(pr)
+			if err := <-wrote; err != nil {
+				t.Fatal(err)
+			}
+			if res.text != tc.wantText || res.finished != tc.wantFinished {
+				t.Errorf("got text %q, finished %v", res.text, res.finished)
+			}
+			if tc.wantErr == "" && res.errMsg != "" || !strings.Contains(res.errMsg, tc.wantErr) {
+				t.Errorf("got error %q, want %q", res.errMsg, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseReadError(t *testing.T) {
+	boom := errors.New("boom")
+	s := &agentSession{a: &Agent{Logf: t.Logf}, id: "s1", provider: nodeproto.ProviderClaude}
+
+	res := s.parse(iotest.ErrReader(boom))
+	if !strings.Contains(res.errMsg, "boom") {
+		t.Errorf("a read error should be the turn's error, got %q", res.errMsg)
+	}
+
+	res = s.parse(io.MultiReader(strings.NewReader(`{"type":"result","result":"all done"}`+"\n"), iotest.ErrReader(boom)))
+	if res.errMsg != "" || res.text != "all done" {
+		t.Errorf("a result that arrived should stand, got %+v", res)
 	}
 }

@@ -225,3 +225,189 @@ func TestErrandMessageWhileItEnds(t *testing.T) {
 		t.Errorf("the conversation's run was handed %+v", seen[len(seen)-1].Lines)
 	}
 }
+
+// lateTail opens dinner's errand with Alex, adds lines to it as they
+// were written before its deadline, and returns the harness with the
+// errand and the time past its deadline.
+func lateTail(t *testing.T, forward bool, lines ...store.ErrandLine) (*harness, *errandRuns, store.Errand, time.Time) {
+	t.Helper()
+	h, runs := errandHarness(t)
+	ctx := context.Background()
+	h.knowAlex()
+	if forward {
+		_, _ = h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", "", time.Now())
+	}
+	r := dinner
+	r.Days = 1
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), r); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	for _, l := range lines {
+		l.At = time.Now()
+		if err := h.b.store.AddErrandLine(ctx, e.ID, l, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return h, runs, e, time.Now().Add(25 * time.Hour)
+}
+
+// TestSweepPassesOnWhatTheyWroteLast: the sweep (or the restart's) that
+// ends an errand whose time ran out passes on what the person wrote that
+// nobody answered, once: to the owner, or to a conversation of its own.
+// The turn that was already scheduled finds the errand ended and does
+// nothing more. Nothing is passed on when the last line was Fridolin's.
+func TestSweepPassesOnWhatTheyWroteLast(t *testing.T) {
+	t.Parallel()
+	ours := store.ErrandLine{Sender: errand.FromYou, Text: "When would dinner suit you?"}
+	theirs := func(text string) store.ErrandLine { return store.ErrandLine{Sender: errand.FromThem, Text: text} }
+	for _, resume := range []bool{false, true} {
+		name := "sweep"
+		if resume {
+			name = "restart"
+		}
+		t.Run(name+"/owner", func(t *testing.T) {
+			t.Parallel()
+			h, runs, e, late := lateTail(t, true, ours, theirs("Tuesday works"), theirs("Sorry, Thursday!"))
+			h.b.sweepErrands(context.Background(), late, resume)
+			h.WaitSent(harnessDM, "Tuesday works\nSorry, Thursday!")
+			h.b.errandTurn(e.ID)
+			if n := strings.Count(strings.Join(h.SentTo(harnessDM), "\n"), "Sorry, Thursday!"); n != 1 || len(runs.handed()) != 0 {
+				t.Errorf("their lines reached the owner %d times, %d runs", n, len(runs.handed()))
+			}
+		})
+		t.Run(name+"/conversation", func(t *testing.T) {
+			t.Parallel()
+			h, runs, e, late := lateTail(t, false, ours, theirs("Tuesday works"), theirs("Sorry, Thursday!"))
+			runs.say(`{"action":"reply","text":"Thursday it is!"}`)
+			h.b.sweepErrands(context.Background(), late, resume)
+			h.WaitSent(errandJID, "Thursday it is!")
+			h.b.errandTurn(e.ID)
+			handed := runs.handed()
+			if len(handed) != 1 || len(handed[0].Lines) != 1 || handed[0].Lines[0].Text != "Tuesday works\nSorry, Thursday!" {
+				t.Errorf("the conversation's runs: %+v", handed)
+			}
+		})
+		t.Run(name+"/answered", func(t *testing.T) {
+			t.Parallel()
+			h, runs, e, late := lateTail(t, true, theirs("Tuesday works"), ours)
+			h.b.sweepErrands(context.Background(), late, resume)
+			h.b.errandTurn(e.ID)
+			if got := h.errandOf(e.ID); got.State != store.ErrandExpired {
+				t.Errorf("the errand: %+v", got)
+			}
+			for _, text := range h.SentTo(harnessDM) {
+				if strings.Contains(text, "Tuesday works") {
+					t.Errorf("an answered line was passed on: %q", text)
+				}
+			}
+			if len(runs.handed()) != 0 {
+				t.Error("a run after the errand ended")
+			}
+		})
+	}
+}
+
+// TestHeardLimitWhileOpen: past a day's messages, what someone writes in a
+// conversation they began goes to the owner, unrecorded and unanswered, and
+// the conversation stays open. An errand the owner started has no such limit.
+func TestHeardLimitWhileOpen(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	addLines := func(t *testing.T, h *harness, id string, n int) {
+		t.Helper()
+		for range n {
+			if err := h.b.store.AddErrandLine(ctx, id, store.ErrandLine{Sender: errand.FromThem, Text: "more", At: time.Now()}, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Run("they began it", func(t *testing.T) {
+		t.Parallel()
+		h, runs := errandHarness(t)
+		h.knowAlex()
+		runs.say(`{"action":"reply","text":"Right."}`)
+		now := time.Now()
+		if err := h.b.store.AddErrand(ctx, store.Errand{ID: "echat", Brain: "core", Contact: errandNumber, Name: "Alex", State: store.ErrandOpen, Chat: harnessDM,
+			Days: 1, CreatedAt: now, Deadline: now.Add(time.Hour), Mode: store.ErrandByMessage, OpenedBy: store.OpenedByThem}); err != nil {
+			t.Fatal(err)
+		}
+		addLines(t, h, "echat", errandHeardPerDay-1)
+		h.theyWrite("The last one heard")
+		h.WaitSent(errandJID, "Right.")
+		h.theyWrite("One too many")
+		h.WaitSent(harnessDM, outboundmsg.ErrandForwardNotice("Alex", errandNumber, "One too many"))
+		lines, err := h.b.store.ErrandLines(ctx, "echat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.ContainsFunc(lines, func(l store.ErrandLine) bool { return l.Text == "One too many" }) {
+			t.Error("a message past the limit was recorded")
+		}
+		if got := h.errandOf("echat"); got.State != store.ErrandOpen {
+			t.Errorf("the conversation past the limit: %+v", got)
+		}
+		if len(runs.handed()) != 1 {
+			t.Errorf("%d runs, want 1", len(runs.handed()))
+		}
+	})
+	t.Run("the owner started it", func(t *testing.T) {
+		t.Parallel()
+		h, runs := errandHarness(t)
+		h.knowAlex()
+		if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+			t.Fatal(err)
+		}
+		addLines(t, h, h.onlyErrand().ID, errandHeardPerDay)
+		runs.say(`{"action":"reply","text":"Noted."}`)
+		h.theyWrite("Still heard")
+		h.WaitSent(errandJID, "Noted.")
+	})
+}
+
+// TestErrandSendFailureIsNotSaid (#578): what cannot be queued for the person
+// is not kept as said, so the next turn still answers them; and a warning
+// that did not go out is none, so that turn warns instead of blocking them.
+func TestErrandSendFailureIsNotSaid(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct{ answer, sent string }{
+		"reply":   {`{"action":"reply","text":"Thursday?"}`, "Thursday?"},
+		"warning": {`{"action":"abort","reason":"a prank"}`, outboundmsg.ErrandWarnMessage("Sam")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, runs := errandHarness(t)
+			ctx := context.Background()
+			h.knowAlex()
+			if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+				t.Fatal(err)
+			}
+			e := h.onlyErrand()
+			db := testStoreSQL(t, h.b.cfgs.Get().DBPath)
+			if _, err := db.Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromThem, Text: "Tuesday is bad", At: time.Now()}, false); err != nil {
+				t.Fatal(err)
+			}
+			runs.say(c.answer)
+			h.b.errandTurn(e.ID)
+			lines, _ := h.b.store.ErrandLines(ctx, e.ID)
+			if len(lines) != 2 || lines[1].Sender != errand.FromThem || h.errandOf(e.ID).Sent != 1 {
+				t.Errorf("after the failure: lines %q, sent %d", lines, h.errandOf(e.ID).Sent)
+			}
+			if c, _ := h.b.store.ErrandContactOf(ctx, errandNumber); c.Warned(time.Now()) {
+				t.Errorf("warned by a warning that did not go out: %+v", c)
+			}
+			if _, err := db.Exec(`DROP TRIGGER refuse_outbox`); err != nil {
+				t.Fatal(err)
+			}
+			runs.say(c.answer)
+			h.b.errandTurn(e.ID)
+			h.WaitSent(errandJID, c.sent)
+			if got := h.errandOf(e.ID); got.State != store.ErrandOpen || got.Sent != 2 {
+				t.Errorf("after the next turn: %+v", got)
+			}
+		})
+	}
+}

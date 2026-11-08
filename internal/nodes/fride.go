@@ -192,6 +192,15 @@ func (s *Service) FrideImportOn(ctx context.Context, id, instance string, r io.R
 	fo := on(instance)
 	var tr nodeproto.FrideTransfer
 	buf := make([]byte, nodeproto.FrideChunkBytes)
+	defer func() {
+		if tr.ID == "" {
+			return
+		}
+		// A context of its own: the import's may be what ended.
+		dctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		defer cancel()
+		_ = s.Call(dctx, id, nodeproto.MethodFrideDrop, nodeproto.FrideChunkParams{FrideOn: fo, ID: tr.ID}, nil)
+	}()
 	for {
 		k, rerr := io.ReadFull(r, buf)
 		if k > 0 || tr.ID == "" {
@@ -206,11 +215,6 @@ func (s *Service) FrideImportOn(ctx context.Context, id, instance string, r io.R
 			return nodeproto.FrideTask{}, rerr
 		}
 	}
-	defer func() {
-		dctx, cancel := context.WithTimeout(context.Background(), callTimeout)
-		defer cancel()
-		_ = s.Call(dctx, id, nodeproto.MethodFrideDrop, nodeproto.FrideChunkParams{FrideOn: fo, ID: tr.ID}, nil)
-	}()
 	var out nodeproto.FrideTask
 	err := s.Call(ctx, id, nodeproto.MethodFrideImport, nodeproto.FrideImportParams{FrideOn: fo, ID: tr.ID, As: as, StartAgent: startAgent}, &out)
 	return out, err

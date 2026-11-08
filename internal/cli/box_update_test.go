@@ -20,26 +20,40 @@ import (
 )
 
 const (
-	testNodeImage  = "ghcr.io/owner/fridolin-core@sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	testFrideImage = "ghcr.io/owner/fridolin-fride@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	testNodeImage      = "ghcr.io/owner/fridolin-core@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	testFrideImage     = "ghcr.io/owner/fridolin-fride@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	testNewerNodeImage = "ghcr.io/owner/fridolin-core@sha256:3333333333333333333333333333333333333333333333333333333333333333"
 )
 
 // boxDir is a box's state dir with the core's key pinned and a request
 // for nodeImage signed with it.
 func boxDir(t *testing.T, nodeImage string) string {
 	t.Helper()
+	dir, _ := boxDirKey(t, nodeImage)
+	return dir
+}
+
+// boxDirKey is boxDir, and the core's key for signing a later request.
+func boxDirKey(t *testing.T, nodeImage string) (string, ed25519.PrivateKey) {
+	t.Helper()
 	_, key, _ := ed25519.GenerateKey(nil)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, nodeagent.CoreKeyFile), []byte(hex.EncodeToString(key.Public().(ed25519.PublicKey))+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p := nodeproto.BoxUpdateParams{Version: "v1.1.0", NodeImage: nodeImage, FrideImage: testFrideImage}
+	writeBoxRequest(t, dir, key, "v1.1.0", nodeImage)
+	return dir, key
+}
+
+// writeBoxRequest does what the agent does with a signed request.
+func writeBoxRequest(t *testing.T, dir string, key ed25519.PrivateKey, version, nodeImage string) {
+	t.Helper()
+	p := nodeproto.BoxUpdateParams{Version: version, NodeImage: nodeImage, FrideImage: testFrideImage}
 	p.Signature = nodeproto.SignBoxUpdate(key, p.Version, p.NodeImage, p.FrideImage)
 	data, _ := json.Marshal(nodeagent.BoxUpdateRequest{BoxUpdateParams: p, From: "v1.0.0", RequestedAt: time.Now()})
 	if err := os.WriteFile(filepath.Join(dir, nodeagent.BoxUpdateFile), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return dir
 }
 
 func testBoxDeps(verified *[]string, fail error) boxDeps {
@@ -131,6 +145,94 @@ func TestBoxPendingRefusesAForgedSignature(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := runBox([]string{"pending", "--state-dir", dir}, &out, &errb, testBoxDeps(&verified, nil)); code != 1 || len(verified) != 0 {
 		t.Fatalf("exit %d, verified %v", code, verified)
+	}
+}
+
+// newerWhileChecking has the agent write a newer signed request during the
+// first provenance check.
+func newerWhileChecking(t *testing.T, dir string, key ed25519.PrivateKey, d boxDeps) boxDeps {
+	t.Helper()
+	verify, written := d.verify, false
+	d.verify = func(ctx context.Context, image, repo string) error {
+		if !written {
+			written = true
+			writeBoxRequest(t, dir, key, "v1.2.0", testNewerNodeImage)
+		}
+		return verify(ctx, image, repo)
+	}
+	return d
+}
+
+func readBoxReport(t *testing.T, dir string) nodeproto.UpdateReport {
+	t.Helper()
+	var rep nodeproto.UpdateReport
+	data, err := os.ReadFile(filepath.Join(dir, nodeagent.BoxUpdateResultFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &rep); err != nil {
+		t.Fatal(err)
+	}
+	return rep
+}
+
+// A request written while another is checked and applied waits for the next
+// round: what is checked is what is applied and reported (#559).
+func TestBoxPendingAppliesAndReportsTheRequestItChecked(t *testing.T) {
+	dir, key := boxDirKey(t, testNodeImage)
+	var verified []string
+	var out, errb bytes.Buffer
+	d := testBoxDeps(&verified, nil)
+	if code := runBox([]string{"pending", "--state-dir", dir}, &out, &errb, newerWhileChecking(t, dir, key, d)); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if want := "VERSION=v1.1.0\nNODE_IMAGE=" + testNodeImage + "\nFRIDE_IMAGE=" + testFrideImage + "\n"; out.String() != want {
+		t.Fatalf("printed %q", out.String())
+	}
+	if code := runBox([]string{"result", "--state-dir", dir, "ok"}, &out, &errb, d); code != 0 {
+		t.Fatalf("result: %d %s", code, errb.String())
+	}
+	if rep := readBoxReport(t, dir); !rep.OK || rep.To != "v1.1.0" {
+		t.Fatalf("the agent reports %+v", rep)
+	}
+	out.Reset()
+	if code := runBox([]string{"pending", "--state-dir", dir}, &out, &errb, d); code != 0 || !strings.Contains(out.String(), "VERSION=v1.2.0\n") {
+		t.Fatalf("the next round: exit %d, %q, %s", code, out.String(), errb.String())
+	}
+}
+
+func TestBoxPendingRefusalKeepsANewerRequest(t *testing.T) {
+	dir, key := boxDirKey(t, testNodeImage)
+	var verified []string
+	var out, errb bytes.Buffer
+	d := testBoxDeps(&verified, errors.New("no attestations"))
+	if code := runBox([]string{"pending", "--state-dir", dir}, &out, &errb, newerWhileChecking(t, dir, key, d)); code != 1 || out.Len() != 0 {
+		t.Fatalf("exit %d, printed %q", code, out.String())
+	}
+	if rep := readBoxReport(t, dir); rep.OK || rep.To != "v1.1.0" {
+		t.Fatalf("the agent reports %+v", rep)
+	}
+	if r, err := nodeagent.ReadBoxUpdate(dir); err != nil || r == nil || r.Version != "v1.2.0" {
+		t.Fatalf("the newer request: %+v, %v", r, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, nodeagent.BoxUpdateTakenFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the refused request stays taken: %v", err)
+	}
+}
+
+// A request that does not read fails its round and does not come back.
+func TestBoxPendingUnreadableRequest(t *testing.T) {
+	dir := boxDir(t, testNodeImage)
+	if err := os.WriteFile(filepath.Join(dir, nodeagent.BoxUpdateFile), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var verified []string
+	var out, errb bytes.Buffer
+	if code := runBox([]string{"pending", "--state-dir", dir}, &out, &errb, testBoxDeps(&verified, nil)); code != 1 || out.Len() != 0 {
+		t.Fatalf("exit %d, printed %q", code, out.String())
+	}
+	if code := runBox([]string{"pending", "--state-dir", dir}, &out, &errb, testBoxDeps(&verified, nil)); code != 3 {
+		t.Fatalf("the next round: exit %d", code)
 	}
 }
 

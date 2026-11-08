@@ -329,9 +329,14 @@ const (
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Cause is what errors.Is sees on this side; it does not go on the wire.
+	Cause error `json:"-"`
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
+
+// Unwrap returns the Cause.
+func (e *Error) Unwrap() error { return e.Cause }
 
 // Errorf builds an *Error.
 func Errorf(code, format string, args ...any) *Error {

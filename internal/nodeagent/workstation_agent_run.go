@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os/exec"
 	"path/filepath"
@@ -161,23 +162,65 @@ type streamLine struct {
 	Error json.RawMessage `json:"error"`
 }
 
+// maxStreamLine is the longest stream line parse keeps, newline included.
+const maxStreamLine = 8 << 20
+
 // parse reads a turn's stream: Claude Code's stream-json or Codex's JSONL.
+// It reads to the end, because a CLI whose stdout nobody reads blocks until
+// the session's maximum runtime. A line over maxStreamLine (a tool's large
+// output) is skipped, and fails the turn only if no result arrives.
 func (s *agentSession) parse(r interface{ Read([]byte) (int, error) }) turnResult {
 	var res turnResult
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64<<10), 8<<20)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 || line[0] != '{' {
-			continue
+	br := bufio.NewReaderSize(r, 64<<10)
+	var line []byte
+	skipped := false
+	for {
+		var tooLong bool
+		var err error
+		line, tooLong, err = readStreamLine(br, line[:0])
+		if tooLong {
+			skipped = true
+			s.a.logf("node: agent session %s: skipped a stream line over %d MiB", s.id, maxStreamLine>>20)
+		} else if len(line) > 0 && line[0] == '{' {
+			var ev streamLine
+			if json.Unmarshal(line, &ev) == nil {
+				s.event(ev, &res)
+			}
 		}
-		var ev streamLine
-		if json.Unmarshal(line, &ev) != nil {
-			continue
+		if err != nil {
+			if err != io.EOF {
+				// A result that already arrived stands.
+				if !res.finished {
+					res.errMsg = fmt.Sprintf("reading the %s stream: %v", s.provider, err)
+				}
+				_, _ = io.Copy(io.Discard, r)
+			}
+			break
 		}
-		s.event(ev, &res)
+	}
+	if skipped && !res.finished && res.errMsg == "" {
+		res.errMsg = fmt.Sprintf("a stream line over %d MiB was skipped and no result arrived", maxStreamLine>>20)
 	}
 	return res
+}
+
+// readStreamLine appends the next line to buf, newline included. A line over
+// maxStreamLine is not kept: what was read of it goes as it comes, and it
+// returns tooLong with a nil line.
+func readStreamLine(br *bufio.Reader, buf []byte) (line []byte, tooLong bool, err error) {
+	for {
+		frag, err := br.ReadSlice('\n')
+		if !tooLong {
+			if len(buf)+len(frag) > maxStreamLine {
+				tooLong, buf = true, nil
+			} else {
+				buf = append(buf, frag...)
+			}
+		}
+		if err != bufio.ErrBufferFull {
+			return buf, tooLong, err
+		}
+	}
 }
 
 func (s *agentSession) event(ev streamLine, res *turnResult) {

@@ -125,7 +125,7 @@ Use a volume of its own for that, never `fridolin-data`.
 
 `container/compose.yaml` defines the service `core` (container
 `fridolin-core`, restart `unless-stopped`, memory limit
-`FRIDOLIN_MEMORY_LIMIT`, default `8g`) and the volume. The compose file is
+`FRIDOLIN_MEMORY_LIMIT`, default `8g`, process limit 4096) and the volume. The compose file is
 compiled into the binary, and the host commands write it to
 `<user config dir>/fridolin/compose.yaml` (on macOS
 `~/Library/Application Support/fridolin/compose.yaml`) before each run, so
@@ -809,6 +809,9 @@ blocks the move is listed under "It cannot run".
    `google_calendar_credentials_<brain>.json`,
    `google_calendar_token_<brain>.json` and
    `google_contacts_token_<brain>.json`, nothing else of the folder.
+   A move carries at most 64 such files (enough for 20 brains with all
+   three of theirs), each at most 16 KiB, and at most 4 local files;
+   more refuses the move, naming both limits.
    SRC reads them through its core's container (`fridolin core run core
    files export`), seals them and the folder's name under `~` beside the
    secrets to DST's one-time key, and DST writes them through its own
@@ -960,8 +963,12 @@ machine and nothing it held before ([Forgetting a former core
 host](#forgetting-a-former-core-host)): the host secrets it received
 over the node channel, the secret files they wrote, and the core's data
 dir when a move's import put it into an empty one. No vote within 24
-hours forgets them. After a move that failed once the secrets had gone
-to DST, the same poll asks about DST. Revoking a core host (`!revoke`,
+hours forgets them. After a move that clearly failed once the secrets
+had gone to DST (SRC refused to release the core or was never asked, or
+SRC says the move failed or rolled back), the same poll asks about DST.
+When it is unclear where the core runs (the move ended unknown, or SRC
+never answered the release), nothing is asked and DST keeps them.
+Revoking a core host (`!revoke`,
 the Nodes page, `fridolin nodes revoke`) has it forget them first when
 it is connected, and `!revoke` says what it forgot.
 

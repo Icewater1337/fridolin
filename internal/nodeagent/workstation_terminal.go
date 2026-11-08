@@ -32,6 +32,8 @@ type terminal struct {
 	exit    *int
 	lastUse time.Time
 	wake    chan struct{}
+	exited  bool          // the shell ended; its output may still be arriving
+	drained chan struct{} // closed once readLoop read the output to its end
 }
 
 // defaultShell is the shell a terminal runs: the user's on macOS and
@@ -118,7 +120,7 @@ func (a *Agent) terminalOpen(eff nodeproto.Capabilities, p nodeproto.TerminalOpe
 	}
 	now := time.Now()
 	t := &terminal{id: newSessionID(), folder: folder, requested: filepath.Clean(p.Folder), shell: filepath.Base(shell[0]), sandbox: sb,
-		started: now, proc: proc, tmp: tmp, lastUse: now, wake: make(chan struct{})}
+		started: now, proc: proc, tmp: tmp, lastUse: now, wake: make(chan struct{}), drained: make(chan struct{})}
 	a.work.mu.Lock()
 	a.work.terms[t.id] = t
 	a.pruneWorkLocked(now)
@@ -147,7 +149,10 @@ func filteredEnv() []string {
 	})
 }
 
+// readLoop reads the output to its end, then closes the PTY.
 func (t *terminal) readLoop() {
+	defer close(t.drained)
+	defer t.proc.Close()
 	b := make([]byte, 32<<10)
 	for {
 		n, err := t.proc.Read(b)
@@ -167,8 +172,19 @@ func (t *terminal) readLoop() {
 	}
 }
 
+// waitLoop records the shell's end once its output has been read, or the
+// grace ran out because something else still holds the PTY open.
 func (t *terminal) waitLoop() {
 	code := t.proc.Wait()
+	t.mu.Lock()
+	t.exited = true
+	t.mu.Unlock()
+	select {
+	case <-t.drained:
+	case <-time.After(terminalDrainGrace):
+		// Not waited for: on Windows Close can block on the read in progress.
+		go t.proc.Close()
+	}
 	t.mu.Lock()
 	t.closed, t.exit = true, &code
 	t.wakeLocked()
@@ -205,9 +221,17 @@ func (t *terminal) isClosed() bool {
 	return t.closed
 }
 
+// shellRunning says whether the shell's process, and on Windows its console,
+// can still be acted on: they are gone from its exit on, before closed is set.
+func (t *terminal) shellRunning() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.exited
+}
+
 // end kills the shell; waitLoop records it.
 func (t *terminal) end() {
-	if !t.isClosed() {
+	if t.shellRunning() {
 		t.proc.Kill()
 	}
 }
@@ -307,7 +331,7 @@ func (a *Agent) terminalResize(p nodeproto.TerminalResizeParams) (any, *nodeprot
 	if err := nodeproto.CheckSize(p.Cols, p.Rows); err != nil || p.Cols == 0 || p.Rows == 0 {
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "terminal size %d×%d", p.Cols, p.Rows)
 	}
-	if !t.isClosed() {
+	if t.shellRunning() {
 		if err := t.proc.Resize(p.Cols, p.Rows); err != nil {
 			return nil, nodeproto.Errorf(nodeproto.CodeFailed, "resizing: %v", err)
 		}

@@ -240,6 +240,7 @@ func bytesText(n int64) string {
 const (
 	MovePreparing  = "preparing"
 	MoveHandingOff = "handing_off"
+	MoveReleasing  = "releasing" // core.release was sent; the answer is not saved yet
 	MoveHandedOff  = "handed_off"
 	MoveDone       = "done"
 	MoveRolledBack = "rolled_back"
@@ -272,6 +273,9 @@ type MoveRecord struct {
 	TargetState *nodeproto.CoreMoveState `json:"target_state,omitempty"`
 	// Told is set once the source heard that the target runs the core.
 	Told bool `json:"told,omitempty"`
+	// ReleaseUnanswered is set when core.release went out and no answer
+	// came: the source may have stopped the core with it (#494, #555).
+	ReleaseUnanswered bool `json:"release_unanswered,omitempty"`
 }
 
 // MoveOptions are a move's timings: HandoffDeadline after the plan is
@@ -527,12 +531,33 @@ func (s *Service) runMove(ctx context.Context, r *MoveRecord, o MoveOptions) {
 	}
 	// From here the source stops this core (when it runs there): this
 	// record goes into the final export as it is now.
+	s.moveStep(r, MoveReleasing, "releasing", "asking %s to release the core", r.SourceName)
 	if err := s.Call(ctx, src, nodeproto.MethodCoreRelease, signed, &accepted); err != nil {
-		s.moveStep(r, MoveFailed, "release", "%s refused to release the core: %v; %s gives up at the deadline, nothing changed", r.SourceName, err, r.TargetName)
+		s.releaseFailed(ctx, r, err)
 		return
 	}
 	s.moveStep(r, MoveHandedOff, "release", "%s stops the core and exports; %s takes over", r.SourceName, r.TargetName)
 	s.watchMove(ctx, r)
+}
+
+// releaseFailed ends or follows r after core.release answered err.
+func (s *Service) releaseFailed(ctx context.Context, r *MoveRecord, err error) {
+	if errors.Is(err, errNotSent) {
+		s.moveStep(r, MoveFailed, "release", "could not ask %s to release the core: %v; %s gives up at the deadline, nothing changed", r.SourceName, err, r.TargetName)
+		return
+	}
+	// The source may have stopped before it answered, with the core
+	// already moving: only its own word settles that (#494).
+	var ne *nodeproto.Error
+	if errors.As(err, &ne) && (ne.Code == nodeproto.CodeUnavailable || ne.Code == nodeproto.CodeTimeout) {
+		s.moveMu.Lock()
+		r.ReleaseUnanswered = true
+		s.moveMu.Unlock()
+		s.moveStep(r, MoveHandedOff, "release", "no answer from %s (%v); asking the hosts how the move goes", r.SourceName, err)
+		s.watchMove(ctx, r)
+		return
+	}
+	s.moveStep(r, MoveFailed, "release", "%s refused to release the core: %v; %s gives up at the deadline, nothing changed", r.SourceName, err, r.TargetName)
 }
 
 // resumeMoves follows the moves that were handed off before this core
@@ -554,7 +579,7 @@ func (s *Service) resumeMoves() {
 			s.moves[id] = r
 			s.saveMoveLocked(r)
 			go s.moveStep(r, MoveFailed, "restart", "the core stopped while the move was %s; nothing was handed off", r.State)
-		case MoveHandedOff:
+		case MoveReleasing, MoveHandedOff:
 			s.moves[id] = r
 			s.moveActive = id
 			s.wg.Go(func() {

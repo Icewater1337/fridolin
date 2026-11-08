@@ -134,7 +134,9 @@ a Claude Code *channel*.
   (`fridolin mcp --run … --live`), the one that also serves the brain's
   tools; it passes each message on as a `notifications/claude/channel`, and
   the session's Stop hook (`fridolin live-turn-end`) brings the turn's last
-  text back, which is sent to the chat as a run's reply is: quiet mode, the
+  text back, with the turn of the last message the model read (from the
+  session's transcript), so that late output of the turn before never passes
+  for the answer. It is sent to the chat as a run's reply is: quiet mode, the
   one-time-code guard, history and policy are the same. Each turn is admitted
   by the policy as a run is (lockdown, risk, rate limit, audit `run_start` and
   `run_end`), and the session's token speaks for the turn's message and chat.
@@ -572,8 +574,8 @@ only), a **Stop** for one that has not ended (as `errand_stop`), and the
 **People** Fridolin knows: how it deals with each, with **Edit** (as
 `errand_contact`), and **Unblock** for someone blocked (as `!unblock`).
 
-The conversations are in bridge.db (`errands`, `errand_lines`,
-`errand_contacts`), never in a brain's folder or history. So are the
+The conversations are in bridge.db (`errands`, `errand_lines`, `errand_notes`
+with the notes each passed on to the owner, `errand_contacts`), never in a brain's folder or history. So are the
 WhatsApp ids of the notices that carry their words, with the version a
 run is shown (`sent_notes`, for 60 days), by which the bridge knows a
 reply that quotes one. The audit log

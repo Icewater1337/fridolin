@@ -11,8 +11,11 @@ type ptyProc interface {
 	Resize(cols, rows int) error
 	// Kill ends it and what it started.
 	Kill()
-	// Wait waits for it to end and returns its exit code.
+	// Wait waits for it to end and returns its exit code. Output may still
+	// be waiting to be read.
 	Wait() int
+	// Close releases its output, what was not read of it too. Reads end.
+	Close()
 }
 
 var errEndOfOutput = errors.New("the terminal ended")

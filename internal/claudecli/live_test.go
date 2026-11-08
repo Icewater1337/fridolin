@@ -17,7 +17,7 @@ func TestLiveHubTurn(t *testing.T) {
 	if _, err := h.Begin(); !errors.Is(err, ErrLiveBusy) {
 		t.Errorf("a second turn while one is armed: %v", err)
 	}
-	if err := h.Deliver(LiveEvent{Content: "hello", Meta: map[string]string{"kind": "message"}}); err != nil {
+	if err := h.Deliver(LiveEvent{Content: "hello", Meta: map[string]string{"kind": "message", "turn": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -34,6 +34,10 @@ func TestLiveHubTurn(t *testing.T) {
 	default:
 		t.Error("not connected after the MCP server asked")
 	}
+	if h.End("early") {
+		t.Fatal("a stop before the ack answered the turn")
+	}
+	h.Ack("1")
 	if !h.End("done") {
 		t.Fatal("End found no turn waiting")
 	}
@@ -122,5 +126,52 @@ func TestLiveArgs(t *testing.T) {
 	}
 	if got := strings.Join(LiveArgs(Options{InheritUser: true}, "/b/.mcp.json", "{}"), " "); strings.Contains(got, "--setting-sources") || strings.Contains(got, "--mcp-config") {
 		t.Errorf("inheriting the user's config: %s", got)
+	}
+}
+
+// The MCP server's long poll is always open, so it takes the event right
+// after Deliver: only the ack shows the model read it (#558).
+func TestLiveHubLateStopDoesNotEndNextTurn(t *testing.T) {
+	h := NewLiveHub()
+	answer, err := h.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken := make(chan bool)
+	go func() {
+		_, ok := h.Next(context.Background(), 5*time.Second)
+		taken <- ok
+	}()
+	if err := h.Deliver(LiveEvent{Content: "three", Meta: map[string]string{"turn": "3"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !<-taken {
+		t.Fatal("the pump got no event")
+	}
+	if h.End("late text") {
+		t.Fatal("a stop the model did not ack answered the turn")
+	}
+	for _, stale := range []string{"", "2"} {
+		h.Ack(stale)
+		if h.End("late text") {
+			t.Fatalf("a stop after an ack of turn %q answered turn 3", stale)
+		}
+	}
+	h.Ack("3")
+	if !h.End("answer") {
+		t.Fatal("the stop after the ack found no turn")
+	}
+	if got := <-answer; got != "answer" {
+		t.Errorf("answer %q", got)
+	}
+	// An ack does not outlive its turn.
+	if _, err := h.Begin(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Deliver(LiveEvent{Meta: map[string]string{"turn": "3"}}); err != nil {
+		t.Fatal(err)
+	}
+	if h.End("late text") {
+		t.Error("the last turn's ack answered this one")
 	}
 }

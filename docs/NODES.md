@@ -440,7 +440,12 @@ On the core: `!revoke <id>` in the owner's chat, `fridolin nodes revoke
 <id>` or **Revoke**. On the machine:
 `fridolin node stop`, `fridolin node uninstall` (Windows: elevated, with
 `--state-dir`), then delete the state dir; uninstall Tailscale if the
-owner wants. Joining again later makes a new device with a new code.
+owner wants. Joining again later makes a new device with a new code; on
+a machine with a key already, the old key and what was sealed with it or
+tied to it (`core-secrets/`, `node-secrets/`, `core-role.json`,
+`core-secrets-received.json`, `core.pub`, `core-moves/`) move into a
+`rejoined-<time>-*` folder in the state dir, which the owner may delete
+once nothing in it is needed.
 
 ### Never
 
@@ -998,8 +1003,10 @@ digest, without ever reaching the box's Docker:
    `ai.fridolin.box-updater`, the systemd user timer
    `fridolin-box-updater` or cron; on Windows `update.ps1`, run by the
    Scheduled Task *fridolin box updater* while the owner is signed in)
-   asks a throwaway container **of the image the box runs now** to check
-   the request (`fridolin box pending`): the signature again, that both
+   asks a throwaway container **of the image the box runs now** to take
+   the request and check it (`fridolin box pending`), so that a newer one
+   the core asks for meanwhile waits for the next round: the signature
+   again, that both
    images are `ghcr.io/OWNER/fridolin-core@sha256:…` and
    `…/fridolin-fride@sha256:…` of the registry that image was built for,
    and their build provenance (GitHub's attestations for this
@@ -1049,7 +1056,10 @@ container, no Docker socket: the box's role is a file in the node's
 volume (`core-role.json`, `standby` or `core`), which the agent reads
 when it starts, so a box that is the core starts it again after a
 restart or a box update, and `docker compose stop` stops it cleanly
-(which releases the lease) without standing the box down.
+(which releases the lease) without standing the box down. A core that
+does not start (a secret that cannot be read, a failed spawn) is tried
+again while the role is `core`, with a wait that grows to 5 minutes; the
+agent's log has each failure.
 
 **The core's settings** are a second compose file beside the box's,
 `core.yaml` ([container/box-core.yaml](../container/box-core.yaml),
@@ -1065,7 +1075,7 @@ the `node` service:
 | `fridolin-box-data` at `/data`, `fridolin-box-home` at `/var/lib/fridolin` | the core's data dir and its home (the credentials folder a move brings, never in an export); named apart from a core container's `fridolin-data`, so a machine that runs both never shares one |
 | `127.0.0.1:8765` and `127.0.0.1:8780` on the host (`FRIDOLIN_BOX_DASHBOARD_PORT`, `FRIDOLIN_BOX_SITE_PORT` in `.env`) | the dashboard and the site, as a core container publishes them. The core listens on the container's loopback (`fridolin run --container --box`), and the agent forwards the published ports to it, refusing FrIDE's address on the box network |
 | the core container's seccomp profile and `systempaths=unconfined` | bubblewrap gives each brain's run its own user, mount and PID namespaces ([CORE.md](CORE.md#the-brains-sandbox-in-the-container)) |
-| `FRIDOLIN_BOX_CORE=1`, `mem_limit` `FRIDOLIN_BOX_CORE_MEMORY` (8g), `stop_grace_period` 45s | the agent may run the core; room for it; a clean stop |
+| `FRIDOLIN_BOX_CORE=1`, `mem_limit` `FRIDOLIN_BOX_CORE_MEMORY` (8g), `pids_limit` 4096, `stop_grace_period` 45s | the agent may run the core; room for it; a clean stop |
 
 On **Linux with AppArmor** (Ubuntu), which confines the user namespaces
 bubblewrap makes, load the core's profile once (`sudo fridolin core

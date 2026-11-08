@@ -10,6 +10,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // fileName are the secret files a move carries from the core's
@@ -32,8 +34,10 @@ const LocalDir = "core/local-secrets"
 // the GitHub identity's commit name and email.
 var localName = regexp.MustCompile(`^local:(gitlab|github)\.json$`)
 
+// maxFiles covers the 2 global files and all 3 per brain for 20 brains
+// (#610); the export does not know the brains, so it is a constant.
 const (
-	maxFiles      = 8
+	maxFiles      = 64
 	maxLocalFiles = 4
 	maxFileBytes  = 16 << 10
 )
@@ -118,9 +122,15 @@ func ReadFiles(dir string) (map[string][]byte, error) {
 	return out, checkFiles(out)
 }
 
-// StoreFiles writes files into dir (made 0700), each 0600, and never
-// replaces one already there: those are kept, so the folder of a machine
-// that ran the core before keeps what it has. Stored were written.
+// createFile is fsx.CreateFileAtomic; tests swap it to simulate a crash.
+var createFile = fsx.CreateFileAtomic
+
+// StoreFiles writes files into dir (made 0700), each 0600 and whole or not
+// at all (a temp file, fsynced, linked into place only if the path is still
+// absent), and never replaces or follows one already there: those are kept,
+// so the folder of a machine that ran the core before keeps what it has, and
+// a crash never leaves a truncated file to be kept forever (#612). Stored
+// were written.
 func StoreFiles(dir string, files map[string][]byte) (stored, kept []string, err error) {
 	if err := checkFiles(files); err != nil {
 		return nil, nil, err
@@ -143,21 +153,13 @@ func StoreFiles(dir string, files map[string][]byte) (stored, kept []string, err
 	sort.Strings(names)
 	for _, n := range names {
 		p := filepath.Join(dir, n)
-		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		err := createFile(p, files[n], 0o600)
 		if errors.Is(err, fs.ErrExist) {
 			kept = append(kept, n)
 			continue
 		}
 		if err != nil {
 			return stored, kept, err
-		}
-		_, werr := f.Write(files[n])
-		if cerr := f.Close(); werr == nil {
-			werr = cerr
-		}
-		if werr != nil {
-			_ = os.Remove(p)
-			return stored, kept, werr
 		}
 		stored = append(stored, n)
 	}

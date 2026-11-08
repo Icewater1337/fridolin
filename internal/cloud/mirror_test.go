@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,5 +98,56 @@ func TestMirrorNeverEmptiesStoreFromAnEmptyDir(t *testing.T) {
 	}
 	if objs, err := store.List(ctx, ""); err != nil || len(objs) != 2 {
 		t.Fatalf("store has %d objects (%v), want 2", len(objs), err)
+	}
+}
+
+// blockingStore's Put waits on release (or ctx), after telling entered.
+type blockingStore struct {
+	ObjectStore
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingStore) Put(ctx context.Context, key string, r io.Reader) error {
+	b.entered <- struct{}{}
+	select {
+	case <-b.release:
+		return b.ObjectStore.Put(ctx, key, r)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestMirrorStatusDoesNotWaitForSync(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := seal.NewKey()
+	sealed, _ := newSealedDir(t, key)
+	store := &blockingStore{ObjectStore: sealed, entered: make(chan struct{}), release: make(chan struct{})}
+	m := &Mirror{Dir: src, Store: store}
+	prev := MirrorStatus{Files: 7}
+	m.last.Store(&prev)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = m.Sync(context.Background(), time.Now())
+	}()
+	<-store.entered // Sync now holds m.mu, inside Put
+	got := make(chan MirrorStatus)
+	go func() { got <- m.Status() }()
+	select {
+	case st := <-got:
+		if st.Files != 7 {
+			t.Fatalf("want the previous status, got %+v", st)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Status waited for the running Sync")
+	}
+	close(store.release)
+	<-done
+	if st := m.Status(); st.Uploaded != 1 {
+		t.Fatalf("status after the sync: %+v", st)
 	}
 }

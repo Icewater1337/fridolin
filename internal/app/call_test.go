@@ -286,3 +286,125 @@ func TestCallsOffRefuseCalls(t *testing.T) {
 		t.Error("the owner's call was taken with calls off")
 	}
 }
+
+// callMidWay starts a call errand to Alex, lets it pick up and open, and
+// returns the harness, the errand and the call, with the runs for later.
+func callMidWay(t *testing.T) (*harness, *errandRuns, store.Errand, *fakeCall) {
+	t.Helper()
+	runs := &errandRuns{}
+	optionsOf(t).hooks.errandRun = runs.run
+	optionsOf(t).waits.errandGather = 10 * time.Millisecond
+	optionsOf(t).waits.callRing = 200 * time.Millisecond
+	var mu sync.Mutex
+	var placed *fakeCall
+	optionsOf(t).hooks.placeCall = func(_ context.Context, number string) (whatsapp.Call, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		placed = &fakeCall{peer: types.NewJID(number, types.DefaultUserServer), pickUp: true}
+		return placed, nil
+	}
+	h := newServedHarness(t, callsConfig)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}, Errands: &manifest.Errands{OwnerName: "Sam"}})
+	h.setConnectionKeys()
+	ctx := context.Background()
+	_ = h.b.store.SaveErrandContact(ctx, store.ErrandContact{Contact: errandNumber, Name: "Alex", Brain: "core", State: store.ContactKnown, UpdatedAt: time.Now()})
+	call := dinner
+	call.Call = true
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), call); err != nil {
+		t.Fatal(err)
+	}
+	h.WaitFor("the call", func() bool { mu.Lock(); defer mu.Unlock(); return placed != nil })
+	c := placed
+	h.WaitFor("the opener", func() bool { return c.spoke() >= 1 })
+	return h, runs, h.onlyErrand(), c
+}
+
+// TestCallEndsWithTheirLineUnanswered: a WhatsApp line from the person
+// while the call listens, and a call that ends, get a turn by message.
+func TestCallEndsWithTheirLineUnanswered(t *testing.T) {
+	t.Parallel()
+	useFakeAI(t)
+	h, runs, e, c := callMidWay(t)
+	runs.say(`{"action":"reply","text":"Sure, I will write instead."}`)
+	h.theyWrite("can't talk now, text me")
+	c.end("hung up")
+	h.WaitFor("the answer by message", func() bool { return len(h.SentTo(errandJID)) == 1 })
+	if got := h.SentTo(errandJID); got[0] != "Sure, I will write instead." {
+		t.Errorf("sent: %q", got)
+	}
+	if e = h.errandOf(e.ID); e.State != store.ErrandOpen {
+		t.Errorf("the errand: %+v", e)
+	}
+}
+
+// TestCallLimitAfterTheirLine: the call ends on the message limit right
+// after they spoke; a turn by message follows instead of nothing.
+func TestCallLimitAfterTheirLine(t *testing.T) {
+	t.Parallel()
+	useFakeAI(t)
+	h, _, e, c := callMidWay(t)
+	ctx := context.Background()
+	for i := 0; i < errand.MaxMessages; i++ {
+		_ = h.b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: "x", At: time.Now()}, true)
+	}
+	c.speak()
+	h.WaitFor("the turn after the call", func() bool { return h.errandOf(e.ID).State != store.ErrandOpen })
+}
+
+// TestCallEndsOnOwnerQuestionAsksOnce: the run asked the owner and
+// nothing new came: no turn, so the owner is not asked again.
+func TestCallEndsOnOwnerQuestionAsksOnce(t *testing.T) {
+	t.Parallel()
+	useFakeAI(t)
+	h, runs, e, c := callMidWay(t)
+	runs.say(`{"action":"ask_owner","question":"Which day?"}`)
+	c.speak()
+	h.WaitFor("the call over", c.isOver)
+	time.Sleep(200 * time.Millisecond)
+	if n := len(runs.handed()); n != 1 {
+		t.Errorf("runs after the question: %d", n)
+	}
+	if e = h.errandOf(e.ID); e.State != store.ErrandOpen {
+		t.Errorf("the errand: %+v", e)
+	}
+}
+
+// TestCallSilenceAfterAStopSaysNothing (#581): the errand is stopped while
+// the person stays silent; at the silence's end the call ends without
+// saying Fridolin will get back to them, and the owner gets no notice.
+func TestCallSilenceAfterAStopSaysNothing(t *testing.T) {
+	t.Parallel()
+	useFakeAI(t)
+	optionsOf(t).waits.errandCallIdle = 2 * time.Second // long enough to stop within it
+	h, _, e, c := callMidWay(t)
+	if err := h.b.stopErrand(context.Background(), "core", e.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.WaitFor("the call over", c.isOver)
+	if n := c.spoke(); n != 1 {
+		t.Errorf("spoke %d times, want the opener alone", n)
+	}
+	if got := h.SentTo(harnessDM); len(got) != 0 {
+		t.Errorf("to the owner: %q", got)
+	}
+}
+
+// TestCallSilenceOnAnOpenErrandSaysLater: a silence on an errand still open
+// ends the call with the promise to go on by message, and the owner is told.
+func TestCallSilenceOnAnOpenErrandSaysLater(t *testing.T) {
+	t.Parallel()
+	ai := useFakeAI(t)
+	optionsOf(t).waits.errandCallIdle = 100 * time.Millisecond
+	h, _, e, c := callMidWay(t)
+	h.WaitFor("the call over", c.isOver)
+	ai.mu.Lock()
+	spoken := append([]string(nil), ai.spoken...)
+	ai.mu.Unlock()
+	if len(spoken) != 2 || spoken[1] != errandCallLater {
+		t.Errorf("spoke %q, want the opener and %q", spoken, errandCallLater)
+	}
+	h.WaitSent(harnessDM, outboundmsg.ErrandCallEndedNotice("Alex", e.ID))
+	if e = h.errandOf(e.ID); e.State != store.ErrandOpen {
+		t.Errorf("the errand: %+v", e)
+	}
+}

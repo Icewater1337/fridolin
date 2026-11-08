@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -92,10 +93,23 @@ func migrateV12(tx *sql.Tx) error {
 	return nil
 }
 
-// migrateV13 lets errands use the owner's calendar (docs/BRAINS.md,
+// migrateV13 adds errand_notes: what each errand passed on to the owner,
+// so that a note goes out once (#611).
+func migrateV13(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE errand_notes (
+		errand  TEXT NOT NULL,                  -- errands.id
+		key     TEXT NOT NULL,                  -- the note trimmed and lower-cased, which makes it the same note
+		text    TEXT NOT NULL,
+		at      DATETIME NOT NULL,
+		PRIMARY KEY (errand, key)
+	)`)
+	return err
+}
+
+// migrateV14 lets errands use the owner's calendar (docs/BRAINS.md,
 // "Calendar in errands"): how far an errand and a person may, and an
 // errand's one booking.
-func migrateV13(tx *sql.Tx) error {
+func migrateV14(tx *sql.Tx) error {
 	stmts := []string{
 		`ALTER TABLE errands ADD COLUMN calendar TEXT NOT NULL DEFAULT ''`,         // the most this errand may do with the calendar, '' as brain.json allows
 		`ALTER TABLE errands ADD COLUMN booked TEXT NOT NULL DEFAULT ''`,           // '', asking:<approval>, booking, or event:<id>
@@ -387,10 +401,11 @@ func (s *Store) LiveErrandWith(ctx context.Context, contact string) (Errand, err
 	return scanErrand(s.db.QueryRowContext(ctx, `SELECT `+errandColumns+` FROM errands WHERE contact = ? AND state IN (?, ?) ORDER BY created_at DESC LIMIT 1`, contact, ErrandAsking, ErrandOpen))
 }
 
-// ErrandCallsSince counts the errands by call made since t.
-func (s *Store) ErrandCallsSince(ctx context.Context, t time.Time) (int, error) {
+// ErrandCallsSince counts the errands by call made since t, except the one
+// with id except: those still asking or declined made no call.
+func (s *Store) ErrandCallsSince(ctx context.Context, t time.Time, except string) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE mode = ? AND created_at >= ? AND state != ?`, ErrandByCall, t.UTC(), ErrandDeclined).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM errands WHERE mode = ? AND created_at >= ? AND state NOT IN (?, ?) AND id != ?`, ErrandByCall, t.UTC(), ErrandDeclined, ErrandAsking, except).Scan(&n)
 	return n, err
 }
 
@@ -445,6 +460,83 @@ func (s *Store) AddErrandLine(ctx context.Context, id string, l ErrandLine, mine
 		}
 	}
 	return tx.Commit()
+}
+
+// AddErrandLineWhileOpen adds one of Fridolin's messages to errand id's
+// conversation in the one statement that checks the errand is still open,
+// and counts it. It reports false, and adds nothing, once the errand ended;
+// line is what TakeBackErrandLine takes.
+func (s *Store) AddErrandLineWhileOpen(ctx context.Context, id string, l ErrandLine) (line int64, ok bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE errands SET sent = sent + 1 WHERE id = ? AND state = ?`, id, ErrandOpen)
+	if err != nil {
+		return 0, false, errors.Join(err, tx.Rollback())
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return 0, false, tx.Rollback()
+	}
+	res, err = tx.ExecContext(ctx, `INSERT INTO errand_lines (errand, sender, text, at) VALUES (?, ?, ?, ?)`, id, l.Sender, l.Text, l.At.UTC())
+	if err != nil {
+		return 0, false, errors.Join(err, tx.Rollback())
+	}
+	if line, err = res.LastInsertId(); err != nil {
+		return 0, false, errors.Join(err, tx.Rollback())
+	}
+	return line, true, tx.Commit()
+}
+
+// TakeBackErrandLine undoes AddErrandLineWhileOpen for a message that could
+// not be sent: the line goes, and no longer counts.
+func (s *Store) TakeBackErrandLine(ctx context.Context, id string, line int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM errand_lines WHERE id = ? AND errand = ?`, line, id)
+	if err != nil {
+		return errors.Join(err, tx.Rollback())
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return tx.Rollback()
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE errands SET sent = sent - 1 WHERE id = ?`, id); err != nil {
+		return errors.Join(err, tx.Rollback())
+	}
+	return tx.Commit()
+}
+
+// AddErrandNote records note as passed on to the owner in errand id. It
+// reports false, and records nothing, when the errand already passed on
+// the same note: equal after trimming, whatever the case.
+func (s *Store) AddErrandNote(ctx context.Context, id, note string, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO errand_notes (errand, key, text, at) VALUES (?, ?, ?, ?)`,
+		id, strings.ToLower(strings.TrimSpace(note)), note, at.UTC())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// ErrandNotes are the notes errand id passed on to the owner, oldest first.
+func (s *Store) ErrandNotes(ctx context.Context, id string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT text FROM errand_notes WHERE errand = ? ORDER BY at, rowid`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // ErrandLines is errand id's conversation, oldest first.

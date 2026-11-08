@@ -22,7 +22,7 @@ import (
 const (
 	// BoxUpdateFile is the request the updater picks up.
 	BoxUpdateFile = "box-update.json"
-	// BoxUpdateTakenFile is the request while the updater applies it.
+	// BoxUpdateTakenFile is the request while the updater checks and applies it.
 	BoxUpdateTakenFile = "box-update.taken.json"
 	// BoxUpdateResultFile is how the updater's last update ended.
 	BoxUpdateResultFile = "box-update-result.json"
@@ -134,7 +134,11 @@ func BoxHealthy(dir string, maxAge time.Duration, now time.Time) error {
 // ReadBoxUpdate reads the box's pending request in dir; nil when there
 // is none.
 func ReadBoxUpdate(dir string) (*BoxUpdateRequest, error) {
-	data, err := os.ReadFile(filepath.Join(dir, BoxUpdateFile))
+	return readBoxRequest(dir, BoxUpdateFile)
+}
+
+func readBoxRequest(dir, name string) (*BoxUpdateRequest, error) {
+	data, err := os.ReadFile(filepath.Join(dir, name))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -143,7 +147,7 @@ func ReadBoxUpdate(dir string) (*BoxUpdateRequest, error) {
 	}
 	var r BoxUpdateRequest
 	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("%s: %w", BoxUpdateFile, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return &r, nil
 }
@@ -168,13 +172,23 @@ func VerifyBoxUpdate(dir string, r *BoxUpdateRequest) error {
 }
 
 // TakeBoxUpdate marks the pending request as being applied, so that the
-// next round of the updater does not apply it again.
-func TakeBoxUpdate(dir string) error {
-	return os.Rename(filepath.Join(dir, BoxUpdateFile), filepath.Join(dir, BoxUpdateTakenFile))
+// next round of the updater does not apply it again, and returns it; nil
+// when none is pending. The agent may write a newer request at any time,
+// which waits in BoxUpdateFile for the next round, so the updater checks
+// and applies what this returns and never reads BoxUpdateFile again.
+func TakeBoxUpdate(dir string) (*BoxUpdateRequest, error) {
+	err := os.Rename(filepath.Join(dir, BoxUpdateFile), filepath.Join(dir, BoxUpdateTakenFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return readBoxRequest(dir, BoxUpdateTakenFile)
 }
 
 // FinishBoxUpdate records how an update ended, for the agent to report,
-// and forgets the request.
+// and forgets the taken request. A newer request stays pending.
 func FinishBoxUpdate(dir string, r nodeproto.UpdateReport) error {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
@@ -183,10 +197,8 @@ func FinishBoxUpdate(dir string, r nodeproto.UpdateReport) error {
 	if err := writeFile(filepath.Join(dir, BoxUpdateResultFile), append(data, '\n'), 0o600); err != nil {
 		return err
 	}
-	for _, f := range []string{BoxUpdateFile, BoxUpdateTakenFile} {
-		if err := os.Remove(filepath.Join(dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
+	if err := os.Remove(filepath.Join(dir, BoxUpdateTakenFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }

@@ -172,7 +172,7 @@ func (h *liveHost) run(r *commandRunner, ctx context.Context, spec brain.RunSpec
 		return claudecli.Result{}, false
 	}
 	if !h.eligible(spec) {
-		h.endIfAnswersInChat(spec)
+		h.endIfAnswersInChat(spec.ID, spec.Message.JID)
 		return claudecli.Result{}, false
 	}
 	s := h.ready(r, spec)
@@ -186,11 +186,14 @@ func (h *liveHost) run(r *commandRunner, ctx context.Context, spec brain.RunSpec
 // to answer in the chat it serves: its later turns only get the new message,
 // so they would never see this exchange. The next message starts a session
 // that is given the chat's history.
-func (h *liveHost) endIfAnswersInChat(spec brain.RunSpec) {
+func (h *liveHost) endIfAnswersInChat(brainID, jid string) {
+	if h == nil {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if s := h.sess[spec.ID]; s != nil && !s.stopped && !s.busy && s.chat == spec.Message.JID {
-		log.Printf("brain %s: ending the live session, as a one-off run answers in its chat", spec.ID)
+	if s := h.sess[brainID]; s != nil && !s.stopped && !s.busy && s.chat == jid {
+		log.Printf("brain %s: ending the live session, as a one-off run answers in its chat", brainID)
 		h.stopLocked(s)
 	}
 }
@@ -395,7 +398,7 @@ func (h *liveHost) check(s *liveSession) error {
 		return err
 	}
 	defer s.hub.Abort()
-	if err := s.hub.Deliver(claudecli.LiveEvent{Content: liveProbe, Meta: map[string]string{"kind": "check"}}); err != nil {
+	if err := s.hub.Deliver(claudecli.LiveEvent{Content: liveProbe, Meta: map[string]string{"kind": "check", "turn": "0"}}); err != nil {
 		return err
 	}
 	select {
@@ -441,6 +444,14 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 	// one before its message went in.
 	if s.gh != "" {
 		defer h.loginGitHub(ctx, s, spec)()
+	}
+	// Stopped while the token was minted: nothing is begun, so no message
+	// reaches the session and no Stop hook has a turn to land in.
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return claudecli.Result{Err: claudecli.TimedOut(spec.Settings.RunTimeout)}
+		}
+		return claudecli.Result{Err: claudecli.ErrInterrupted}
 	}
 	answer, err := s.hub.Begin()
 	if err != nil {
@@ -553,15 +564,17 @@ func (h *liveHost) next(ctx context.Context, token string, wait time.Duration) (
 }
 
 // end is POST /brain/live/turn-end: the Stop hook of the session whose
-// token it is. A Stop with no turn waiting is the session going on after
-// its answer, as when a background task it started ends: what it says then
-// goes to its chat, as a later message of the run would. One of a session
-// on its way out, or of its check, goes nowhere.
-func (h *liveHost) end(ctx context.Context, token, text string) error {
+// token it is, and turn the last message its model read. A Stop with no turn
+// waiting, or one before the model read the waiting turn's message, is the
+// session going on after its answer, as when a background task it started
+// ends: what it says then goes to its chat, as a later message of the run
+// would. One of a session on its way out, or of its check, goes nowhere.
+func (h *liveHost) end(ctx context.Context, token, text, turn string) error {
 	s := h.byToken(token)
 	if s == nil {
 		return apperr.New(apperr.NotFound, "this token is no live session's")
 	}
+	s.hub.Ack(turn)
 	if s.hub.End(text) {
 		return nil
 	}

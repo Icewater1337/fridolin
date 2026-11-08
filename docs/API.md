@@ -235,8 +235,11 @@ with the session's token: `GET /brain/live/next?wait=SECONDS` (at most 60)
 answers the next message for the session as `{"content": "…", "meta": {…}}`,
 or `204` when none came in time (`fridolin mcp --live` passes it on as a
 channel notification), and `POST /brain/live/turn-end` takes
-`{"text": "…"}`, the last text of the turn the session finished (its Stop hook,
-`fridolin live-turn-end`). Both answer `404` for a token that is no live
+`{"text": "…", "turn": "…"}`, the last text of the turn the session finished
+and the `turn` meta of the last message its model read (its Stop hook,
+`fridolin live-turn-end`); the text answers a message only with that message's
+`turn`, and otherwise goes to the chat as what the session said after its turn.
+Both answer `404` for a token that is no live
 session's.
 
 | Status | When |

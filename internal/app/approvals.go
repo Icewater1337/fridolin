@@ -42,8 +42,9 @@ import (
 // again; an answer that comes once no call waits goes to the brain as a
 // new message (SourceApprovalResult) in the chat it was asked in.
 //
-// An answer reaches the brain once: in the call that waits for it, or,
-// when none does, as that new message, which starts a run of its own.
+// An answer reaches the brain once: in the calls that wait for it, each of
+// them when several do, or, when none does, as that new message, which
+// starts a run of its own.
 // decide holds approvalWaiters.settle from its update of bridge.db until
 // it has handed the answer on, and a call reads the approval under it
 // too. So a call never finds an answer in bridge.db that decide has yet
@@ -80,7 +81,7 @@ type approvalWaiters struct {
 	// answer is handed on, and by a call while it reads the approval.
 	settle sync.Mutex
 	mu     sync.Mutex
-	wait   map[string]chan store.Approval
+	wait   map[string]*approvalWait
 	text   map[string]string // chat → id of the question asked there without options
 	// late are the approvals decided while no call waited, whose answer
 	// went to the brain as a message, with when; kept lateMemory.
@@ -91,41 +92,84 @@ type approvalWaiters struct {
 // brain as a message, longer than any run that could ask about it again.
 const lateMemory = 24 * time.Hour
 
-// add registers a waiter for id, or returns the one registered already
-// (ask registers it before the poll goes out).
-func (w *approvalWaiters) add(id string) chan store.Approval {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+// approvalWait is what the calls waiting on one approval share. done
+// closes once got holds the answer, which every one of them then reads.
+type approvalWait struct {
+	callers int // guarded by approvalWaiters.mu
+	done    chan struct{}
+	got     store.Approval
+}
+
+// answer gives every call waiting on aw the answer.
+func (aw *approvalWait) answer(a store.Approval) {
+	aw.got = a
+	close(aw.done)
+}
+
+// entry returns id's approvalWait, made if there is none. w.mu is held.
+func (w *approvalWaiters) entry(id string) *approvalWait {
 	if w.wait == nil {
-		w.wait = map[string]chan store.Approval{}
+		w.wait = map[string]*approvalWait{}
 	}
-	if ch := w.wait[id]; ch != nil {
-		return ch
+	aw := w.wait[id]
+	if aw == nil {
+		aw = &approvalWait{done: make(chan struct{})}
+		w.wait[id] = aw
 	}
-	ch := make(chan store.Approval, 1)
-	w.wait[id] = ch
-	return ch
+	return aw
 }
 
-// take removes id's waiter, if a call waits, and returns its channel.
-func (w *approvalWaiters) take(id string) chan store.Approval {
+// reserve holds id's place for the call that asks, from before the poll
+// goes out: an answer before the call waits then finds it, and stays in
+// bridge.db for the call instead of going to the brain as a message.
+func (w *approvalWaiters) reserve(id string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	ch := w.wait[id]
-	delete(w.wait, id)
-	return ch
+	w.entry(id)
 }
 
-// hand removes id's waiter and returns its channel, which the answer
-// goes into. With no call waiting, it returns nil and, with goesOn,
-// marks the answer as one that goes to the brain as a message: in one
-// step, so that no call can start or stop waiting in between.
-func (w *approvalWaiters) hand(id string, goesOn bool) chan store.Approval {
+// add counts one more call waiting on id; each leaves again with leave.
+func (w *approvalWaiters) add(id string) *approvalWait {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if ch := w.wait[id]; ch != nil {
+	aw := w.entry(id)
+	aw.callers++
+	return aw
+}
+
+// leave ends a call's wait on aw, and drops id's entry with the last
+// call. It reports false if the answer was handed to aw already, which
+// then comes on aw.done.
+func (w *approvalWaiters) leave(id string, aw *approvalWait) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.wait[id] != aw {
+		return false
+	}
+	aw.callers--
+	if aw.callers == 0 {
 		delete(w.wait, id)
-		return ch
+	}
+	return true
+}
+
+// drop removes id's entry: the question never went out.
+func (w *approvalWaiters) drop(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.wait, id)
+}
+
+// hand removes id's entry and returns it, for the answer. With no call
+// waiting, it returns nil and, with goesOn, marks the answer as one that
+// goes to the brain as a message: in one step, so that no call can start
+// or stop waiting in between.
+func (w *approvalWaiters) hand(id string, goesOn bool) *approvalWait {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if aw := w.wait[id]; aw != nil {
+		delete(w.wait, id)
+		return aw
 	}
 	if goesOn {
 		now := time.Now()
@@ -424,7 +468,7 @@ func (b *App) ask(ctx context.Context, c mcpCaller, a store.Approval) (store.App
 	// The call waits from before the poll goes out: a vote that comes
 	// before awaitAnswer would otherwise find no waiter and go to the
 	// brain as a late answer as well, a second run.
-	b.waiters.add(a.ID)
+	b.waiters.reserve(a.ID)
 	max := b.cfgs.Get().MaxChunkSize
 	var err error
 	switch {
@@ -436,7 +480,7 @@ func (b *App) ask(ctx context.Context, c mcpCaller, a store.Approval) (store.App
 		err = b.outbox.Question(ctx, a.Notify, target, outboundmsg.AskQuestion(a.Action), max)
 	}
 	if err != nil {
-		b.waiters.take(a.ID)
+		b.waiters.drop(a.ID)
 		_, _ = b.store.DecideApproval(ctx, a.ID, store.ApprovalDenied, "", "bridge", now)
 		return a, fmt.Errorf("the question could not be sent: %w", err)
 	}
@@ -470,12 +514,12 @@ func (b *App) awaitAnswer(ctx context.Context, a store.Approval, wait time.Durat
 // nothing to act on, the result to answer: pending, or an answer that went
 // on to the brain as a message (decidedResult).
 func (b *App) awaitDecision(ctx context.Context, a store.Approval, wait time.Duration) (store.Approval, *mcp.CallResult) {
-	ch := b.waiters.add(a.ID)
-	// Decided already: by an answer that found this waiter, and is in the
-	// channel, or by one that found none, and went on to the brain.
+	aw := b.waiters.add(a.ID)
+	// Decided already: by an answer that found this wait, and comes on it,
+	// or by one that found none, and went on to the brain.
 	if cur, late, err := b.settledApproval(ctx, a.ID); err == nil && cur.Status != store.ApprovalPending {
-		if b.waiters.take(a.ID) == nil {
-			return <-ch, nil
+		if !b.waiters.leave(a.ID, aw) {
+			return handedAnswer(ctx, a, aw)
 		}
 		return decidedFor(cur, late)
 	}
@@ -486,14 +530,14 @@ func (b *App) awaitDecision(ctx context.Context, a store.Approval, wait time.Dur
 	timer := time.NewTimer(deadline)
 	defer timer.Stop()
 	select {
-	case got := <-ch:
-		return got, nil
+	case <-aw.done:
+		return aw.got, nil
 	case <-timer.C:
 	case <-ctx.Done():
 	}
-	if b.waiters.take(a.ID) == nil {
-		// Taken by an answer as the wait ended: it is in the channel.
-		return <-ch, nil
+	if !b.waiters.leave(a.ID, aw) {
+		// Taken by an answer as the wait ended: it comes on aw.
+		return handedAnswer(ctx, a, aw)
 	}
 	if b.hooks.approvalWaitEnded != nil {
 		b.hooks.approvalWaitEnded(a.ID)
@@ -509,7 +553,26 @@ func (b *App) awaitDecision(ctx context.Context, a store.Approval, wait time.Dur
 	if err == nil && cur.Status != store.ApprovalPending {
 		return decidedFor(cur, late)
 	}
+	if ctx.Err() != nil {
+		return a, stoppedWaiting(ctx, a)
+	}
 	return a, mcp.TextResult(fmt.Sprintf("pending: no answer yet after %s (approval_id %s). Call check_approval with this id to wait again, or end your turn: the answer comes to you as a new message in this chat. Until it is approved, do not take the action.", wait.Round(time.Second), a.ID))
+}
+
+// handedAnswer is the answer decide has taken aw for and is about to give
+// it, unless ctx ends first.
+func handedAnswer(ctx context.Context, a store.Approval, aw *approvalWait) (store.Approval, *mcp.CallResult) {
+	select {
+	case <-aw.done:
+		return aw.got, nil
+	case <-ctx.Done():
+		return a, stoppedWaiting(ctx, a)
+	}
+}
+
+// stoppedWaiting is the tool result for a wait whose context ended.
+func stoppedWaiting(ctx context.Context, a store.Approval) *mcp.CallResult {
+	return mcp.ErrorResult(fmt.Sprintf("stopped waiting for approval %s: %v. Do not take the action.", a.ID, ctx.Err()))
 }
 
 // decidedFor is decided a, which no waiting call took, for the call that
@@ -590,7 +653,7 @@ func (b *App) decide(ctx context.Context, id, status, answer, by string, late la
 	if b.hooks.approvalDecided != nil {
 		b.hooks.approvalDecided(id)
 	}
-	ch := b.waiters.hand(id, late != callerAnswers)
+	aw := b.waiters.hand(id, late != callerAnswers)
 	b.waiters.settle.Unlock()
 	kind := audit.ApprovalDecided
 	if a.Kind == questionKind {
@@ -602,8 +665,8 @@ func (b *App) decide(ctx context.Context, id, status, answer, by string, late la
 	}
 	b.audit.Append(audit.Entry{Kind: kind, Thread: a.Thread, Chat: a.Chat, Brain: a.Brain, Run: a.Run, ID: a.ID, Risk: a.Risk, By: by, Detail: detail, Outcome: status})
 	b.waiters.forget(id)
-	if ch != nil {
-		ch <- a
+	if aw != nil {
+		aw.answer(a)
 		return a, true
 	}
 	if late == answerAsMessage {

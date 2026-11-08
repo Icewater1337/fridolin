@@ -217,6 +217,133 @@ for compatibility.
 
 ### Fixed
 
+- **A note from a conversation reaches you once.** When a call's reply
+  was not heard (they hung up, or its speech failed), the turn after it
+  could pass the same note on again. Fridolin now remembers the notes
+  each conversation passed on, shows them to its run, and does not send
+  the same one twice. bridge.db gets the table `errand_notes`; an older
+  bridge ignores it.
+
+- **A core move carries the secret files of up to 20 brains.** A move
+  refused a credentials folder with more than 8 secret files, so a core
+  with three or more brains that each have calendar and contacts files
+  could not move. It now carries up to 64 (16 KiB each, as before) and
+  4 local files; the sealed bundle may be 2 MiB instead of 256 KiB. Both
+  machines must run this version for a bundle over the old size.
+
+- **Stopping an errand that waits on your approval no longer leaves
+  `fridolin doctor` warning about it.** The approval was denied without an
+  `approval_decided` line in the audit log, so an hour later doctor said
+  "1 waiting for an answer" and asked you to vote in a poll that no longer
+  meant anything, for up to about two months. The denial is now logged
+  (outcome denied, by bridge) and doctor shows nothing waiting.
+- **Steady background noise on a call is no longer taken for speech.** A car,
+  a café or a fan loud enough counted as talking for the whole call: each turn
+  waited for the 30 s cut instead of ending 0.9 s after the caller stopped,
+  blocks of noise went to transcription, and the call could not go idle. Now a
+  level that stays put for about 3 s becomes the line's noise, and only sound
+  well above it counts.
+- **`fridolin doctor` no longer calls an old lockdown "off".** Doctor only
+  read the last two monthly audit files, so a lockdown started longer ago
+  showed as off while the bridge still refused write work. It now looks back
+  through every month on disk until it finds the last lockdown or unlock.
+  With the vault on, past months are in the cold tier and doctor does not
+  bring them back: if it finds nothing on disk, it says those months were
+  not read instead of a plain "off".
+- **A silent call no longer promises a message after its errand was stopped.**
+  When someone stayed silent on an errand's call and the errand was stopped
+  meanwhile, the call still told them Fridolin would get back to them on
+  WhatsApp, which it would not. Now the call ends without a word.
+- **Every call waiting on an approval gets the answer.** When two calls waited
+  on one approval (two `check_approval`s, or `node_exec` and `check_approval`),
+  only one got the answer and the other hung for good, even after its run was
+  stopped. Now each gets it, and a call whose run is stopped ends at once.
+- **What someone asks to pass on reaches you even when the reply fails.**
+  When an errand was stopped while its run was thinking, or the reply could
+  not be sent, the note that came with the reply was dropped without a
+  trace. It now reaches you either way, on a chat and on a call.
+- **An errand's reply that could not be sent no longer counts as said.**
+  When someone hung up while Fridolin answered, or the answer could not be
+  queued, the conversation kept a reply they never got, and what they said
+  last went unanswered. The line is now taken out of the conversation and
+  no longer counts towards the errand's messages, so a turn by message
+  answers them after a call. A warning that could not be sent no longer
+  counts as their warning.
+- **A box's updater applies and reports the update it checked.** When the
+  core asked for a newer version while the updater was still checking or
+  applying one, the box pulled the first version's images and reported the
+  newer one as done, or threw the newer request away. The updater now takes
+  a request before checking it, and a newer one waits for its next round.
+- **A live session's late output no longer answers your next message.** When
+  a session went on after its answer (a background task ended) and you wrote
+  meanwhile, what it said late could go out as the answer to your new message,
+  and the real answer after it as an extra message. The session's Stop hook now
+  reads from the transcript which message the model last read, and only a Stop
+  that names the waiting message answers it; any other goes to the chat as what
+  the session said after its turn. A session whose hook cannot tell fails its
+  start-up check, and messages run `claude -p` as they do for any session that
+  does not come up.
+- **A box that is the core no longer stays without a core after a failed
+  start.** When the core could not start as the agent came up or after a
+  crash (a secret that could not be read, a failed spawn), the box only
+  logged it and never tried again. It now tries again while its role is
+  `core`, with a wait that grows to 5 minutes, and logs each failure.
+- **After a failed core move you are asked about the target's secrets only
+  when it is clear where the core runs.** A move the source refused now asks
+  whether the target keeps the host secrets, as it should. A move that ended
+  "unknown", or whose source never answered the release, no longer asks, and
+  so can no longer remove the secrets of the machine that may run the core.
+
+- **A core move whose source could not be asked to release ends at once.**
+  When the source was not connected as the move reached the release, the
+  move showed as handed off, refused every new move for hours and ended
+  "unknown", though nothing had changed. It now fails straight away, and the
+  core keeps running on the source.
+
+- **A box that joins again can start a core and take secrets again.** The
+  new device key left the secrets sealed with the old one in place, where
+  they no longer opened, so the core could not start in the box and receiving
+  secrets failed. Joining again now moves the old key, what was sealed with
+  it and what belonged to the old device into a `rejoined-<time>-*` folder in
+  the state dir, deleting nothing, and the box comes back as a standby box.
+  `box.sh` and `box.ps1` stop the node before they join again; send it
+  secrets again if it is to take the core.
+
+- **A very long line from a node's agent session no longer stalls its turn.**
+  A stream line over 8 MiB, such as a tool printing a large file, left the
+  session hanging until its maximum runtime (2 hours by default), and the
+  turn's result was lost. The line is now skipped and the turn goes on to its
+  result; if none arrives, the turn fails at once with an error that names
+  the long line.
+
+- **A node terminal keeps the shell's last output.** The terminal closed its
+  side as soon as the shell exited, so what the shell wrote just before could
+  be lost, and a read could say "closed" before the last output arrived. It now
+  reports closed only once the output was read to its end. A background job that
+  keeps the terminal open gets 2 seconds; then it closes without that job's output.
+
+- **The 40 messages a day now also count while a conversation is open.**
+  Someone in a conversation they began could write any number of messages:
+  the limit was only checked when one began. Past 40, what they write goes
+  to you instead, within the usual five passed on a day, and gets no answer.
+  The conversation stays open until it ends as usual.
+
+- **An errand that runs out of time no longer loses what the person wrote last.**
+  When the minute check (or a restart) ends an errand whose time ran out,
+  what they wrote that Fridolin had not answered now goes on, once: to you,
+  or to a conversation of its own, as it already did when a run ended it.
+
+- **A call errand answers what came in during or at the end of the call.**
+  When a call ends and the errand is still open with the person's words
+  (or your answer) as its last line, Fridolin now goes on by message
+  instead of leaving it unanswered. No turn follows when the call ended on
+  a question to you and nothing new arrived since.
+
+- **A brain's run can no longer fork-bomb a container.** The containers
+  now have a process limit: 4096 for the core, FrIDE and a box that can
+  hold the core, 1024 for a box's node without that overlay. It applies
+  the next time the container is created, and a run that forks without
+  end fails at the limit.
 - **Cron `*/n` in a day field.** A day-of-month or day-of-week field that
   starts with `*` (`*/2`) no longer counts as restricted, so `0 9 */2 * 1-5`
   runs on odd weekdays, not odd days or weekdays, and `0 9 */2 * *` skips

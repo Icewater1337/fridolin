@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,7 +32,9 @@ type Mirror struct {
 	remote     map[string]int64 // key → size in Store
 	listed     bool
 	lastDelete time.Time
-	last       MirrorStatus
+
+	// last is written when a Sync ends, so Status never waits for one.
+	last atomic.Pointer[MirrorStatus]
 }
 
 // MirrorStatus is what the last Sync did.
@@ -43,11 +46,13 @@ type MirrorStatus struct {
 	Error    string    `json:"error,omitempty"`
 }
 
-// Status returns what the last Sync did.
+// Status returns what the last finished Sync did, without waiting for one
+// that is running.
 func (m *Mirror) Status() MirrorStatus {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.last
+	if st := m.last.Load(); st != nil {
+		return *st
+	}
+	return MirrorStatus{}
 }
 
 // local lists Dir's files by key with their sizes.
@@ -92,7 +97,7 @@ func (m *Mirror) Sync(ctx context.Context, now time.Time) (MirrorStatus, error) 
 	if err != nil {
 		st.Error = err.Error()
 	}
-	m.last = st
+	m.last.Store(&st)
 	return st, err
 }
 

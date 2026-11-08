@@ -693,6 +693,16 @@ func (s *Service) NewJoinCodeFrom(origin string) (string, time.Time, error) {
 // ErrCall is a call the core refuses before sending it.
 var ErrCall = errors.New("refused")
 
+// errNotSent marks a CodeUnavailable from Call whose request never left the
+// core, so the node cannot have acted on it.
+var errNotSent = errors.New("not sent")
+
+func notSent(format string, args ...any) *nodeproto.Error {
+	e := nodeproto.Errorf(nodeproto.CodeUnavailable, format, args...)
+	e.Cause = errNotSent
+	return e
+}
+
 // Call calls method on node id with params and decodes the result into
 // out (nil to drop it). The approvals are checked here before anything is
 // sent, and again on the node. A failure on the node is a
@@ -731,20 +741,20 @@ func (s *Service) Call(ctx context.Context, id, method string, params, out any) 
 	ss := s.sessions[id]
 	s.mu.Unlock()
 	if ss == nil {
-		return nodeproto.Errorf(nodeproto.CodeUnavailable, "node %s is not connected", id)
+		return notSent("node %s is not connected", id)
 	}
 	// The node hears the state that allows the call before the call: the
 	// change the core just recorded may not have been told it yet, and
 	// the node checks the call against what it was told.
 	if err := s.tell(ss, nil, true); err != nil {
-		return nodeproto.Errorf(nodeproto.CodeUnavailable, "telling node %s its state: %v", id, err)
+		return notSent("telling node %s its state: %v", id, err)
 	}
 	reqID := strconv.FormatUint(s.nextID.Add(1), 10)
 	ch := make(chan nodeproto.Response, 1)
 	ss.mu.Lock()
 	if ss.gone {
 		ss.mu.Unlock()
-		return nodeproto.Errorf(nodeproto.CodeUnavailable, "node %s disconnected", id)
+		return notSent("node %s disconnected", id)
 	}
 	ss.pending[reqID] = ch
 	ss.mu.Unlock()

@@ -44,6 +44,9 @@ services:
       # folder's binds instead (compose.host.yaml).
       - fridolin-home:/var/lib/fridolin
     mem_limit: ${FRIDOLIN_MEMORY_LIMIT:-8g}
+    # So a brain's run that forks without end fails at the limit, and cannot
+    # take the VM down with it.
+    pids_limit: 4096
     # Least privilege for the bridge, which runs as uid 10001 and needs no
     # capability. Each brain's run is sandboxed with bubblewrap in user,
     # mount and PID namespaces of its own: seccomp.json (beside this file)

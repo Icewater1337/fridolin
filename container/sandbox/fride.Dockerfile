@@ -25,7 +25,7 @@
 
 # sbx's Claude kit image, pinned by digest (Go 1.27, Node 22, git, gh, socat).
 ARG BASE_IMAGE=docker/sandbox-templates:claude-code-docker@sha256:4a94d9144a70df744fd9247e0c365a14cfb97024afab8db7597c8ba3e0637642
-ARG GO_IMAGE=golang:1.27.2-bookworm
+ARG GO_IMAGE=golang:1.27.3-bookworm
 
 # ── FrIDE ─────────────────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS fride
@@ -41,7 +41,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/fride .
 FROM ${BASE_IMAGE}
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.312
+ARG CLAUDE_CODE_VERSION=2.1.316
 # ponytail v5.3.2 (docs/NODES.md, "Ponytail for every agent").
 ARG PONYTAIL_REPO=https://github.com/DietrichGebert/ponytail
 ARG PONYTAIL_COMMIT=16352ac229eb08a9598dcae48fe9f2b342567d86

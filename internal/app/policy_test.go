@@ -350,7 +350,7 @@ func TestApprovalSeenAsItIsDecidedGoesOnce(t *testing.T) {
 	if err := h.b.store.AddApproval(ctx, a); err != nil {
 		t.Fatal(err)
 	}
-	h.b.waiters.add(a.ID) // as ask does before the poll goes out
+	h.b.waiters.reserve(a.ID) // as ask does before the poll goes out
 
 	res := make(chan *mcp.CallResult, 1)
 	var early *mcp.CallResult
@@ -383,6 +383,130 @@ func TestApprovalSeenAsItIsDecidedGoesOnce(t *testing.T) {
 			t.Errorf("the yes went to the brain as a message as well: %q", s)
 		}
 	}
+}
+
+// waitingApproval stores a pending approval for the tests of several calls
+// waiting on one.
+func waitingApproval(t *testing.T, h *harness) store.Approval {
+	t.Helper()
+	now := time.Now()
+	a := store.Approval{ID: "atest", Kind: approvalKind, Brain: "taxes", Notify: "taxes", Thread: harnessDM, Chat: harnessDM,
+		Action: "Submit the 2025 tax return through ELSTER", Risk: "irreversible", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if err := h.b.store.AddApproval(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// resultOf is what a call answers, or a failure if it hangs.
+func resultOf(t *testing.T, res <-chan *mcp.CallResult) *mcp.CallResult {
+	t.Helper()
+	select {
+	case r := <-res:
+		return r
+	case <-time.After(10 * time.Second):
+		t.Fatal("the call still waits: it hangs")
+		return nil
+	}
+}
+
+// noWaitLeft fails if an entry for the approval stayed behind.
+func noWaitLeft(t *testing.T, h *harness, id string) {
+	t.Helper()
+	h.b.waiters.mu.Lock()
+	defer h.b.waiters.mu.Unlock()
+	if _, ok := h.b.waiters.wait[id]; ok {
+		t.Errorf("approval %s still has an entry", id)
+	}
+}
+
+// TestEveryWaitingCallGetsTheDecision: two calls wait on one approval, and
+// the owner's yes reaches both; before, the second never returned.
+func TestEveryWaitingCallGetsTheDecision(t *testing.T) {
+	t.Parallel()
+	h := policyHarness(t, "", nil)
+	ctx := context.Background()
+	a := waitingApproval(t, h)
+	res := make(chan *mcp.CallResult, 2)
+	for range 2 {
+		go func() { res <- h.b.awaitAnswer(ctx, a, time.Minute) }()
+	}
+	time.Sleep(300 * time.Millisecond) // both wait by now; one that came later would only pass by bridge.db
+	if _, err := h.b.dashboardDecide(ctx, a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if got := resultOf(t, res); !strings.HasPrefix(got.Content[0].Text, "approved: the owner said yes") {
+			t.Errorf("a call's answer: %+v", got)
+		}
+	}
+	noWaitLeft(t, h, a.ID)
+	if runs := h.auditOf("run_start"); len(runs) != 0 {
+		t.Errorf("the yes went to the brain as a message as well: %v", runs)
+	}
+}
+
+// TestCancelledWaitLeavesTheOthersWaiting: a call whose context ends
+// answers that at once, and the other call waiting on the approval still
+// gets the answer; before, the first took the entry with it, and the other
+// never returned.
+func TestCancelledWaitLeavesTheOthersWaiting(t *testing.T) {
+	t.Parallel()
+	h := policyHarness(t, "", nil)
+	a := waitingApproval(t, h)
+	cancelled, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first, second := make(chan *mcp.CallResult, 1), make(chan *mcp.CallResult, 1)
+	go func() { first <- h.b.awaitAnswer(cancelled, a, time.Minute) }()
+	go func() { second <- h.b.awaitAnswer(context.Background(), a, time.Minute) }()
+	time.Sleep(300 * time.Millisecond) // both wait by now
+	cancel()
+	if got := resultOf(t, first); !got.IsError || !strings.Contains(got.Content[0].Text, context.Canceled.Error()) {
+		t.Errorf("the cancelled call's answer: %+v", got)
+	}
+	if _, err := h.b.dashboardDecide(context.Background(), a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := resultOf(t, second); !strings.HasPrefix(got.Content[0].Text, "approved: the owner said yes") {
+		t.Errorf("the other call's answer: %+v", got)
+	}
+	noWaitLeft(t, h, a.ID)
+}
+
+// TestWaitForAHandedAnswerEndsWithItsContext: decide took the entry and
+// has yet to answer: a call whose context ends then does not wait for it.
+func TestWaitForAHandedAnswerEndsWithItsContext(t *testing.T) {
+	t.Parallel()
+	h := policyHarness(t, "", nil)
+	a := waitingApproval(t, h)
+	aw := h.b.waiters.add(a.ID)
+	if h.b.waiters.hand(a.ID, false) != aw {
+		t.Fatal("hand did not return the entry")
+	}
+	if h.b.waiters.leave(a.ID, aw) {
+		t.Error("leave says the answer was not handed to the entry")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, got := handedAnswer(ctx, a, aw); got == nil || !got.IsError {
+		t.Errorf("the cancelled call's answer: %+v", got)
+	}
+}
+
+// TestDecidedApprovalAnswersAtOnce: a call on an approval decided already
+// gets the stored decision, and leaves nothing behind.
+func TestDecidedApprovalAnswersAtOnce(t *testing.T) {
+	t.Parallel()
+	h := policyHarness(t, "", nil)
+	ctx := context.Background()
+	a := waitingApproval(t, h)
+	if _, err := h.b.store.DecideApproval(ctx, a.ID, store.ApprovalDenied, "", "15551234567", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.b.awaitAnswer(ctx, a, time.Minute); !strings.HasPrefix(got.Content[0].Text, "denied: the owner said no") {
+		t.Errorf("the call's answer: %+v", got)
+	}
+	noWaitLeft(t, h, a.ID)
 }
 
 // TestApprovalAsTheWaitEndsGoesOnce: an answer that comes just as the

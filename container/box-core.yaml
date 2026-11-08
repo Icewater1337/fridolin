@@ -53,6 +53,8 @@ services:
       - systempaths=unconfined
       - ${FRIDOLIN_BOX_APPARMOR:+apparmor=}${FRIDOLIN_BOX_APPARMOR:-no-new-privileges}
     mem_limit: ${FRIDOLIN_BOX_CORE_MEMORY:-8g}
+    # A core container's limit (compose.yaml), not box.yaml's for a node.
+    pids_limit: 4096
     # The core stops cleanly within 30 seconds, releasing the lease.
     stop_grace_period: 45s
 

@@ -325,9 +325,9 @@ func (b *App) tellOwner(text string) {
 // coreMoveEnded tells the owner, in their direct chat, how a core move
 // ended: the core that runs afterwards says it, on either machine. Then
 // it asks whether the machine that does not run the core keeps the host
-// secrets: the source after a move, the target after one that failed
-// once the secrets had gone there. A site with a domain is asked whether
-// it answers from where the core runs now.
+// secrets: the source after a move, the target after one that clearly
+// failed once the secrets had gone there. A site with a domain is asked
+// whether it answers from where the core runs now.
 func (b *App) coreMoveEnded(r nodes.MoveRecord) {
 	b.audit.Append(audit.Entry{Kind: audit.CoreMoveEnded, ID: r.ID, Detail: r.SourceName + " → " + r.TargetName + ": " + r.Detail, Outcome: r.State})
 	var notOnTarget []string
@@ -335,14 +335,7 @@ func (b *App) coreMoveEnded(r nodes.MoveRecord) {
 		notOnTarget = r.Report.MachineBound
 	}
 	b.tellOwner(outboundmsg.CoreMoveEnded(r.ID, r.SourceName, r.TargetName, r.State, r.Detail, notOnTarget))
-	left, leftName := "", ""
-	switch {
-	case r.State == nodes.MoveDone:
-		left, leftName = r.Source, r.SourceName
-	case secretsSent(r):
-		left, leftName = r.Target, r.TargetName
-	}
-	if left != "" {
+	if left, leftName := secretsQuestionFor(r); left != "" {
 		b.askKeepSecrets(r.ID, left, leftName)
 	}
 	if r.State == nodes.MoveDone && b.site != nil {
@@ -350,6 +343,19 @@ func (b *App) coreMoveEnded(r nodes.MoveRecord) {
 			go b.coreMoveSite(s.Domain, r.TargetName)
 		}
 	}
+}
+
+// secretsQuestionFor names the machine whose host secrets the owner is
+// asked about once r ended, none when it stays unclear where the core runs:
+// forgetting could then hit the machine that runs it (#555).
+func secretsQuestionFor(r nodes.MoveRecord) (id, name string) {
+	switch {
+	case r.State == nodes.MoveDone:
+		return r.Source, r.SourceName
+	case (r.State == nodes.MoveFailed || r.State == nodes.MoveRolledBack) && secretsSent(r) && !r.ReleaseUnanswered:
+		return r.Target, r.TargetName
+	}
+	return "", ""
 }
 
 // secretsSent reports whether r's host secrets went to its target.

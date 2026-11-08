@@ -191,7 +191,7 @@ test-web: ## syntax-check the dashboard JS and run its unit tests
 # allows, and runs none of their install scripts. Renovate moves the pin
 # through the comment above it. It needs Node 20.19+, 22.13+ or 24+.
 # renovate: datasource=npm depName=eslint
-ESLINT_VERSION := 10.13.0
+ESLINT_VERSION := 10.14.0
 NPX    ?= npx
 ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
 lint-web: ## ESLint on the dashboard's JS (npx fetches it)
@@ -209,7 +209,7 @@ lint-web: ## ESLint on the dashboard's JS (npx fetches it)
 # renovate: datasource=npm depName=typescript
 TYPESCRIPT_VERSION := 7.0.2
 # renovate: datasource=npm depName=@types/node
-TYPES_NODE_VERSION := 26.6.5
+TYPES_NODE_VERSION := 26.6.6
 TSC_NPX ?= $(NPX) --yes -p typescript@$(TYPESCRIPT_VERSION) -p @types/node@$(TYPES_NODE_VERSION)
 typecheck-web: ## tsc --noEmit on the dashboard's JS and tests (npx fetches it)
 	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(TSC_NPX) -c 'tsc -p . && tsc -p test --typeRoots "$$(dirname "$$(command -v tsc)")/../@types"'
@@ -219,6 +219,7 @@ test-sh: ## tests for the personal-data, action-pin, notices, release, OS-test a
 	scripts/test-check-action-pins.sh
 	scripts/test-third-party-notices.sh
 	scripts/test-build-release.sh
+	scripts/test-dockerfile-go-version.sh
 	scripts/test-makefile.sh
 	scripts/test-test-shard.sh
 	scripts/test-os-tests.sh

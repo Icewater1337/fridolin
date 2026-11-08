@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -220,5 +221,92 @@ func TestErrandBooking(t *testing.T) {
 	}
 	if e, _ := s.GetErrand(ctx, "e1"); e.Booked != "" || !e.BookedFrom.IsZero() {
 		t.Errorf("cleared: %+v", e)
+	}
+}
+
+func TestErrandCallsSince(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	add := func(id, state, mode string) {
+		t.Helper()
+		e := Errand{ID: id, Brain: "core", Contact: "1555000" + id, Name: "Alex", Message: "Hi", State: state, Mode: mode, Days: 1, CreatedAt: now, Deadline: now.Add(time.Hour)}
+		if err := s.AddErrand(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, st := range []string{ErrandDone, ErrandOpen, ErrandStopped, ErrandExpired} {
+		add(string(rune('a'+i)), st, ErrandByCall)
+	}
+	add("w", ErrandAsking, ErrandByCall)   // not yet approved: no call made
+	add("x", ErrandDeclined, ErrandByCall) // refused: no call made
+	add("y", ErrandDone, ErrandByMessage)  // not a call
+	since := now.Add(-time.Hour)
+	if n, err := s.ErrandCallsSince(ctx, since, ""); err != nil || n != 4 {
+		t.Fatalf("before the 5th: %d %v, want 4", n, err)
+	}
+	add("e", ErrandOpen, ErrandByCall) // the 5th, as startErrand has stored it
+	if n, _ := s.ErrandCallsSince(ctx, since, "e"); n != 4 {
+		t.Errorf("the errand starting counts itself: %d, want 4", n)
+	}
+	if n, _ := s.ErrandCallsSince(ctx, since, "a"); n != 4 {
+		t.Errorf("the next one after 5: %d, want 4 (the 5 made, minus itself)", n)
+	}
+	if n, _ := s.ErrandCallsSince(ctx, since, ""); n != 5 {
+		t.Errorf("five calls made: %d, want 5", n)
+	}
+}
+
+func TestTakeBackErrandLine(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now()
+	if err := s.AddErrand(ctx, Errand{ID: "e1", Contact: "15551234567", State: ErrandOpen, Deadline: now.Add(time.Hour), CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	line, ok, err := s.AddErrandLineWhileOpen(ctx, "e1", ErrandLine{Sender: "you", Text: "unsent", At: now})
+	if err != nil || !ok {
+		t.Fatalf("add: %v %v", ok, err)
+	}
+	// A line that came in meanwhile stays.
+	if err := s.AddErrandLine(ctx, "e1", ErrandLine{Sender: "them", Text: "Hi!", At: now}, false); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // only the first counts
+		if err := s.TakeBackErrandLine(ctx, "e1", line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines, _ := s.ErrandLines(ctx, "e1")
+	got, _ := s.GetErrand(ctx, "e1")
+	if len(lines) != 1 || lines[0].Text != "Hi!" || got.Sent != 0 {
+		t.Errorf("lines %+v, sent %d", lines, got.Sent)
+	}
+}
+
+// TestAddErrandNoteOnce (#611): the same note, trimmed and in any case,
+// is recorded once per errand; another errand or another note is new.
+func TestAddErrandNoteOnce(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now()
+	for i, c := range []struct {
+		errand, note string
+		want         bool
+	}{
+		{"e1", "Alex says: late.", true},
+		{"e1", "  alex SAYS: late. \n", false},
+		{"e2", "Alex says: late.", true},
+		{"e1", "Alex says: bring wine.", true},
+	} {
+		if got, err := s.AddErrandNote(ctx, c.errand, c.note, now.Add(time.Duration(i)*time.Second)); err != nil || got != c.want {
+			t.Errorf("%d %q: %v %v, want %v", i, c.note, got, err, c.want)
+		}
+	}
+	if got, err := s.ErrandNotes(ctx, "e1"); err != nil || !slices.Equal(got, []string{"Alex says: late.", "Alex says: bring wine."}) {
+		t.Errorf("notes %q %v", got, err)
 	}
 }

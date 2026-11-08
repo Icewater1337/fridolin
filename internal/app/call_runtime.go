@@ -43,11 +43,10 @@ const (
 	// silence ends it.
 	ownerCallMax  = 15 * time.Minute
 	ownerCallIdle = 2 * time.Minute
-	// An errand's calls: how long one lasts at most, how long a silence
-	// ends it, and how many calls errands make a day (how long one rings
-	// is waits.callRing).
+	// An errand's calls: how long one lasts at most and how many calls
+	// errands make a day (how long one rings is waits.callRing, how long a
+	// silence ends it waits.errandCallIdle).
 	errandCallMax     = 10 * time.Minute
-	errandCallIdle    = 45 * time.Second
 	errandCallsPerDay = 5
 	// callReadyWait is how long an answered call may take until its
 	// audio flows.
@@ -358,15 +357,16 @@ func (b *App) placeCallTo(ctx context.Context, number string) (whatsapp.Call, er
 	return b.placeCall(ctx, number)
 }
 
-// errandCallsReady says why errand e cannot call now; nil when it can.
-func (b *App) errandCallsReady(ctx context.Context, cfg *config.Settings) error {
+// errandCallsReady says why a call errand cannot call now; nil when it can.
+// self is the errand being started, left out of the count ("" before it exists).
+func (b *App) errandCallsReady(ctx context.Context, cfg *config.Settings, self string) error {
 	if err := b.callsOn(cfg); err != nil {
 		return err
 	}
 	if b.hooks.placeCall == nil && b.placeCall == nil {
 		return errors.New("calls need WhatsApp: this bridge runs without it")
 	}
-	n, err := b.store.ErrandCallsSince(ctx, time.Now().Add(-24*time.Hour))
+	n, err := b.store.ErrandCallsSince(ctx, time.Now().Add(-24*time.Hour), self)
 	if err != nil {
 		return err
 	}
@@ -374,6 +374,28 @@ func (b *App) errandCallsReady(ctx context.Context, cfg *config.Settings) error 
 		return fmt.Errorf("errands made %d calls in the last day, the most they make: write instead, or wait", n)
 	}
 	return nil
+}
+
+// errandOpen reports whether errand id is open, as close to a send as
+// the caller can ask.
+func (b *App) errandOpen(ctx context.Context, id string) bool {
+	e, err := b.store.GetErrand(ctx, id)
+	return err == nil && e.State == store.ErrandOpen
+}
+
+// errandAfterCall schedules a turn by message for errand id after its call,
+// when it is still open and its last line is not Fridolin's: a line that
+// came in during the call, or that ended it. quiet is the number of lines
+// when the owner was asked (-1 if not): then only a newer line counts.
+func (b *App) errandAfterCall(id string, quiet int) {
+	ctx := context.Background()
+	lines, err := b.store.ErrandLines(ctx, id)
+	if err != nil || len(lines) == 0 || lines[len(lines)-1].Sender == errand.FromYou || len(lines) <= quiet {
+		return
+	}
+	if b.errandOpen(ctx, id) {
+		b.errands.soon(id, b.waits.errandGather, b.errandTurn)
+	}
 }
 
 // callErrand calls errand e's person and carries the errand by voice:
@@ -384,7 +406,15 @@ func (b *App) errandCallsReady(ctx context.Context, cfg *config.Settings) error 
 // not ended goes on by message.
 func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	b.errands.setCalling(e.ID, true)
-	defer b.errands.setCalling(e.ID, false)
+	// followUp: the call got past its opener. quiet: the owner holds a
+	// question or a failure notice, so no turn follows unless more arrives.
+	followUp, quiet := false, -1
+	defer func() {
+		b.errands.setCalling(e.ID, false)
+		if followUp {
+			b.errandAfterCall(e.ID, quiet)
+		}
+	}()
 	cfg := b.cfgs.Get()
 	ring := b.waits.callRing
 	if ring <= 0 {
@@ -412,32 +442,57 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	}
 	b.auditErrand(e, "called", "they picked up")
 	owner := strings.TrimSpace(s.OwnerName)
-	say := func(text string) error {
+	// said speaks text, already cut to what is heard, and audits it.
+	said := func(text string) error {
 		if err := v.say(ctx, text); err != nil {
+			return err
+		}
+		b.auditErrand(e, "said", fmt.Sprintf("%d characters", len([]rune(text))))
+		return nil
+	}
+	say := func(text string) error {
+		if text = voice.Speakable(text, maxSpoken); text == "" {
+			return nil // nothing to hear: no line, not sent
+		}
+		return b.recordAndSend(ctx, e.ID, text, func() error { return said(text) })
+	}
+	sayEnding := func(text string) error {
+		if text = voice.Speakable(text, maxSpoken); text == "" {
+			return nil
+		}
+		if err := said(text); err != nil {
 			return err
 		}
 		if err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: text, At: time.Now()}, true); err != nil {
 			log.Printf("errand %s: recording what was said: %v", e.ID, err)
 		}
-		b.auditErrand(e, "said", fmt.Sprintf("%d characters", len([]rune(text))))
 		return nil
 	}
 	// The chat's words, read aloud without their emoji.
 	unEmoji := func(s string) string {
 		return strings.TrimLeftFunc(s, func(r rune) bool { return !unicode.IsLetter(r) })
 	}
-	ch := errandChannel{say: say, abort: unEmoji(outboundmsg.ErrandAbortMessage(owner)), warn: unEmoji(outboundmsg.ErrandWarnMessage(owner))}
+	ch := errandChannel{say: say, sayEnding: sayEnding, abort: unEmoji(outboundmsg.ErrandAbortMessage(owner)), warn: unEmoji(outboundmsg.ErrandWarnMessage(owner))}
 	opener := errand.Intro(s.OwnerName, s.Intro) + " " + cfg.Calls.NoticeOrDefault() + " " + e.Message
 	if err := say(opener); err != nil {
 		log.Printf("errand %s: opening the call: %v", e.ID, err)
+		if errors.Is(err, errandEnded) {
+			return
+		}
+		why := "the call failed: " + err.Error()
+		if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandExpired, why, time.Now()); ended {
+			b.auditErrand(e, "ended", store.ErrandExpired+": the call failed")
+			b.tellErrandOwner(ctx, e, outboundmsg.ErrandFailedNotice(e.Name, e.ID, why))
+		}
 		return
 	}
+	followUp = true
 	until := time.Now().Add(errandCallMax)
 	goesOn := true
 	for goesOn {
-		text, err := v.listen(ctx, errandCallIdle)
+		text, err := v.listen(ctx, b.waits.errandCallIdle)
 		if err != nil {
-			if errors.Is(err, errCallIdle) {
+			if errors.Is(err, errCallIdle) && b.errandOpen(ctx, e.ID) {
 				_ = v.say(ctx, errandCallLater)
 			}
 			break
@@ -461,14 +516,24 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		ans, err := b.errandRespond(ctx, e, s, lines, true)
 		if err != nil {
 			log.Printf("errand %s: %v", e.ID, err)
-			_ = v.say(ctx, errandCallLater)
+			if b.errandOpen(ctx, e.ID) {
+				_ = v.say(ctx, errandCallLater)
+			}
 			b.tellErrandOwner(ctx, e, outboundmsg.ErrandFailedNotice(e.Name, e.ID, err.Error()))
+			followUp = false // the owner was told; a turn would only fail again
 			return
 		}
 		goesOn = b.errandAct(ctx, e, ans, lines, ch)
 		if !goesOn && ans.Action == errand.AskOwner {
 			// The owner has the question; the call has done what it can.
-			_ = v.say(ctx, errandCallLater)
+			if l, err := b.store.ErrandLines(ctx, e.ID); err == nil {
+				quiet = len(l)
+			} else {
+				followUp = false
+			}
+			if b.errandOpen(ctx, e.ID) {
+				_ = v.say(ctx, errandCallLater)
+			}
 			return
 		}
 	}

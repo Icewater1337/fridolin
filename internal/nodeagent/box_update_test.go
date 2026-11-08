@@ -98,7 +98,7 @@ func TestBoxUpdateEndToEnd(t *testing.T) {
 	if err := VerifyBoxUpdate(b.dir, r); err != nil {
 		t.Fatalf("the updater's check: %v", err)
 	}
-	if err := TakeBoxUpdate(b.dir); err != nil {
+	if _, err := TakeBoxUpdate(b.dir); err != nil {
 		t.Fatal(err)
 	}
 	// The updater recreates the node on the new image.
@@ -142,7 +142,7 @@ func TestBoxUpdateFailureIsReported(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- c.svc.Update(context.Background(), id, nodes.UpdateOptions{}) }()
 	waitFor(t, "the request", func() bool { r, _ := ReadBoxUpdate(b.dir); return r != nil })
-	if err := TakeBoxUpdate(b.dir); err != nil {
+	if _, err := TakeBoxUpdate(b.dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := FinishBoxUpdate(b.dir, nodeproto.UpdateReport{From: vA, To: vB, Error: "pulling the node's image failed"}); err != nil {

@@ -28,6 +28,10 @@ const (
 	DefaultAgentMaxRuntime = 2 * time.Hour
 	// terminalBuffer is the output a terminal keeps for reading, bytes.
 	terminalBuffer = 1 << 20
+	// terminalDrainGrace is how long a terminal waits for the end of its
+	// output once its shell exited: a background job can hold the PTY open
+	// for as long as it runs.
+	terminalDrainGrace = 2 * time.Second
 	// maxSessions bounds the sessions of each kind on a node.
 	maxSessions = 8
 	// keepEnded is how long an ended session stays to be read.

@@ -52,12 +52,15 @@ type fakeCore struct {
 	files    string
 	filesErr error
 
-	mu       sync.Mutex
-	running  bool
-	data     string
-	held     *lease.Lease
-	imported []string
-	exports  int
+	mu sync.Mutex
+	// onRehearse runs at the start of a rehearsal, the last thing a move
+	// asks a host before the handoff.
+	onRehearse func()
+	running    bool
+	data       string
+	held       *lease.Lease
+	imported   []string
+	exports    int
 }
 
 func newFakeCore(t *testing.T, name string, st cloud.ObjectStore, ready bool) *fakeCore {
@@ -267,6 +270,12 @@ func (f *fakeCore) Ready(context.Context) (bool, string) {
 }
 
 func (f *fakeCore) Rehearse(ctx context.Context, move string) (nodeproto.CoreRehearsal, error) {
+	f.mu.Lock()
+	hook := f.onRehearse
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	key, err := coreexport.Latest(ctx, f.st)
 	if err != nil {
 		return nodeproto.CoreRehearsal{}, err
@@ -699,6 +708,88 @@ func TestCoreMoveRollsBack(t *testing.T) {
 	}
 	if rec.TargetState == nil || rec.TargetState.Phase != nodeproto.MoveRolledBack || !strings.Contains(rec.TargetState.Detail, "not ready within") {
 		t.Errorf("icebase's state: %+v", rec.TargetState)
+	}
+}
+
+// TestCoreMoveReleaseNeverSent: mini is gone before core.release can be
+// sent, so it never heard of the release and still runs the core. The move
+// ends failed at once, not handed off and polling for hours with new moves
+// refused (#554).
+func TestCoreMoveReleaseNeverSent(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	m := h.moveHosts(h.b.nodes.Version(), true)
+	stopSrc := h.stopAgent[m.src]
+	m.dstCore.mu.Lock()
+	m.dstCore.onRehearse = func() {
+		stopSrc()
+		testutil.WaitFor(t, 10*time.Second, "mini to go", func() bool { return !h.b.nodes.Online(m.src) })
+	}
+	m.dstCore.mu.Unlock()
+	rec, body := h.startMove(m.src, m.dst, 2, 10)
+	if rec.State != nodes.MoveFailed || !strings.Contains(rec.Detail, "nothing changed") {
+		t.Fatalf("the move ended %s: %s", rec.State, body)
+	}
+	h.WaitFor("new moves allowed", func() bool { return h.b.nodes.MoveActive() == "" })
+	if running, data, _ := m.srcCore.state(); !running || data != "mini's data" {
+		t.Errorf("mini: running %v on %q", running, data)
+	}
+	// Nothing changed, so icebase, which got the secrets, is asked about (#555).
+	h.waitPoll(harnessDM, "Keep the host secrets on icebase?")
+}
+
+// TestCoreMoveReleaseRefused: the source refuses core.release, so the core
+// clearly stays on it and the owner is asked whether the target keeps the
+// secrets it got (#555).
+func TestCoreMoveReleaseRefused(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	m := h.moveHosts(h.b.nodes.Version(), true)
+	m.dstCore.mu.Lock()
+	m.dstCore.onRehearse = func() {
+		if _, err := h.b.nodes.Registry().Revoke(m.src); err != nil {
+			t.Error(err)
+		}
+	}
+	m.dstCore.mu.Unlock()
+	rec, body := h.startMove(m.src, m.dst, 2, 10)
+	if rec.State != nodes.MoveFailed || !strings.Contains(rec.Detail, "refused to release") {
+		t.Fatalf("the move ended %s: %s", rec.State, body)
+	}
+	h.waitPoll(harnessDM, "Keep the host secrets on icebase?")
+}
+
+// The keep-secrets question goes to the machine that clearly does not run
+// the core, and to none while that is unclear (#555).
+func TestSecretsQuestionFor(t *testing.T) {
+	t.Parallel()
+	steps := func(names ...string) (out []nodeproto.CoreMoveStep) {
+		for _, n := range names {
+			out = append(out, nodeproto.CoreMoveStep{Step: n})
+		}
+		return out
+	}
+	secrets, released := steps("secrets"), steps("secrets", "releasing", "release")
+	for _, c := range []struct {
+		name       string
+		state      string
+		steps      []nodeproto.CoreMoveStep
+		unanswered bool
+		want       string
+	}{
+		{"done", nodes.MoveDone, released, false, "src"},
+		{"failed before the secrets went", nodes.MoveFailed, steps("start"), false, ""},
+		{"failed before the release", nodes.MoveFailed, secrets, false, "dst"},
+		{"release refused", nodes.MoveFailed, released, false, "dst"},
+		{"rolled back", nodes.MoveRolledBack, released, false, "dst"},
+		{"failed after an unanswered release", nodes.MoveFailed, released, true, ""},
+		{"rolled back after an unanswered release", nodes.MoveRolledBack, released, true, ""},
+		{"unknown", nodes.MoveUnknown, released, false, ""},
+	} {
+		r := nodes.MoveRecord{Source: "src", SourceName: "src", Target: "dst", TargetName: "dst", State: c.state, Steps: c.steps, ReleaseUnanswered: c.unanswered}
+		if got, _ := secretsQuestionFor(r); got != c.want {
+			t.Errorf("%s: asked about %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 

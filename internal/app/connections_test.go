@@ -36,7 +36,10 @@ type fakeAI struct {
 	calls  []string // "METHOD path"
 	auth   []string // the key each call carried
 	files  [][]byte // the recordings sent
+	spoken []string // the texts sent to be read aloud
 	models int
+	// speechFails, when set, fails text-to-speech of a text containing it.
+	speechFails string
 }
 
 // useFakeAI points the connections of the bridges t makes at a fakeAI.
@@ -76,6 +79,19 @@ func (f *fakeAI) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/voices":
 		reply(map[string]any{"voices": []map[string]any{{"voice_id": "v1", "name": "Rachel"}}})
 	case strings.HasPrefix(r.URL.Path, "/v1/text-to-speech/"):
+		var req struct{ Text string }
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		f.mu.Lock()
+		fails := f.speechFails != "" && strings.Contains(req.Text, f.speechFails)
+		if !fails {
+			f.spoken = append(f.spoken, req.Text)
+		}
+		f.mu.Unlock()
+		if fails {
+			http.Error(w, "speech failed", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "audio/mpeg")
 		_, _ = w.Write([]byte("ID3fake"))
 	default:

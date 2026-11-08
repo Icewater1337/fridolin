@@ -333,6 +333,8 @@ func TestDeclarationThatGrowsWaitsForApproval(t *testing.T) {
 	r.cancel()
 	<-r.done
 	r.done <- nil
+	// Online below must not be answered by the connection that just ended.
+	waitFor(t, "the core to see the agent go", func() bool { return !c.svc.Online(a.ID()) })
 
 	// The owner adds host and a second rule to node.json.
 	b, err := Load(a.Dir, "test")
@@ -343,7 +345,10 @@ func TestDeclarationThatGrowsWaitsForApproval(t *testing.T) {
 	b.Config.Capabilities.Host = true
 	b.Config.Capabilities.Exec.Allow = append(b.Config.Capabilities.Exec.Allow, nodeproto.ExecRule{Name: exe, Args: []string{"helper-fail"}})
 	runAgent(t, b)
-	waitFor(t, "the grown declaration", func() bool { return b.Connected() && b.State().Commands == nodeproto.CommandsPending })
+	// The core welcomes a node before its session is live, so the node can be connected before the core can call it.
+	waitFor(t, "the grown declaration", func() bool {
+		return b.Connected() && c.svc.Online(a.ID()) && b.State().Commands == nodeproto.CommandsPending
+	})
 	ctx := context.Background()
 	if res, err := c.svc.Exec(ctx, a.ID(), nodeproto.ExecParams{Argv: []string{exe, "helper-echo", "still"}}); err != nil || res.Stdout != "still" {
 		t.Fatalf("what was approved before: %+v, %v", res, err)

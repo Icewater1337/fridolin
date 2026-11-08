@@ -41,9 +41,9 @@ type BrainAPI struct {
 	// LiveNext and LiveEnd serve a brain's live session (fridolin mcp
 	// --live, and its Stop hook, fridolin live-turn-end): the next
 	// message for it, waiting up to the given time, and the end of its
-	// turn with its last text.
+	// turn with its last text and the last turn its model read.
 	LiveNext func(ctx context.Context, token string, wait time.Duration) (claudecli.LiveEvent, bool, error)
-	LiveEnd  func(ctx context.Context, token, text string) error
+	LiveEnd  func(ctx context.Context, token, text, turn string) error
 }
 
 // maxLiveWait is the longest GET /brain/live/next waits for an event.
@@ -55,6 +55,9 @@ const maxTurnEndBody = 8 << 20
 // LiveTurnEnd is the body of POST /brain/live/turn-end.
 type LiveTurnEnd struct {
 	Text string `json:"text"`
+	// Turn is the "turn" of the last message the model read, "" when the
+	// hook could not tell: the Stop then answers no turn.
+	Turn string `json:"turn,omitempty"`
 }
 
 // brainLiveNext answers GET /brain/live/next?wait=SECONDS with the next
@@ -86,11 +89,11 @@ func (a *BrainAPI) brainLiveNext(w http.ResponseWriter, r *http.Request, _ *brai
 func (a *BrainAPI) brainLiveTurnEnd(w http.ResponseWriter, r *http.Request, _ *brainruntime.Brain) {
 	var req LiveTurnEnd
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteErr(w, http.StatusBadRequest, `the body is {"text": "<the turn's last text>"}`)
+		WriteErr(w, http.StatusBadRequest, `the body is {"text": "<the turn's last text>", "turn": "<the last turn read>"}`)
 		return
 	}
 	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if err := a.LiveEnd(r.Context(), tok, req.Text); err != nil {
+	if err := a.LiveEnd(r.Context(), tok, req.Text, req.Turn); err != nil {
 		WriteErr(w, statusFor(apperr.KindOf(err)), err.Error())
 		return
 	}
