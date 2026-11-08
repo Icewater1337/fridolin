@@ -127,6 +127,9 @@ var (
 	ErrWrongCode    = errors.New("the code does not match: start fridolin core receive again and use its new code")
 	ErrNotConfirmed = errors.New("the words were not confirmed; nothing was sent")
 	ErrTimeout      = errors.New("timed out")
+	// ErrCancelled: the caller's context was cancelled (Ctrl-C) while
+	// waiting on the network.
+	ErrCancelled = errors.New("cancelled")
 )
 
 // message is one line of the protocol: JSON, one object per line.
@@ -382,13 +385,22 @@ type Result struct {
 }
 
 // Receive waits for one sender and stores what it sends.
-func Receive(ctx context.Context, o ReceiveOptions) (Result, error) {
+func Receive(ctx context.Context, o ReceiveOptions) (res Result, err error) {
 	timeout := o.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// A cancel only ends the network waits; once storing began its result
+	// stands.
+	storing := false
+	defer func() {
+		if err != nil && !storing && errors.Is(parent.Err(), context.Canceled) {
+			err = ErrCancelled
+		}
+	}()
 	self, err := o.Net.Self(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("asking Tailscale about this device: %w", err)
@@ -422,6 +434,8 @@ func Receive(ctx context.Context, o ReceiveOptions) (Result, error) {
 		return Result{}, err
 	}
 	defer nc.Close()
+	stopConn := context.AfterFunc(ctx, func() { _ = nc.SetDeadline(time.Now()) })
+	defer stopConn()
 	dl, _ := ctx.Deadline()
 	_ = nc.SetDeadline(dl)
 	c := newConn(nc)
@@ -429,7 +443,7 @@ func Receive(ctx context.Context, o ReceiveOptions) (Result, error) {
 	if err != nil {
 		return Result{}, c.fail(fmt.Errorf("no device of the tailnet behind the connection (%s): %w", nc.RemoteAddr(), err))
 	}
-	res := Result{Peer: peer}
+	res = Result{Peer: peer}
 	if err := SameOwner(self, peer); err != nil {
 		return res, c.fail(err)
 	}
@@ -483,6 +497,7 @@ func Receive(ctx context.Context, o ReceiveOptions) (Result, error) {
 			return res, c.fail(fmt.Errorf("the bundle holds %s, which this machine does not take", name))
 		}
 	}
+	storing = true
 	res.Stored, res.Unchanged, err = storeAll(o.Store, secrets, o.Replace)
 	if err != nil {
 		return res, c.fail(err)
