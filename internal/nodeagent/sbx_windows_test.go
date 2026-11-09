@@ -8,18 +8,34 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 // sbxUserSIDForTest is the SID of the user the tests run as.
-func sbxUserSIDForTest(t *testing.T) string {
+func sbxUserSIDForTest(t *testing.T) *windows.SID {
 	t.Helper()
 	u, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return u.User.Sid.String()
+	return u.User.Sid
+}
+
+// allowedSIDs are the SIDs of acl's entries, and whether each allows.
+func allowedSIDs(t *testing.T, acl *windows.ACL) (sids []*windows.SID, allAllow bool) {
+	t.Helper()
+	allAllow = true
+	for i := uint32(0); acl != nil && i < uint32(acl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		allAllow = allAllow && ace.Header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE
+		sids = append(sids, (*windows.SID)(unsafe.Pointer(&ace.SidStart)))
+	}
+	return sids, allAllow
 }
 
 // Run as a user, not as the node's service, the agent runs sbx itself:
@@ -65,9 +81,21 @@ func TestSbxHostFolderOnWindows(t *testing.T) {
 	if err != nil || ctl&windows.SE_DACL_PROTECTED == 0 {
 		t.Errorf("not protected: %v %v (%s)", ctl, err, sd)
 	}
-	sddl, sid := sd.String(), sbxUserSIDForTest(t)
-	if strings.Count(sddl, "(A;") != 2 || !strings.Contains(sddl, ";;;SY)") || !strings.Contains(sddl, ";;;"+sid+")") {
-		t.Errorf("the folder's ACL %s: not SYSTEM and %s alone", sddl, sid)
+	// By SID, not SDDL text: SDDL names some SIDs by alias, the built-in
+	// Administrator's as LA, which CI's Windows runner runs as.
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := sbxUserSIDForTest(t)
+	sids, allAllow := allowedSIDs(t, dacl)
+	if len(sids) != 2 || !allAllow || !windows.EqualSid(sids[0], system) && !windows.EqualSid(sids[1], system) ||
+		!windows.EqualSid(sids[0], user) && !windows.EqualSid(sids[1], user) {
+		t.Errorf("the folder's ACL %s: not SYSTEM and %s alone", sd, user)
 	}
 	writeTestFile(t, filepath.Join(dir, "a.token"), "x")
 	if b, err := os.ReadFile(filepath.Join(dir, "a.token")); err != nil || string(b) != "x" {
