@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newKey(t testing.TB) (ed25519.PublicKey, ed25519.PrivateKey) {
@@ -71,17 +72,25 @@ func TestHelloCheck(t *testing.T) {
 	if err := ok.Check(); err != nil {
 		t.Fatal(err)
 	}
+	down := time.Date(2026, 11, 7, 11, 8, 0, 0, time.UTC)
+	healed := ok
+	healed.TailscaleOn = &TailscaleOn{Down: down, On: down.Add(19 * time.Hour)}
+	if err := healed.Check(); err != nil {
+		t.Fatal(err)
+	}
 	for name, mutate := range map[string]func(*Hello){
-		"short key":        func(h *Hello) { h.PublicKey = h.PublicKey[:10] },
-		"another's id":     func(h *Hello) { h.DeviceID = DeviceIDFor(other) },
-		"no name":          func(h *Hello) { h.Name = "" },
-		"long name":        func(h *Hello) { h.Name = strings.Repeat("n", MaxNameLen+1) },
-		"control in name":  func(h *Hello) { h.Name = "a\nb" },
-		"newline in os":    func(h *Hello) { h.OS = "linux\n" },
-		"shell allowed":    func(h *Hello) { h.Capabilities.Exec = &ExecCap{Allow: []ExecRule{{Name: "bash"}}} },
-		"relative root":    func(h *Hello) { h.Capabilities.FS = &FSCap{Roots: []FSRoot{{Path: "docs"}}} },
-		"bad pattern":      func(h *Hello) { h.Capabilities.Exec = &ExecCap{Allow: []ExecRule{{Name: "git", Args: []string{"("}}}} },
-		"relative program": func(h *Hello) { h.Capabilities.Exec = &ExecCap{Allow: []ExecRule{{Name: "bin/tool"}}} },
+		"tailscale on before down": func(h *Hello) { h.TailscaleOn = &TailscaleOn{Down: down, On: down.Add(-time.Second)} },
+		"tailscale on, no down":    func(h *Hello) { h.TailscaleOn = &TailscaleOn{On: down} },
+		"short key":                func(h *Hello) { h.PublicKey = h.PublicKey[:10] },
+		"another's id":             func(h *Hello) { h.DeviceID = DeviceIDFor(other) },
+		"no name":                  func(h *Hello) { h.Name = "" },
+		"long name":                func(h *Hello) { h.Name = strings.Repeat("n", MaxNameLen+1) },
+		"control in name":          func(h *Hello) { h.Name = "a\nb" },
+		"newline in os":            func(h *Hello) { h.OS = "linux\n" },
+		"shell allowed":            func(h *Hello) { h.Capabilities.Exec = &ExecCap{Allow: []ExecRule{{Name: "bash"}}} },
+		"relative root":            func(h *Hello) { h.Capabilities.FS = &FSCap{Roots: []FSRoot{{Path: "docs"}}} },
+		"bad pattern":              func(h *Hello) { h.Capabilities.Exec = &ExecCap{Allow: []ExecRule{{Name: "git", Args: []string{"("}}}} },
+		"relative program":         func(h *Hello) { h.Capabilities.Exec = &ExecCap{Allow: []ExecRule{{Name: "bin/tool"}}} },
 	} {
 		h := ok
 		mutate(&h)

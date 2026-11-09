@@ -559,6 +559,12 @@ frideHostNoLoginNotice
 	Once the token is stored, the core logs in the instance running there within a few minutes.
 fridePlacedNotice
 	🛠️ *FrIDE #3* went to laptop now.
+nodeTailscaleOnNotice
+	🔌 *mini* is connected again. Tailscale on that machine was off, so the node could not reach me for 19 h 29 min; it switched Tailscale back on by itself.
+nodeTailscaleOnNotice(minutes)
+	🔌 *mini* is connected again. Tailscale on that machine was off, so the node could not reach me for 2 min; it switched Tailscale back on by itself.
+nodeTailscaleOnNotice(hours)
+	🔌 *mini* is connected again. Tailscale on that machine was off, so the node could not reach me for 3 h; it switched Tailscale back on by itself.
 frideInstanceQueuedNotice
 	⏳ *FrIDE #4* waits: the FrIDE instance work cannot take it now (no node has room for the FrIDE instance work (6144 MB, or 3072 MB at the least): mini has 1000 MB free beyond its reserve). It starts as soon as it can, and I'll say so here.
 frideInstanceSmallerNotice

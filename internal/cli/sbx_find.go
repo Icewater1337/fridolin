@@ -27,6 +27,24 @@ func findDocker() string {
 	return findProgram("docker", "/usr/local/bin/docker", "/opt/homebrew/bin/docker")
 }
 
+// findTailscale is the machine's Tailscale CLI: on PATH, else inside the
+// macOS app (a launchd agent's short PATH lacks the app's /usr/local/bin
+// link), or on Windows where Tailscale's installer puts it (internal/doctor
+// looks in the same places). "" when there is none.
+func findTailscale() string {
+	if runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("tailscale"); err == nil {
+			return p
+		}
+		const p = `C:\Program Files\Tailscale\tailscale.exe`
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		return ""
+	}
+	return findProgram("tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale")
+}
+
 // findProgram looks name up on PATH, then at each of places.
 func findProgram(name string, places ...string) string {
 	if p, err := exec.LookPath(name); err == nil {

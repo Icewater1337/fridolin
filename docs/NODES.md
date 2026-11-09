@@ -202,6 +202,17 @@ $core = "fridolin-core.$tailnet"
 Test-NetConnection $core -Port 8766   # TcpTestSucceeded: True
 ```
 
+The node reaches the core over this Tailscale from then on. If it comes
+back switched off, after a restart for instance, the node switches it on
+again by itself: once the core has been out of reach for two minutes and
+`tailscale status` says `Stopped` (signed in, switched off), it runs
+`tailscale up`, which keeps every setting, tries again later, waiting
+longer each time, if that fails, and the core tells the owner in WhatsApp
+once the node is back. It leaves a Tailscale that needs a sign-in to the
+owner; the node's log says so. Where the node runs as a user that may not
+switch Tailscale on (Linux without `sudo tailscale set --operator=$USER`),
+the try fails and is logged.
+
 ### 3. Build fridolin
 
 In the clone (no C compiler needed):
