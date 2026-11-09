@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // Risk is how far a skill's steps reach, the highest of them: read
@@ -448,7 +449,19 @@ func slug(name string) string {
 	if b.Len() == 0 {
 		return "skill"
 	}
-	return truncate(b.String(), maxName)
+	return strings.TrimRight(cut(b.String(), maxName), "-")
+}
+
+// cut cuts s to at most n bytes at a rune boundary, with no "…": for
+// generated values that must fit a limit (truncate is for messages).
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // firstHeading is the text of a markdown file's first heading, without
@@ -458,7 +471,7 @@ func firstHeading(body string) string {
 		if t := strings.TrimSpace(line); strings.HasPrefix(t, "#") {
 			t = strings.TrimSpace(strings.TrimLeft(t, "#"))
 			t = strings.TrimSpace(strings.TrimPrefix(t, "Skill:"))
-			return truncate(t, maxDescription)
+			return cut(t, maxDescription)
 		}
 	}
 	return ""

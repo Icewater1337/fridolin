@@ -779,6 +779,24 @@ func TestSkillPolicyFromTheDashboard(t *testing.T) {
 	}
 }
 
+// TestSkillPolicyForALongNamedFile: a file without a frontmatter whose
+// name and first heading are too long for the limits still takes a
+// policy from the dashboard (#627).
+func TestSkillPolicyForALongNamedFile(t *testing.T) {
+	t.Parallel()
+	h := policyHarness(t, "", []testutil.FakeMCPStep{})
+	rel := "skills/" + strings.Repeat("a", 70) + ".md"
+	if err := os.WriteFile(filepath.Join(h.Home(), "taxes", filepath.FromSlash(rel)), []byte("# "+strings.Repeat("d", 1100)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if w := h.Do("PUT", "/api/brains/taxes/skills/policy", map[string]any{"path": rel, "risk": "read"}); w.Code != http.StatusOK {
+		t.Fatalf("edit: %d %s", w.Code, w.Body.String())
+	}
+	if s := h.skill("taxes", rel); s.Status != skillApproved {
+		t.Errorf("after the edit: %+v", s)
+	}
+}
+
 // TestLockdownCoversIntentsAndNodes: what M5's policy calls writing
 // beyond its own tools. A lockdown refuses setting a standing intent,
 // also to a run that answers the owner, and the core's node calls that

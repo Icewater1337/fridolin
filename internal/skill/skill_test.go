@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const taxes = `---
@@ -163,6 +164,33 @@ func TestBlockScalars(t *testing.T) {
 	for k, want := range map[string]string{"a": "one\ntwo\n", "b": "x y\nz\n", "c": "it's", "d": "q\"é"} {
 		if got := n.Get(k).Value; got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// Names and descriptions made up for a file without a frontmatter fit
+// the limits, so the file written parses (#627).
+func TestWithPolicyCutsGeneratedValues(t *testing.T) {
+	long := strings.Repeat("a", 63) + " " + strings.Repeat("b", 6) // slug cut right after the hyphen
+	cases := map[string]string{
+		"skills/" + long + ".md": "# Short\n",
+		"skills/x.md":            "# " + strings.Repeat("d", 1100) + "\n",
+		"skills/y.md":            "# " + strings.Repeat("d", 1023) + "é tail\n", // é across byte 1024
+	}
+	for rel, body := range cases {
+		out, err := WithPolicy(rel, []byte(body), Policy{Risk: RiskRead}, "")
+		if err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+		s, err := Parse(rel, out)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", rel, err, out)
+		}
+		if len(s.Name) > maxName || !nameRe.MatchString(s.Name) || strings.HasSuffix(s.Name, "-") {
+			t.Errorf("%s: name %q", rel, s.Name)
+		}
+		if len(s.Description) > maxDescription || !utf8.ValidString(s.Description) || strings.Contains(s.Description, "…") {
+			t.Errorf("%s: description %q", rel, s.Description)
 		}
 	}
 }
