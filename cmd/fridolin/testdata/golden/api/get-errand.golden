@@ -6,6 +6,7 @@ Content-Type: application/json
   "brain": "main",
   "brief": "Sam is free on Tuesday and Thursday evenings.",
   "by_owner": true,
+  "calendar": "",
   "created": "<TIME>",
   "days": 3,
   "deadline": "<TIME>",

@@ -1117,6 +1117,8 @@ export interface ErrandPerson {
   mode: string;
   /** What Fridolin may always tell them about the owner. */
   brief: string;
+  /** The most errands with them may do with the owner's calendar: off, offer, book_after_yes, book, or "" for what brain.json allows. */
+  calendar: string;
   /** When Fridolin warned them, within the month a second try blocks them. */
   warned?: string;
   /** When they last changed. */
@@ -1144,6 +1146,12 @@ export interface ErrandDetail extends ErrandView {
   by_owner: boolean;
   days: number;
   max_messages: number;
+  /** The most it may do with the owner's calendar, "" for what brain.json and the person allow. */
+  calendar: string;
+  /** Its booking: asking (the owner is asked to confirm), booking or booked. */
+  booking?: string;
+  booking_from?: string;
+  booking_to?: string;
   lines: ErrandLine[];
 }
 

@@ -127,10 +127,10 @@ func TestErrandConversations(t *testing.T) {
 	if err != nil || c.Mode != ContactConverse || c.Brief != "" || !c.WarnedAt.IsZero() || c.Warned(now) {
 		t.Fatalf("a new contact: %+v %v", c, err)
 	}
-	if ok, err := s.SetErrandContactWays(ctx, alex, ContactForward, "Alex is Sam's brother.", now); !ok || err != nil {
+	if ok, err := s.SetErrandContactWays(ctx, alex, ContactForward, "Alex is Sam's brother.", "offer", now); !ok || err != nil {
 		t.Fatalf("setting the ways: %v %v", ok, err)
 	}
-	if ok, _ := s.SetErrandContactWays(ctx, "15550000000", ContactForward, "", now); ok { // personal-data:ignore (a fictional 555 number)
+	if ok, _ := s.SetErrandContactWays(ctx, "15550000000", ContactForward, "", "", now); ok { // personal-data:ignore (a fictional 555 number)
 		t.Error("set the ways of nobody")
 	}
 	if err := s.WarnErrandContact(ctx, alex, now); err != nil {
@@ -140,7 +140,7 @@ func TestErrandConversations(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, _ = s.ErrandContactOf(ctx, alex)
-	if c.Name != "Alex P." || c.Mode != ContactForward || c.Brief != "Alex is Sam's brother." || !c.WarnedAt.Equal(now) || !c.Warned(now.Add(ErrandWarningKeep-time.Minute)) || c.Warned(now.Add(ErrandWarningKeep)) {
+	if c.Name != "Alex P." || c.Mode != ContactForward || c.Brief != "Alex is Sam's brother." || c.Calendar != "offer" || !c.WarnedAt.Equal(now) || !c.Warned(now.Add(ErrandWarningKeep-time.Minute)) || c.Warned(now.Add(ErrandWarningKeep)) {
 		t.Errorf("saved again: %+v", c)
 	}
 	if ok, _ := s.UnblockErrandContact(ctx, alex, now); ok {
@@ -185,6 +185,42 @@ func TestErrandConversations(t *testing.T) {
 	lines, err := s.EarlierErrandLines(ctx, alex, "e3", 3)
 	if err != nil || len(lines) != 3 || lines[0].Text != "e1you" || lines[2].Text != "e2you" {
 		t.Errorf("earlier lines: %+v %v", lines, err)
+	}
+}
+
+// TestErrandBooking: an errand keeps how far it may use the calendar,
+// and makes one booking: the move from one state to the next takes only
+// from the state it expects.
+func TestErrandBooking(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := s.AddErrand(ctx, Errand{ID: "e1", Brain: "core", Contact: "15551234567", Name: "Alex", State: ErrandOpen, Chat: "c", Days: 1, CreatedAt: now, Deadline: now.Add(time.Hour), Calendar: "offer"}); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := s.GetErrand(ctx, "e1"); e.Calendar != "offer" || e.Booked != "" || !e.BookedFrom.IsZero() {
+		t.Fatalf("a new errand: %+v", e)
+	}
+	from, to := now.Add(24*time.Hour), now.Add(25*time.Hour)
+	if ok, err := s.SetErrandBooking(ctx, "e1", "", BookingAsking+"a1", from, to); !ok || err != nil {
+		t.Fatalf("asking: %v %v", ok, err)
+	}
+	if ok, _ := s.SetErrandBooking(ctx, "e1", "", BookingMaking, from, to); ok {
+		t.Error("a second booking while the first is asked for")
+	}
+	if ok, _ := s.SetErrandBooking(ctx, "e1", BookingAsking+"a1", BookingEvent+"ev1", from, to); !ok {
+		t.Error("booking what was asked for")
+	}
+	e, _ := s.GetErrand(ctx, "e1")
+	if e.Booked != BookingEvent+"ev1" || !e.BookedFrom.Equal(from) || !e.BookedTo.Equal(to) {
+		t.Errorf("booked: %+v", e)
+	}
+	if ok, _ := s.SetErrandBooking(ctx, "e1", BookingEvent+"ev1", "", time.Time{}, time.Time{}); !ok {
+		t.Error("clearing it")
+	}
+	if e, _ := s.GetErrand(ctx, "e1"); e.Booked != "" || !e.BookedFrom.IsZero() {
+		t.Errorf("cleared: %+v", e)
 	}
 }
 

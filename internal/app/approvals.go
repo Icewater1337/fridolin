@@ -702,6 +702,10 @@ func (b *App) deliverAnswer(a store.Approval) {
 		go b.errandDecided(a)
 		return
 	}
+	if a.Notify == errandBookingNotify {
+		go b.errandBookingDecided(a)
+		return
+	}
 	br := b.brainMgr.Get(a.Notify)
 	if br == nil || a.Chat == "" {
 		log.Printf("approval %s: the answer came once its run was over, and brain %s is not there to hear it", a.ID, a.Notify)
