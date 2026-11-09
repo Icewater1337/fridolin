@@ -95,7 +95,7 @@ advertisement changes with recordings anyway, and uses that if it does. The find
 
   ```bash
   brew install --cask android-commandlinetools
-  sdkmanager "platforms;android-35" "build-tools;35.0.0"
+  sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
   ```
 
 ## Build and test

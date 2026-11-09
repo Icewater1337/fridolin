@@ -69,11 +69,13 @@ for you:
 3. **Build phone app**. Fridolin builds `plaud-android/` of the checkout it
    was installed from with Gradle, which needs a JDK 17 or newer and the
    Android SDK on this computer (`brew install openjdk@21`, `brew install
-   --cask android-commandlinetools`, then `sdkmanager "platforms;android-35"
-   "build-tools;35.0.0"`). It finds them through `JAVA_HOME` and
+   --cask android-commandlinetools`, then `sdkmanager
+   "platforms;android-37.0" "build-tools;36.0.0"`; where the SDK's
+   licences are accepted, Gradle fetches a missing platform or build
+   tools itself). It finds them through `JAVA_HOME` and
    `ANDROID_HOME` in the service's environment, else where Homebrew and
    Android Studio put them; of several JDKs it takes the newest that the
-   app's Gradle runs on (up to 23). The first build downloads Gradle and
+   app's Gradle runs on (up to 27). The first build downloads Gradle and
    Plaud's SDK and takes a few minutes.
 
    Where this computer has neither, as the fridolin-core container

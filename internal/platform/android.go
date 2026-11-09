@@ -14,11 +14,11 @@ import (
 
 // The JDKs the Plaud Sync app (plaud-android/) builds with: the Android
 // Gradle plugin needs 17 or newer, and the Gradle of the app's wrapper
-// (8.10, gradle-wrapper.properties) runs on at most 23. A newer JDK is
+// (9.8, gradle-wrapper.properties) runs on at most 27. A newer JDK is
 // taken only when no JDK in that range is there.
 const (
 	MinAndroidJDK = 17
-	maxGradleJDK  = 23
+	maxGradleJDK  = 27
 )
 
 // AndroidToolchain is a JDK and an Android SDK to build an app with.
@@ -108,7 +108,7 @@ func FindAndroidToolchain(l AndroidLookup) (AndroidToolchain, error) {
 	case tc.JavaHome == "":
 		return tc, errors.New("no JDK 17 or newer found to build the app with: install one (brew install openjdk@21), or set JAVA_HOME in the service's environment")
 	case tc.SDK == "":
-		return tc, errors.New(`no Android SDK found to build the app with: brew install --cask android-commandlinetools, then sdkmanager "platforms;android-35" "build-tools;35.0.0"; or set ANDROID_HOME in the service's environment`)
+		return tc, errors.New(`no Android SDK found to build the app with: brew install --cask android-commandlinetools, then sdkmanager "platforms;android-37.0" "build-tools;36.0.0"; or set ANDROID_HOME in the service's environment`)
 	}
 	if ents, err := os.ReadDir(filepath.Join(tc.SDK, "platforms")); err == nil {
 		for _, e := range ents {
@@ -119,7 +119,7 @@ func FindAndroidToolchain(l AndroidLookup) (AndroidToolchain, error) {
 		slices.Sort(tc.Platforms)
 	}
 	if len(tc.Platforms) == 0 {
-		return tc, errors.New(`the Android SDK at ` + tc.SDK + ` has no platform: sdkmanager "platforms;android-35" "build-tools;35.0.0"`)
+		return tc, errors.New(`the Android SDK at ` + tc.SDK + ` has no platform: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"`)
 	}
 	return tc, nil
 }
