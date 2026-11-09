@@ -31,7 +31,7 @@ func TestPrepareCaches(t *testing.T) {
 	if err != nil || got != filepath.Join(root, "caches", "work") {
 		t.Fatalf("%q %v", got, err)
 	}
-	if env := frideInstanceCacheEnv(got); len(env) != 4 || env[0] != "GOMODCACHE="+got+"/gomod" {
+	if env := frideInstanceCacheEnv(got); len(env) != 4 || env[0] != "GOMODCACHE="+filepath.Join(got, "gomod") {
 		t.Errorf("env %v", env)
 	}
 	for _, bad := range []string{filepath.Join(state, "caches"), root} {
