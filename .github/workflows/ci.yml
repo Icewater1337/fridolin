@@ -95,7 +95,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           name="rclone-$PINNED_RCLONE_VERSION-linux-amd64"
-          curl -fsSLo rclone.zip "https://downloads.rclone.org/$PINNED_RCLONE_VERSION/$name.zip"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o rclone.zip "https://downloads.rclone.org/$PINNED_RCLONE_VERSION/$name.zip"
           echo "$PINNED_RCLONE_SHA256  rclone.zip" | sha256sum -c -
           unzip -q rclone.zip
           sudo install -m 0755 "$name/rclone" /usr/local/bin/rclone
