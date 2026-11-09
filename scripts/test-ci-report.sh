@@ -36,6 +36,9 @@ case "$1 $2" in
 "api --paginate") cat "$FAKE/jobs.json" ;;
 "api repos/"*/logs) id="${2%/logs}"; cat "$FAKE/log.${id##*/}" ;;
 "api repos/"*/commits/main) printf '{"sha":"%s"}\n' "$(cat "$FAKE/tip")" ;;
+"api repos/"*/comments*)
+	n="${2%/comments*}" n="${n##*/}"
+	if [ -f "$FAKE/comments.$n" ]; then cat "$FAKE/comments.$n"; else echo '[]'; fi ;;
 "run download")
 	dir="${args[${#args[@]} - 1]}"
 	[ -d "$FAKE/artifact" ] || exit 1
@@ -99,10 +102,34 @@ check() {
 	fi
 }
 
+# report_body KIND JOB... — a body as the script writes it, or a comment of
+# its, naming the jobs a failure was in.
+report_body() {
+	local kind="$1"
+	shift
+	printf '<!-- ci-main-report kind=%s -->\n**TestX** failed on `main`.\n\nJobs:\n' "$kind"
+	printf -- '- `%s`\n' "$@"
+	printf '\nFailure (from the first job):\n\n```\nboom\n```\n'
+}
+
+# issue NUMBER STATE TITLE BODY — one issue as gh issue list answers it;
+# issues.json is a list of them (jq -s).
+issue() {
+	jq -n --argjson n "$1" --arg s "$2" --arg t "$3" --arg b "$4" '{number: $n, state: $s, title: $t, body: $b}'
+}
+
+# comment BODY — one comment as the REST API answers it; comments.N is
+# a list of them (jq -s).
+comment() {
+	jq -n --arg b "$1" '{body: $b}'
+}
+
 called() { grep -qxF -- "$1" "$FAKE/calls"; }
 not_called() { ! grep -qF -- "$1" "$FAKE/calls"; }
 body_has() { grep -qF -- "$2" "$FAKE/body.$1"; }
 not_in_body() { ! grep -qF -- "$2" "$FAKE/body.$1"; }
+# lists_job N JOB — body N has JOB in its Jobs list.
+lists_job() { grep -A20 -x 'Jobs:' "$FAKE/body.$1" | grep -qxF -- "- \`$2\`"; }
 
 # ── a fuzz finding, a test failing on two systems, a build failure, gofmt ──
 setup mixed
@@ -210,16 +237,18 @@ check "hostile: the job still gets one" grep -q '^issue create --repo o/r --titl
 # ── a green run on main's tip closes what this script opened ──
 setup green
 jobs 10:success:fuzz "20:success:go (ubuntu-latest, stable, 1/2)" 30:skipped:web
-cat >"$FAKE/issues.json" <<'EOF'
-[{"number":9,"title":"CI on main: TestOld failing","state":"OPEN","body":"<!-- ci-main-report kind=test -->\nx"},
- {"number":10,"title":"CI on main: FuzzOld failing","state":"OPEN","body":"<!-- ci-main-report kind=fuzz -->\nx"},
- {"number":11,"title":"CI on main: TestMine failing","state":"OPEN","body":"opened by a person"},
- {"number":12,"title":"CI on main: TestGone failing","state":"CLOSED","body":"<!-- ci-main-report kind=test -->"}]
-EOF
+{
+	issue 9 OPEN "CI on main: TestOld failing" "$(report_body test "go (ubuntu-latest, stable, 1/2)")"
+	issue 10 OPEN "CI on main: FuzzOld failing" "$(report_body fuzz fuzz)"
+	issue 11 OPEN "CI on main: TestMine failing" "opened by a person"
+	issue 12 CLOSED "CI on main: TestGone failing" "$(report_body test "go (ubuntu-latest, stable, 1/2)")"
+	issue 13 OPEN "CI on main: more failures than one run reports" "$(report_body overflow "go (ubuntu-latest, stable, 1/2)")"
+} | jq -s . >"$FAKE/issues.json"
 run
 check "green: a test's issue is closed" grep -q '^issue close 9 --repo o/r --reason completed ' "$FAKE/calls"
 check "green: a fuzz target's issue is closed" grep -q '^issue close 10 ' "$FAKE/calls"
 check "green: an issue a person opened stays open" not_called "issue close 11"
+check "green: the issue of too many failures is closed" grep -q '^issue close 13 ' "$FAKE/calls"
 check "green: nothing is opened" not_called "issue create"
 
 # ── the same, but main moved on while the run went ──
@@ -244,6 +273,50 @@ check "partial: the fuzz target's issue is closed" grep -q '^issue close 10 ' "$
 check "partial: the failing test's issue is not" not_called "issue close 9"
 check "partial: it gets a comment" grep -q '^issue comment 9 ' "$FAKE/calls"
 
+# ── a green push to main, which skips go-windows and the macOS jobs (#630) ──
+# They run on schedule and on demand only. A job the run skipped says
+# nothing about a test that fails there: its issue stays open until a run
+# in which every job its reports name ran and passed.
+setup skipped
+jobs 10:success:fuzz "20:success:go (ubuntu-latest, stable, 1/2)" "25:skipped:go (macos-latest, \${{ matrix.go }})" \
+	26:skipped:go-windows
+{
+	issue 9 OPEN "CI on main: TestOld failing" "$(report_body test "go (ubuntu-latest, stable, 1/2)")"
+	issue 20 OPEN "CI on main: TestOnWindows failing" "$(report_body test go-windows)"
+	issue 21 OPEN "CI on main: TestOnMac failing" "$(report_body test "go (macos-latest, stable, 2/4)")"
+	issue 22 OPEN "CI on main: TestBoth failing" "$(report_body test "go (ubuntu-latest, stable, 1/2)" go-windows)"
+	issue 23 OPEN "CI on main: TestReopened failing" "$(report_body test "go (ubuntu-latest, stable, 1/2)")"
+	issue 24 OPEN "CI on main: TestNoJobs failing" "$(printf '<!-- ci-main-report kind=test -->\nfailed, written before the jobs were listed.\n')"
+} | jq -s . >"$FAKE/issues.json"
+# 23 passed once, then failed on Windows, which a comment of the script's
+# says; a comment of a person's lists no job of the script's.
+{
+	comment "Passed on \`main\` at $tip in [run 41](https://github.com/o/r/actions/runs/41). Reopened if it fails again."
+	comment "$(report_body test go-windows)"
+	comment "$(printf 'Jobs:\n- `go (windows-made-up)`\n')"
+} | jq -s . >"$FAKE/comments.23"
+run
+check "skipped: the script succeeds" succeeded
+check "skipped: an issue of a job that ran and passed is closed" grep -q '^issue close 9 ' "$FAKE/calls"
+check "skipped: a go-windows issue stays open" not_called "issue close 20"
+check "skipped: an issue of a job not in the run stays open" not_called "issue close 21"
+check "skipped: an issue of two jobs, one of them skipped, stays open" not_called "issue close 22"
+check "skipped: so does one whose comment names a skipped job" not_called "issue close 23"
+check "skipped: an issue that names no job stays open" not_called "issue close 24"
+check "skipped: the summary says what stayed open" grep -q '^kept open: #20' "$FAKE/summary"
+
+# ── the weekly run, in which go-windows and the macOS jobs ran and passed ──
+setup weekly
+jobs 10:success:fuzz "20:success:go (ubuntu-latest, stable, 1/2)" "25:success:go (macos-latest, stable, 2/4)" \
+	26:success:go-windows
+cp "$work/skipped/issues.json" "$work/skipped/comments.23" "$FAKE/"
+run
+check "weekly: the go-windows issue is closed" grep -q '^issue close 20 --repo o/r --reason completed ' "$FAKE/calls"
+check "weekly: the macOS one" grep -q '^issue close 21 ' "$FAKE/calls"
+check "weekly: the one of two jobs" grep -q '^issue close 22 ' "$FAKE/calls"
+check "weekly: the one whose comment names go-windows, not counting a person's comment" grep -q '^issue close 23 ' "$FAKE/calls"
+check "weekly: an issue that names no job still stays open" not_called "issue close 24"
+
 # ── more failures than one run reports ──
 setup many
 jobs "20:failure:go (ubuntu-latest, stable, 1/2)"
@@ -260,6 +333,7 @@ MAX_ISSUES=2 run
 check "many: two issues of their own" test "$(grep -c '^issue create --repo o/r --title CI on main: Test' "$FAKE/calls")" = 2
 check "many: the rest in one more" grep -q '^issue create --repo o/r --title CI on main: more failures than one run reports ' "$FAKE/calls"
 check "many: which names it" body_has 3 "CI on main: TestC failing"
+check "many: and its jobs, so a later run can close it" lists_job 3 "go (ubuntu-latest, stable, 1/2)"
 
 # ── another workflow's report: its own titles and label ──
 setup nightly

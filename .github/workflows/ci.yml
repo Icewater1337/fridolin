@@ -312,7 +312,8 @@ jobs:
           retention-days: 30
 
   # A run on main reports itself in issues (scripts/ci-report.sh): one per
-  # failing fuzz target or test, which a later run that passes closes.
+  # failing fuzz target or test, which a later run that passes closes, once
+  # the jobs it failed in ran in it (a push skips go-windows and macOS).
   # Nobody watches main's runs, and a failure after a merge shows in no
   # pull request. Pushes to main of this repository only, so the write
   # permission is never in a run a pull request or a fork started. It runs
