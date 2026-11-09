@@ -95,7 +95,21 @@
         "intro": {"type": "string", "maxLength": 300, "description": "What Fridolin's first message to someone opens with. Default: Hi, this is Fridolin, <owner_name>'s assistant."},
         "model": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$", "description": "The OpenAI model of the errands' runs in Codex mode. Default gpt-5. In Claude mode they run on the brain's model."},
         "persona": {"type": "string", "maxLength": 500, "description": "How Fridolin comes across to the people it talks with, e.g. warm, a bit witty, Swiss du. Default: warm and natural, with a light touch of humour."},
-        "profile": {"type": "string", "maxLength": 2000, "description": "What Fridolin may tell anyone it talks with about you, e.g. that you usually answer in the evening. Each person's own brief and each errand's brief add to it."}
+        "profile": {"type": "string", "maxLength": 2000, "description": "What Fridolin may tell anyone it talks with about you, e.g. that you usually answer in the evening. Each person's own brief and each errand's brief add to it."},
+        "calendar": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["mode"],
+          "description": "How far errands may use this brain's calendar: offer its free times, or book one, within these hours. Each person and each errand may narrow it (docs/BRAINS.md, Calendar in errands).",
+          "properties": {
+            "mode": {"type": "string", "enum": ["", "book", "book_after_yes", "off", "offer"], "description": "off (also \"\"); offer (free times only); book_after_yes (you confirm each booking in a poll); book."},
+            "days": {"type": ["array", "null"], "items": {"type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}, "description": "The weekdays. Default Monday to Friday."},
+            "from": {"type": "string", "pattern": "^([01][0-9]|2[0-4]):[0-5][0-9]$", "description": "Start of the hours, HH:MM. Default 08:00."},
+            "to": {"type": "string", "pattern": "^([01][0-9]|2[0-4]):[0-5][0-9]$", "description": "End of the hours, HH:MM. Default 20:00."},
+            "days_ahead": {"type": "integer", "minimum": 0, "maximum": 60, "description": "How many days ahead. Default 14."},
+            "max_minutes": {"type": "integer", "minimum": 0, "maximum": 480, "description": "The longest booking, 15 or more. Default 90."}
+          }
+        }
       }
     },
     "github": {

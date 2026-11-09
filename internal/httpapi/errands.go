@@ -68,6 +68,9 @@ type ErrandPerson struct {
 	Mode string `json:"mode"`
 	// Brief is what Fridolin may always tell them about the owner.
 	Brief string `json:"brief"`
+	// Calendar is the most errands with them may do with the owner's
+	// calendar, "" for what brain.json allows.
+	Calendar string `json:"calendar"`
 	// Warned is when Fridolin warned them, within the month a second try
 	// blocks them.
 	Warned *time.Time `json:"warned,omitempty"`
@@ -78,8 +81,9 @@ type ErrandPerson struct {
 // PersonWays is PUT /api/errand-contacts/{number}: how Fridolin deals
 // with someone it knows.
 type PersonWays struct {
-	Mode  string `json:"mode"`
-	Brief string `json:"brief"`
+	Mode     string `json:"mode"`
+	Brief    string `json:"brief"`
+	Calendar string `json:"calendar"`
 }
 
 // ErrandsResponse is GET /api/errands: the errands that have not ended,
@@ -109,7 +113,15 @@ type ErrandDetail struct {
 	ByOwner bool `json:"by_owner"`
 	Days    int  `json:"days"`
 	// MaxMessages is how many messages Fridolin writes at most.
-	MaxMessages int          `json:"max_messages"`
+	MaxMessages int `json:"max_messages"`
+	// Calendar is the most it may do with the owner's calendar, "" for
+	// what brain.json and the person allow.
+	Calendar string `json:"calendar"`
+	// Booking is its booking: asking (the owner is asked to confirm),
+	// booking or booked; From and To are its time.
+	Booking     string       `json:"booking,omitempty"`
+	BookingFrom *time.Time   `json:"booking_from,omitempty"`
+	BookingTo   *time.Time   `json:"booking_to,omitempty"`
 	Lines       []ErrandLine `json:"lines"`
 }
 

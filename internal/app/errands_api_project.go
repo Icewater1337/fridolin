@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func (b *App) errandsList(ctx context.Context) (httpapi.ErrandsResponse, error) 
 
 func errandPersonOf(c store.ErrandContact) httpapi.ErrandPerson {
 	p := httpapi.ErrandPerson{Number: c.Contact, Masked: maskedNumber(c.Contact), Name: c.Name, Brain: c.Brain, State: c.State, Reason: c.Reason,
-		Mode: c.Mode, Brief: c.Brief, Since: c.UpdatedAt}
+		Mode: c.Mode, Brief: c.Brief, Calendar: c.Calendar, Since: c.UpdatedAt}
 	if c.Warned(time.Now()) {
 		warned := c.WarnedAt
 		p.Warned = &warned
@@ -72,11 +73,13 @@ func errandPersonOf(c store.ErrandContact) httpapi.ErrandPerson {
 	return p
 }
 
-// checkContactWays reports what is wrong with setting contact's mode
-// and brief, "" for nothing: what errand_contact and the Errands page
-// refuse alike.
-func checkContactWays(contact store.ErrandContact, mode, brief string) (string, apperr.Kind) {
+// checkContactWays reports what is wrong with setting contact's mode,
+// brief and calendar, "" for nothing: what errand_contact and the Errands
+// page refuse alike.
+func checkContactWays(contact store.ErrandContact, mode, brief, calendar string) (string, apperr.Kind) {
 	switch {
+	case calendar != "" && !slices.Contains(errand.CalendarModes, calendar):
+		return "calendar is off, offer, book_after_yes, book, or \"\" for what brain.json allows", apperr.Invalid
 	case contact.State == store.ContactBlocked:
 		return fmt.Sprintf("+%s is blocked: only the owner lifts that, with !unblock %s", contact.Contact, contact.Contact), apperr.Conflict
 	case mode != store.ContactConverse && mode != store.ContactForward:
@@ -101,11 +104,11 @@ func (b *App) dashboardSetPerson(ctx context.Context, written string, ways httpa
 	if err != nil {
 		return httpapi.ErrandPerson{}, err
 	}
-	mode, brief := strings.TrimSpace(ways.Mode), strings.TrimSpace(ways.Brief)
-	if why, kind := checkContactWays(contact, mode, brief); why != "" {
+	mode, brief, calendar := strings.TrimSpace(ways.Mode), strings.TrimSpace(ways.Brief), strings.TrimSpace(ways.Calendar)
+	if why, kind := checkContactWays(contact, mode, brief, calendar); why != "" {
 		return httpapi.ErrandPerson{}, apperr.New(kind, why)
 	}
-	if _, err := b.store.SetErrandContactWays(ctx, number, mode, brief, time.Now()); err != nil {
+	if _, err := b.store.SetErrandContactWays(ctx, number, mode, brief, calendar, time.Now()); err != nil {
 		return httpapi.ErrandPerson{}, err
 	}
 	b.audit.Append(audit.Entry{Kind: audit.Errand, By: "dashboard", ID: logx.MaskJID(number, "", ""), Detail: "contact", Outcome: mode})
@@ -128,7 +131,19 @@ func (b *App) errandDetail(ctx context.Context, id string) (httpapi.ErrandDetail
 	if err != nil {
 		return httpapi.ErrandDetail{}, err
 	}
-	out := httpapi.ErrandDetail{ErrandView: errandViewOf(e), Goal: e.Goal, Brief: e.Brief, ByOwner: e.ByOwner, Days: e.Days, MaxMessages: errand.MaxMessages, Lines: []httpapi.ErrandLine{}}
+	out := httpapi.ErrandDetail{ErrandView: errandViewOf(e), Goal: e.Goal, Brief: e.Brief, ByOwner: e.ByOwner, Days: e.Days, MaxMessages: errand.MaxMessages, Calendar: e.Calendar, Lines: []httpapi.ErrandLine{}}
+	if e.Booked != "" {
+		from, to := e.BookedFrom, e.BookedTo
+		out.BookingFrom, out.BookingTo = &from, &to
+		switch {
+		case strings.HasPrefix(e.Booked, store.BookingAsking):
+			out.Booking = "asking"
+		case strings.HasPrefix(e.Booked, store.BookingEvent):
+			out.Booking = "booked"
+		default:
+			out.Booking = "booking"
+		}
+	}
 	for _, l := range lines {
 		out.Lines = append(out.Lines, httpapi.ErrandLine{From: l.Sender, Text: l.Text, At: l.At})
 	}

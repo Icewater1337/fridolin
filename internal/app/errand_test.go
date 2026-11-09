@@ -193,7 +193,7 @@ func TestErrandFirstContactWaitsForTheOwner(t *testing.T) {
 	}
 	// Set to have their messages passed on, their next message, with no
 	// errand open, goes to the owner and is not answered.
-	if _, err := h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", time.Now()); err != nil {
+	if _, err := h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	h.theyWrite("Thanks again!")
@@ -401,7 +401,7 @@ func TestErrandEndsWhenItsTimeIsOver(t *testing.T) {
 	h, runs := errandHarness(t)
 	ctx := context.Background()
 	_ = h.b.store.SaveErrandContact(ctx, store.ErrandContact{Contact: errandNumber, Name: "Alex", Brain: "core", State: store.ContactKnown, UpdatedAt: time.Now()})
-	_, _ = h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", time.Now())
+	_, _ = h.b.store.SetErrandContactWays(ctx, errandNumber, store.ContactForward, "", "", time.Now())
 	r := dinner
 	r.Days = 1
 	if _, err := h.b.openErrand(ctx, h.ownerRun(), r); err != nil {

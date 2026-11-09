@@ -46,6 +46,11 @@ func newNodes(b *App) (*nodes.Service, error) {
 		// started, which idle.
 		OnConnect: func(n *nodes.Node) { b.programs.connected(n.ID); b.gitIDs.nodeReady(n.ID, true); b.fride.onConnect(n) },
 		OnApprove: func(n *nodes.Node) { b.programs.connected(n.ID); b.gitIDs.nodeReady(n.ID, true) },
+		// A node that switched its machine's Tailscale back on to reach
+		// the core: the owner hears that it was cut off, and why.
+		OnTailscaleOn: func(n *nodes.Node, t nodeproto.TailscaleOn) {
+			b.tellOwner(outboundmsg.NodeTailscaleOnNotice(n.Name, t.On.Sub(t.Down)))
+		},
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,

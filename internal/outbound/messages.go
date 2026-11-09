@@ -528,6 +528,13 @@ func FrideHostNoLoginNotice(node, why string) string {
 	return fmt.Sprintf("⚠️ FrIDE instances on %s cannot log in to Claude, so the core starts none there and hands them no work: %s.\nOnce the token is stored, the core logs in the instance running there within a few minutes.", node, strings.TrimSuffix(why, "."))
 }
 
+// NodeTailscaleOnNotice tells the owner that node is connected again
+// after it switched its machine's Tailscale back on, which was off for
+// down while the core was out of its reach.
+func NodeTailscaleOnNotice(node string, down time.Duration) string {
+	return fmt.Sprintf("🔌 *%s* is connected again. Tailscale on that machine was off, so the node could not reach me for %s; it switched Tailscale back on by itself.", node, hoursMinutes(down))
+}
+
 // FridePlacedNotice says a waiting thread went to node.
 func FridePlacedNotice(thread int64, node string) string {
 	return fmt.Sprintf("🛠️ *FrIDE #%d* went to %s now.", thread, node)
@@ -1275,6 +1282,36 @@ func ErrandWarnedNotice(name, id, reason, last string) string {
 // ErrandWarnedNotice.
 func ErrandWarnedHistory(name, id string) string {
 	return fmt.Sprintf("⚠️ %s tried to make me do what I must not (errand %s), and I warned them. Why, and their message, are left out here: `errands` with id %s shows them, as their words. A second try within 30 days ends the conversation and blocks them.", name, id, id)
+}
+
+// ErrandBookedNotice says Fridolin booked when in the owner's calendar
+// for errand id with name.
+func ErrandBookedNotice(name, id, when string) string {
+	return fmt.Sprintf("📅 Booked %s with %s in your calendar (errand %s).", when, name, id)
+}
+
+// ErrandBookingDraft goes ahead of the poll that asks the owner to
+// confirm booking when with name, for errand id.
+func ErrandBookingDraft(name, id, when string) string {
+	return fmt.Sprintf("📅 %s would like to meet %s. Shall I put it in your calendar (errand %s)?", name, when, id)
+}
+
+// ErrandBookingFailedNotice says the owner confirmed booking when with
+// name, errand id, but the calendar did not take it.
+func ErrandBookingFailedNotice(name, id, when string) string {
+	return fmt.Sprintf("⚠️ I could not put %s with %s in your calendar (errand %s): the calendar did not take it. I told them you will come back to them about it.", when, name, id)
+}
+
+// ErrandBookingQuestion asks the owner what to tell someone who agreed on
+// a time the bridge could not book, twice: why, as the bridge said it.
+func ErrandBookingQuestion(why string) string {
+	return fmt.Sprintf("📅 They want to meet, but the time they agreed on could not be booked. %s What should I tell them?", why)
+}
+
+// ErrandBookingCheckMessage is what the person gets when a time could not
+// be booked twice and the owner is asked: the bridge's own words.
+func ErrandBookingCheckMessage(owner string) string {
+	return fmt.Sprintf("📅 Let me check the time with %s, and I'll get back to you.", owner)
 }
 
 // UnblockedReply answers !unblock of number: Fridolin listens to them

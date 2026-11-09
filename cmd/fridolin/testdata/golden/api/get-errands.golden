@@ -36,6 +36,7 @@ Content-Type: application/json
     {
       "brain": "main",
       "brief": "",
+      "calendar": "",
       "masked": "+1…67",
       "mode": "converse",
       "name": "Kim",

@@ -162,6 +162,17 @@ type Hello struct {
 	// JoinCode is the single-use code of `fridolin nodes join-code`, for a
 	// device the core does not know yet; empty afterwards.
 	JoinCode string `json:"join_code,omitempty"`
+	// TailscaleOn says that the node switched its machine's Tailscale back
+	// on since it last reached the core; nil when it did not.
+	TailscaleOn *TailscaleOn `json:"tailscale_on,omitempty"`
+}
+
+// TailscaleOn is a node switching its machine's Tailscale back on: from
+// Down the core was out of its reach, and at On the node found Tailscale
+// off and switched it on (nodeagent's tailscale.go).
+type TailscaleOn struct {
+	Down time.Time `json:"down"`
+	On   time.Time `json:"on"`
 }
 
 // Check reports what is wrong with h, nil when nothing is.
@@ -182,6 +193,9 @@ func (h Hello) Check() error {
 	}
 	if len(h.JoinCode) > 128 {
 		return errors.New("join code too long")
+	}
+	if t := h.TailscaleOn; t != nil && (t.Down.IsZero() || t.On.Before(t.Down)) {
+		return errors.New("tailscale_on: on before down")
 	}
 	return h.Capabilities.Check()
 }

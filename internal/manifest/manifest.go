@@ -123,6 +123,133 @@ type Errands struct {
 	// owner. Each person's standing brief and each errand's brief add to
 	// it.
 	Profile string `json:"profile,omitempty"`
+	// Calendar is how far the errands may use the brain's calendar; nil
+	// is not at all.
+	Calendar *ErrandCalendar `json:"calendar,omitempty"`
+}
+
+// ErrandCalendar is brain.json's errands.calendar (docs/BRAINS.md,
+// "Calendar in errands"): the errands may offer the free times of the
+// brain's calendar and, with Mode book_after_yes or book, book one,
+// within these hours. Each person and each errand may narrow it.
+type ErrandCalendar struct {
+	// Mode is off, offer, book_after_yes or book (ErrandCalendarModes);
+	// "" is off.
+	Mode string `json:"mode"`
+	// Days are the weekdays, "mon" to "sun"; none is Monday to Friday.
+	Days []string `json:"days,omitempty"`
+	// From and To are the hours of those days, "HH:MM"; "" is 08:00 and
+	// 20:00.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+	// DaysAhead is how many days ahead; 0 is 14.
+	DaysAhead int `json:"days_ahead,omitempty"`
+	// MaxMinutes is the longest booking; 0 is 90.
+	MaxMinutes int `json:"max_minutes,omitempty"`
+}
+
+// The defaults and limits of errands.calendar.
+const (
+	ErrandCalendarDaysAhead    = 14
+	MaxErrandCalendarDaysAhead = 60
+	ErrandCalendarMaxMinutes   = 90
+	MaxErrandCalendarMinutes   = 480
+)
+
+// ErrandCalendarModes are errands.calendar's modes, least first; the
+// errand package names each.
+func ErrandCalendarModes() []string { return []string{"off", "offer", "book_after_yes", "book"} }
+
+// errandWeekdays are errands.calendar's days.
+var errandWeekdays = map[string]time.Weekday{"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday, "thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday}
+
+// Level is c's Mode, "" read as off.
+func (c ErrandCalendar) Level() string {
+	if c.Mode == "" {
+		return "off"
+	}
+	return c.Mode
+}
+
+// Weekdays are c's days, Monday to Friday when it names none.
+func (c ErrandCalendar) Weekdays() []time.Weekday {
+	if len(c.Days) == 0 {
+		return []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday}
+	}
+	var out []time.Weekday
+	for _, d := range c.Days {
+		if w, ok := errandWeekdays[d]; ok && !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// Hours are c's hours as minutes after midnight.
+func (c ErrandCalendar) Hours() (from, to int) {
+	from, to = 8*60, 20*60
+	if m, ok := clockMinutes(c.From); ok {
+		from = m
+	}
+	if m, ok := clockMinutes(c.To); ok {
+		to = m
+	}
+	return from, to
+}
+
+// Ahead is c's DaysAhead, or its default.
+func (c ErrandCalendar) Ahead() int {
+	if c.DaysAhead == 0 {
+		return ErrandCalendarDaysAhead
+	}
+	return c.DaysAhead
+}
+
+// Longest is c's MaxMinutes, or its default.
+func (c ErrandCalendar) Longest() int {
+	if c.MaxMinutes == 0 {
+		return ErrandCalendarMaxMinutes
+	}
+	return c.MaxMinutes
+}
+
+// clockMinutes reads "HH:MM", 00:00 to 24:00.
+func clockMinutes(s string) (int, bool) {
+	var h, m int
+	if len(s) != 5 || s[2] != ':' {
+		return 0, false
+	}
+	if _, err := fmt.Sscanf(s, "%02d:%02d", &h, &m); err != nil || h > 24 || m > 59 || (h == 24 && m > 0) {
+		return 0, false
+	}
+	return h*60 + m, true
+}
+
+func validateErrandCalendar(c ErrandCalendar) error {
+	switch {
+	case !slices.Contains(ErrandCalendarModes(), c.Level()):
+		return fmt.Errorf("errands.calendar.mode is one of %s", strings.Join(ErrandCalendarModes(), ", "))
+	case c.DaysAhead < 0 || c.DaysAhead > MaxErrandCalendarDaysAhead:
+		return fmt.Errorf("errands.calendar.days_ahead is 1 to %d", MaxErrandCalendarDaysAhead)
+	case c.MaxMinutes < 0 || c.MaxMinutes > MaxErrandCalendarMinutes:
+		return fmt.Errorf("errands.calendar.max_minutes is 15 to %d", MaxErrandCalendarMinutes)
+	case c.MaxMinutes != 0 && c.MaxMinutes < 15:
+		return fmt.Errorf("errands.calendar.max_minutes is 15 to %d", MaxErrandCalendarMinutes)
+	}
+	for _, d := range c.Days {
+		if _, ok := errandWeekdays[d]; !ok {
+			return fmt.Errorf("errands.calendar.days are mon, tue, wed, thu, fri, sat and sun, not %q", d)
+		}
+	}
+	for name, v := range map[string]string{"from": c.From, "to": c.To} {
+		if _, ok := clockMinutes(v); v != "" && !ok {
+			return fmt.Errorf("errands.calendar.%s is a time as HH:MM, not %q", name, v)
+		}
+	}
+	if from, to := c.Hours(); to <= from {
+		return errors.New("errands.calendar.to must come after its from")
+	}
+	return nil
 }
 
 // The limits of brain.json's errands.
@@ -151,6 +278,9 @@ func ValidateErrands(e Errands) error {
 		return fmt.Errorf("errands.profile must be at most %d characters", MaxErrandProfile)
 	case e.Model != "" && !errandModelRe.MatchString(e.Model):
 		return fmt.Errorf("errands.model %q is not a model name", e.Model)
+	}
+	if e.Calendar != nil {
+		return validateErrandCalendar(*e.Calendar)
 	}
 	return nil
 }

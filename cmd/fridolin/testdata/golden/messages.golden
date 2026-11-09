@@ -559,6 +559,12 @@ frideHostNoLoginNotice
 	Once the token is stored, the core logs in the instance running there within a few minutes.
 fridePlacedNotice
 	🛠️ *FrIDE #3* went to laptop now.
+nodeTailscaleOnNotice
+	🔌 *mini* is connected again. Tailscale on that machine was off, so the node could not reach me for 19 h 29 min; it switched Tailscale back on by itself.
+nodeTailscaleOnNotice(minutes)
+	🔌 *mini* is connected again. Tailscale on that machine was off, so the node could not reach me for 2 min; it switched Tailscale back on by itself.
+nodeTailscaleOnNotice(hours)
+	🔌 *mini* is connected again. Tailscale on that machine was off, so the node could not reach me for 3 h; it switched Tailscale back on by itself.
 frideInstanceQueuedNotice
 	⏳ *FrIDE #4* waits: the FrIDE instance work cannot take it now (no node has room for the FrIDE instance work (6144 MB, or 3072 MB at the least): mini has 1000 MB free beyond its reserve). It starts as soon as it can, and I'll say so here.
 frideInstanceSmallerNotice
@@ -696,6 +702,16 @@ errandWarnedNotice
 	I said no and warned them: a second try within 30 days ends the conversation and blocks them. `errand_stop` ends it now.
 errandWarnedHistory
 	⚠️ Alex tried to make me do what I must not (errand e1a2b3c4), and I warned them. Why, and their message, are left out here: `errands` with id e1a2b3c4 shows them, as their words. A second try within 30 days ends the conversation and blocks them.
+errandBookedNotice
+	📅 Booked Fri 2026-11-06 14:00–15:00 with Alex in your calendar (errand e1a2b3c4).
+errandBookingDraft
+	📅 Alex would like to meet Fri 2026-11-06 14:00–15:00. Shall I put it in your calendar (errand e1a2b3c4)?
+errandBookingFailedNotice
+	⚠️ I could not put Fri 2026-11-06 14:00–15:00 with Alex in your calendar (errand e1a2b3c4): the calendar did not take it. I told them you will come back to them about it.
+errandBookingQuestion
+	📅 They want to meet, but the time they agreed on could not be booked. Not booked: Fri 2026-11-06 14:00–15:00 is not one of the free times. What should I tell them?
+errandBookingCheckMessage
+	📅 Let me check the time with Sam, and I'll get back to you.
 unblockedReply
 	✅ +15551234567 is unblocked. What they write comes to you again; ask me in this chat to write to them, or to talk with them by myself again.
 notBlockedReply

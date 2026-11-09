@@ -18,6 +18,18 @@ for compatibility.
   on GitHub (*Actions*: *Read and write*), accepted on the installation;
   a scheduled agent then names `"actions": "write"` in its grant
   (docs/GITHUB.md).
+- **Errands can arrange a time in your calendar.** With
+  `errands.calendar` in the core brain's brain.json (`mode` `offer`,
+  `book_after_yes` or `book`, and the days, hours, days ahead and longest
+  booking), the conversing run is handed your free times, worked out by
+  the bridge from the busy times of the brain's calendar, never an event.
+  It can ask to book one: the bridge checks the time is one of them,
+  still free and the errand's first booking, then books it as "<name>
+  (arranged by Fridolin)", or first asks you in a poll with
+  `book_after_yes`. A person (People → Edit, `errand_contact`) and an
+  errand (`contact_person`'s `calendar`) may narrow it. bridge.db's
+  `errands` and `errand_contacts` get columns; an older bridge ignores
+  them. [docs/BRAINS.md](docs/BRAINS.md#calendar-in-errands)
 - **Fridolin talks with the people it knows.** Once Fridolin has written
   to someone (with your approval the first time), what they write while
   nothing is open with them begins a conversation of its own: Fridolin
@@ -238,6 +250,16 @@ for compatibility.
   could not move. It now carries up to 64 (16 KiB each, as before) and
   4 local files; the sealed bundle may be 2 MiB instead of 256 KiB. Both
   machines must run this version for a bundle over the old size.
+- **A node switches its machine's Tailscale back on.** After a restart,
+  Tailscale on a node's machine could come back switched off, and the
+  node then could not reach the core, nor the core it, until someone
+  turned Tailscale on by hand. Now, once the core has been out of reach
+  for two minutes and the machine's Tailscale is off but still signed in,
+  the node switches it on (`tailscale up`, which keeps every setting) and
+  the core tells you in WhatsApp when it is back. A Tailscale that needs a
+  sign-in is left to you, and a node in a box, which has its own tailnet
+  device, is not affected. The node's hello has a new field,
+  `tailscale_on`, which an older core ignores.
 
 - **Stopping an errand that waits on your approval no longer leaves
   `fridolin doctor` warning about it.** The approval was denied without an

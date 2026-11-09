@@ -281,7 +281,7 @@ what the model says:
 | `request_approval(action, details, risk, step)`, `ask_user(question, options)`, `check_approval(id)` | ask you in WhatsApp and wait for the answer, see [Skills, risk and approvals](#skills-risk-and-approvals) | the same, in the core run's chat; not in an observe-only run |
 | `node_update(node)` | with nodes on: updates a node's fridolin to the core's version, a write action ([NODES.md](NODES.md#updates)) | absent |
 | `node_exec(argv, node, dir, timeout_seconds, approval_id, wait_seconds)`, `node_exec_rules(node)` | while a node whose `exec` you approved is online: runs one command its allowlist allows, a write action; a command whose rule has `approve` asks you in a poll each time ([NODES.md](NODES.md#the-core-brain-runs-commands)) | absent |
-| `contact_person(number, name, goal, brief, message, days, call)`, `errands(id)`, `errand_answer(id, text)`, `errand_stop(id)` | with brain.json's `errands` set, in a run that may ask you: has Fridolin write to someone for you and carry the conversation, see [Errands](#errands) | absent |
+| `contact_person(number, name, goal, brief, message, days, call, calendar)`, `errands(id)`, `errand_answer(id, text)`, `errand_stop(id)` | with brain.json's `errands` set, in a run that may ask you: has Fridolin write to someone for you and carry the conversation, see [Errands](#errands) | absent |
 | `plaud_app_update()`, `plaud_app_status()` | while the Plaud Sync app uploads through the site (`plaud.phone_upload`): builds the app as the Plaud card does, which the paired phones then install, a write action; and says what each phone runs and how its last update went ([PLAUD.md](PLAUD.md#updates)) | absent |
 | `system_status()`, `schedule_run(brain, name)`, `run_stop(brain, lane, started)`, `housekeeping_run(dry_run)` | in a run that answers you, or of one of its scheduled agents: the ops tools, see [below](#the-core-brains-ops-tools) | absent |
 
@@ -462,6 +462,48 @@ as they come.
   open a day from its start, and ends sooner when the run says it is
   done or after 20 messages of Fridolin's.
 
+### Calendar in errands
+
+Fridolin can arrange a time to meet with the people it talks with, from
+the core brain's own calendar (Brains → the core brain → Calendar), as
+far as brain.json allows:
+
+```json
+"errands": {
+  "owner_name": "Sam",
+  "calendar": {"mode": "book_after_yes", "days": ["mon", "tue", "wed", "thu", "fri"], "from": "08:00", "to": "20:00", "days_ahead": 14, "max_minutes": 90}
+}
+```
+
+| `mode` | What errands may do |
+| --- | --- |
+| `off` (or `""`, or no `calendar`) | Nothing with your calendar. |
+| `offer` | Offer your free times. |
+| `book_after_yes` | Offer them, and book one once you said yes in a poll (📅 … Shall I put it in your calendar?). |
+| `book` | Offer them, and book one; you hear of it (📅 Booked …). |
+
+- **What the run sees.** Only your free times within `days`, `from`
+  to `to`, and `days_ahead` days, an hour from now at the earliest,
+  which the bridge works out from your calendar's busy times; never an
+  event, a title or who you meet. At most 30 of them, each 30 minutes or
+  more.
+- **What a booking is.** The run can only *ask* to book a time. The
+  bridge books it only when it is inside one of the free times, still
+  free, at most `max_minutes` (default 90) long, and the errand's first
+  booking. With `book_after_yes`, only after your yes, and only if the
+  time is still free by then. The event goes into the brain's default
+  calendar as "<name> (arranged by Fridolin)", with the errand's id; it
+  holds nothing they wrote. Google sends no invitation.
+- **When it does not book.** The run hears why, as a line from the
+  calendar, and tries once more. After a second miss, Fridolin tells them
+  it will check with you, and you get the question. After your yes or
+  no, the run hears of it and tells them.
+- **Narrower for some.** A person's own setting (People → Edit, or
+  `errand_contact`'s `calendar`) and an errand's (`contact_person`'s
+  `calendar`) may narrow what brain.json allows, never widen it. A
+  conversation they begin uses brain.json's and theirs.
+- One booking per errand. The Errands page shows an errand's booking.
+
 **Why a person cannot turn Fridolin against you.** The protection is the
 bridge's, not a model's judgement:
 
@@ -519,12 +561,12 @@ The brain's tools:
 
 | Tool | What |
 | --- | --- |
-| `contact_person(number, name, goal, brief, message, days, call)` | Opens an errand, or asks you for it. Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. With `call: true` (and [calls](CALLS.md) on) Fridolin calls them instead of writing: only someone it wrote to before, at most five errand calls a day; see [CALLS.md](CALLS.md#errand-calls). A write action. When you name a person rather than a number, the brain looks them up with `find_contact` first and asks you which one when several match. |
+| `contact_person(number, name, goal, brief, message, days, call, calendar)` | Opens an errand, or asks you for it. `calendar` narrows what it may do with your calendar ([Calendar in errands](#calendar-in-errands)). Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. With `call: true` (and [calls](CALLS.md) on) Fridolin calls them instead of writing: only someone it wrote to before, at most five errand calls a day; see [CALLS.md](CALLS.md#errand-calls). A write action. When you name a person rather than a number, the brain looks them up with `find_contact` first and asks you which one when several match. |
 | `find_contact(query)` | Looks someone up by name in your Google Contacts: at most 10 people, each number written with its country code as `contact_person` takes it, with whether it is on WhatsApp; one written without as it is written, to ask you for the country code. Only once the core brain's **Google Contacts** card is connected ([CALENDAR.md](CALENDAR.md#google-contacts)). It only reads, and keeps nothing. |
 | `errands(id)` | This brain's errands: those that have not ended, then the last ten others. With `id`, one errand with its conversation. |
 | `errand_answer(id, text)` | Passes on what you said to an open errand. Only in a run that answers your own message in your direct chat. A write action. |
 | `errand_stop(id)` | Ends an errand without a word to them. A write action. |
-| `errand_contact(number, mode, brief)` | Shows how Fridolin deals with someone it knows; with `mode` (`converse` or `forward`) or `brief` (their own brief, `""` clears it) sets it. Setting only in a run that answers your own message in your direct chat, and not for someone blocked. |
+| `errand_contact(number, mode, brief, calendar)` | Shows how Fridolin deals with someone it knows; with `mode` (`converse` or `forward`), `brief` (their own brief, `""` clears it) or `calendar` (the most errands with them may do with your calendar, `""` for what brain.json allows) sets it. Setting only in a run that answers your own message in your direct chat, and not for someone blocked. |
 
 The dashboard's **Errands** page lists every errand, those that have not
 ended first, with its conversation (what they wrote is shown as text
@@ -538,7 +580,8 @@ WhatsApp ids of the notices that carry their words, with the version a
 run is shown (`sent_notes`, for 60 days), by which the bridge knows a
 reply that quotes one. The audit log
 has one `errand` line for each step (asked, opened, sent, answered,
-asked the owner, passed on, warned, ended, blocked, contact), with the
+asked the owner, passed on, warned, asked to book, booked, not booked,
+ended, blocked, contact), with the
 number masked and without the messages' text.
 
 ## Skills, risk and approvals

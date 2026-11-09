@@ -106,6 +106,34 @@ func migrateV13(tx *sql.Tx) error {
 	return err
 }
 
+// migrateV14 lets errands use the owner's calendar (docs/BRAINS.md,
+// "Calendar in errands"): how far an errand and a person may, and an
+// errand's one booking.
+func migrateV14(tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE errands ADD COLUMN calendar TEXT NOT NULL DEFAULT ''`,         // the most this errand may do with the calendar, '' as brain.json allows
+		`ALTER TABLE errands ADD COLUMN booked TEXT NOT NULL DEFAULT ''`,           // '', asking:<approval>, booking, or event:<id>
+		`ALTER TABLE errands ADD COLUMN booked_from DATETIME`,                      // what it booked, or asks the owner to
+		`ALTER TABLE errands ADD COLUMN booked_to DATETIME`,                        //
+		`ALTER TABLE errand_contacts ADD COLUMN calendar TEXT NOT NULL DEFAULT ''`, // the most errands with them may do, '' as brain.json allows
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// An errand's booking, Errand.Booked: none, one the owner is asked to
+// confirm (BookingAsking + the approval's id), one being made, or one
+// made (BookingEvent + the event's id).
+const (
+	BookingAsking = "asking:"
+	BookingMaking = "booking"
+	BookingEvent  = "event:"
+)
+
 // How an errand reaches its person.
 const (
 	ErrandByMessage = "message"
@@ -182,6 +210,13 @@ type Errand struct {
 	// OpenedBy is OpenedByThem for a conversation the person began, ""
 	// for an errand a brain asked for.
 	OpenedBy string
+	// Calendar is the most this errand may do with the owner's calendar,
+	// "" for what brain.json allows.
+	Calendar string
+	// Booked is its booking (BookingAsking, BookingMaking, BookingEvent),
+	// "" for none; BookedFrom and BookedTo are its time.
+	Booked               string
+	BookedFrom, BookedTo time.Time
 }
 
 // Live reports whether the errand has not ended: it waits for the owner,
@@ -210,6 +245,9 @@ type ErrandContact struct {
 	Brief string
 	// WarnedAt is when Fridolin last warned them, zero for never.
 	WarnedAt time.Time
+	// Calendar is the most errands with them may do with the owner's
+	// calendar, "" for what brain.json allows.
+	Calendar string
 }
 
 // Warned reports whether c was warned within ErrandWarningKeep of now.
@@ -220,14 +258,14 @@ func (c ErrandContact) Warned(now time.Time) bool {
 // ErrNoErrand is an errand, or a contact, the store does not have.
 var ErrNoErrand = errors.New("no such errand")
 
-const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at, mode, opened_by`
+const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at, mode, opened_by, calendar, booked, booked_from, booked_to`
 
-const contactColumns = `contact, lid, name, brain, state, reason, updated_at, mode, brief, warned_at`
+const contactColumns = `contact, lid, name, brain, state, reason, updated_at, mode, brief, warned_at, calendar`
 
 func scanContact(row interface{ Scan(...any) error }) (ErrandContact, error) {
 	var c ErrandContact
 	var warned sql.NullTime
-	err := row.Scan(&c.Contact, &c.LID, &c.Name, &c.Brain, &c.State, &c.Reason, &c.UpdatedAt, &c.Mode, &c.Brief, &warned)
+	err := row.Scan(&c.Contact, &c.LID, &c.Name, &c.Brain, &c.State, &c.Reason, &c.UpdatedAt, &c.Mode, &c.Brief, &warned, &c.Calendar)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNoErrand
 	}
@@ -254,12 +292,13 @@ func (s *Store) queryContacts(ctx context.Context, q string, args ...any) ([]Err
 
 func scanErrand(row interface{ Scan(...any) error }) (Errand, error) {
 	var e Errand
-	var closed sql.NullTime
-	err := row.Scan(&e.ID, &e.Brain, &e.Contact, &e.Name, &e.Goal, &e.Brief, &e.Message, &e.State, &e.Approval, &e.ByOwner, &e.Run, &e.Chat, &e.Days, &e.Sent, &e.Outcome, &e.CreatedAt, &e.Deadline, &closed, &e.Mode, &e.OpenedBy)
+	var closed, bookedFrom, bookedTo sql.NullTime
+	err := row.Scan(&e.ID, &e.Brain, &e.Contact, &e.Name, &e.Goal, &e.Brief, &e.Message, &e.State, &e.Approval, &e.ByOwner, &e.Run, &e.Chat, &e.Days, &e.Sent, &e.Outcome, &e.CreatedAt, &e.Deadline, &closed, &e.Mode, &e.OpenedBy,
+		&e.Calendar, &e.Booked, &bookedFrom, &bookedTo)
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, ErrNoErrand
 	}
-	e.ClosedAt = closed.Time
+	e.ClosedAt, e.BookedFrom, e.BookedTo = closed.Time, bookedFrom.Time, bookedTo.Time
 	return e, err
 }
 
@@ -286,9 +325,26 @@ func (s *Store) AddErrand(ctx context.Context, e Errand) error {
 	if mode == "" {
 		mode = ErrandByMessage
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC(), mode, e.OpenedBy)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, '', NULL, NULL)`,
+		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC(), mode, e.OpenedBy, e.Calendar)
 	return err
+}
+
+// SetErrandBooking moves errand id's booking from was to now (see
+// Errand.Booked), for the time from to to (zero for none), unless it is
+// not was any more. It reports whether it moved it: one errand makes one
+// booking, whoever asks at once.
+func (s *Store) SetErrandBooking(ctx context.Context, id, was, now string, from, to time.Time) (bool, error) {
+	var f, t any
+	if !from.IsZero() {
+		f, t = from.UTC(), to.UTC()
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE errands SET booked = ?, booked_from = ?, booked_to = ? WHERE id = ? AND booked = ?`, now, f, t, id, was)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
 }
 
 // ErrandsOpenedByThemSince counts the conversations contact began since t.
@@ -506,11 +562,12 @@ func (s *Store) ErrandContactOf(ctx context.Context, id string) (ErrandContact, 
 	return scanContact(s.db.QueryRowContext(ctx, `SELECT `+contactColumns+` FROM errand_contacts WHERE contact = ? OR (lid != '' AND lid = ?) LIMIT 1`, id, id))
 }
 
-// SetErrandContactWays sets how Fridolin takes contact's messages (mode)
-// and what it may always tell them (brief). It reports whether there was
-// such a contact.
-func (s *Store) SetErrandContactWays(ctx context.Context, contact, mode, brief string, at time.Time) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `UPDATE errand_contacts SET mode = ?, brief = ?, updated_at = ? WHERE contact = ?`, mode, brief, at.UTC(), contact)
+// SetErrandContactWays sets how Fridolin takes contact's messages (mode),
+// what it may always tell them (brief) and the most errands with them may
+// do with the owner's calendar ("" as brain.json allows). It reports
+// whether there was such a contact.
+func (s *Store) SetErrandContactWays(ctx context.Context, contact, mode, brief, calendar string, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE errand_contacts SET mode = ?, brief = ?, calendar = ?, updated_at = ? WHERE contact = ?`, mode, brief, calendar, at.UTC(), contact)
 	if err != nil {
 		return false, err
 	}

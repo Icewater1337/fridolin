@@ -61,3 +61,17 @@ func seen(n FleetNode, now time.Time) string {
 		return fmt.Sprintf("last seen %dd ago", int(d/(24*time.Hour)))
 	}
 }
+
+// hoursMinutes says d in whole hours and minutes, at least a minute:
+// "19 h 28 min", "2 h", "4 min".
+func hoursMinutes(d time.Duration) string {
+	d = d.Round(time.Minute)
+	h, m := int(d/time.Hour), int(d%time.Hour/time.Minute)
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%d min", max(m, 1))
+	case m == 0:
+		return fmt.Sprintf("%d h", h)
+	}
+	return fmt.Sprintf("%d h %d min", h, m)
+}

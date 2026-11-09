@@ -56,6 +56,11 @@ type Options struct {
 	// nothing. Each runs on its own goroutine.
 	OnConnect func(n *Node)
 	OnApprove func(n *Node)
+	// OnTailscaleOn hears that an approved node, which connected, had
+	// switched its machine's Tailscale back on to reach the core
+	// (nodeproto.TailscaleOn); nil for nothing. It runs on its own
+	// goroutine.
+	OnTailscaleOn func(n *Node, t nodeproto.TailscaleOn)
 	// OnJoin hears that a device it did not know joined with a join code
 	// and waits for approval, once, after the registry recorded it; nil
 	// for nothing. It must not block for long.
@@ -138,6 +143,7 @@ type Service struct {
 	progs     programsState
 	onConnect func(*Node)
 	onApprove func(*Node)
+	onTSOn    func(*Node, nodeproto.TailscaleOn)
 
 	// handshook and registered, when set, run in accept right after the
 	// handshake and right after the connection is registered, pushing in
@@ -160,7 +166,7 @@ func New(opts Options) (*Service, error) {
 	s := &Service{
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
-		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, sandboxBin: map[string]time.Time{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove,
+		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, sandboxBin: map[string]time.Time{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove, onTSOn: opts.OnTailscaleOn,
 		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, onStopping: opts.OnMoveStopping, site: opts.Site, movePollEvery: opts.MovePoll,
 	}
 	s.resumeMoves()
@@ -265,6 +271,9 @@ type session struct {
 	// as JSON. stateMu orders telling it (Service.tell).
 	stateMu sync.Mutex
 	told    []byte
+	// tailscaleOn is what the hello said about the node switching its
+	// machine's Tailscale on, nil for nothing.
+	tailscaleOn *nodeproto.TailscaleOn
 }
 
 func (ss *session) send(typ, id string, body any) error {
@@ -380,6 +389,12 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 	if s.onConnect != nil {
 		s.wg.Go(func() { s.onConnect(clone(node)) })
 	}
+	if t := ss.tailscaleOn; t != nil {
+		s.logf("nodes: %s (%s) switched its machine's Tailscale back on at %s; the core was out of its reach since %s", node.Name, node.ID, t.On.Format(time.RFC3339), t.Down.Format(time.RFC3339))
+		if s.onTSOn != nil && node.Device == nodeproto.DeviceApproved {
+			s.wg.Go(func() { s.onTSOn(clone(node), *t) })
+		}
+	}
 	s.readLoop(ss)
 	s.logf("nodes: %s (%s) disconnected", node.Name, node.ID)
 }
@@ -436,6 +451,7 @@ func (s *Service) handshake(ss *session, remote string) (*Node, error) {
 		ss.close(nodeproto.CloseProtocol, "the core could not record this node")
 		return nil, err
 	}
+	ss.tailscaleOn = hello.TailscaleOn
 	if joined {
 		s.logf("nodes: %s (%s) joined; approve it with: fridolin nodes approve %s", node.Name, node.ID, node.ID)
 		if s.onJoin != nil {

@@ -59,6 +59,9 @@ two connections (`brain_monthly_usd`), as its tools' calls are.
   and the errand, and abort says the bridge's own words: a warning the
   first time, and the call goes on; the end and a block after that, or
   for a serious try ([BRAINS.md](BRAINS.md#errands)).
+- On a call too, the errand may offer your free times and book one, as
+  far as it may by message ([BRAINS.md](BRAINS.md#calendar-in-errands));
+  with `book_after_yes`, the confirmation follows by message.
 - Nobody picks up within 45 seconds: the errand ends and you are told.
 - A call that ends before the errand did (they hang up, 45 seconds of
   silence, 10 minutes) leaves the errand open: it goes on by message.
