@@ -17,7 +17,11 @@
 # collects its failures in one place. When the run is on main's current
 # commit, an open issue of this script whose failure did not come back is
 # closed: a fuzz target's once the fuzz job passed, every other once the
-# whole run passed.
+# whole run passed; in both cases only once every job named in the Jobs
+# lists of its body and of the script's comments on it ran in this run and
+# passed. A job the run skipped says nothing about a test that fails only
+# there: a push to main skips go-windows and the macOS jobs, which run on
+# schedule (#630). An issue that names no job stays open.
 #
 # Logs are untrusted text: only names that match a strict pattern reach a
 # title or the issue's prose, the rest goes into code blocks, and none of it
@@ -157,8 +161,10 @@ record() {
 	jq -r --arg self "$SELF_JOB" '.jobs[] | select(.name != $self and .conclusion != null) | [.id, .conclusion, .name] | @tsv' >"$work/jobs"
 
 fuzz_ok=0 all_ok=1
+: >"$work/passed"
 while IFS=$'\t' read -r id conclusion job; do
 	[ "$job" = fuzz ] && [ "$conclusion" = success ] && fuzz_ok=1
+	[ "$conclusion" != success ] || printf '%s\n' "$job" >>"$work/passed"
 	case "$conclusion" in
 	success | skipped) continue ;;
 	esac
@@ -235,7 +241,7 @@ body() {
 			printf '\nThe failing input was not found in the run'"'"'s `fuzz-failing-inputs` artifact.\n'
 		fi
 	fi
-	printf '\nOpened and updated by the report job of `%s`, which closes it once a later run on `main` passes.\n' "$workflow"
+	printf '\nOpened and updated by the report job of `%s`, which closes it once a later run on `main` passes in which the jobs above ran.\n' "$workflow"
 }
 
 if [ -n "$(ls "$work/found")" ]; then
@@ -244,12 +250,14 @@ fi
 count=0 overflow=""
 reported_titles="$work/reported"
 : >"$reported_titles"
+: >"$work/overflow-jobs"
 for d in "$work/found"/*; do
 	[ -d "$d" ] || continue
 	title="$(cat "$d/title")"
 	printf '%s\n' "$title" >>"$reported_titles"
 	if [ "$count" -ge "$max" ]; then
 		overflow="$overflow$title"$'\n'
+		cat "$d/jobs" >>"$work/overflow-jobs"
 		continue
 	fi
 	count=$((count + 1))
@@ -275,7 +283,9 @@ if [ -n "$overflow" ]; then
 		printf '%s kind=overflow -->\n' "$marker"
 		printf '[Run %s](%s) at %s had more than %s failures. These got no issue of their own:\n\n' "$RUN_ID" "$RUN_URL" "$HEAD_SHA" "$max"
 		printf '%s' "$overflow" | sed 's/.*/- &/'
-		printf '\nOpened and updated by the report job of `%s`, which closes it once a later run on `main` passes.\n' "$workflow"
+		printf '\nJobs:\n'
+		awk '!seen[$0]++' "$work/overflow-jobs" | sed 's/.*/- `&`/'
+		printf '\nOpened and updated by the report job of `%s`, which closes it once a later run on `main` passes in which the jobs above ran.\n' "$workflow"
 	} >"$work/overflow"
 	existing="$(jq -r --arg t "$title" '[.[] | select(.title == $t and .state == "OPEN")] | .[0].number // empty' "$work/issues")"
 	if [ -z "$existing" ]; then
@@ -293,10 +303,29 @@ if [ "$tip" != "$HEAD_SHA" ]; then
 	summary "$branch moved on to $tip: no issue closed"
 	exit 0
 fi
+LC_ALL=C sort -u -o "$work/passed" "$work/passed"
+
+# named — the jobs the reports on stdin (an issue's body, the script's
+# comments on it) name in their Jobs lists, one per line.
+named() {
+	awk '{ sub(/\r$/, "") } /^Jobs:$/ { on = 1; next } on && /^- `[^`]+`$/ { print substr($0, 4, length($0) - 4); next } { on = 0 }'
+}
+
 jq -r --arg m "$marker kind=" '.[] | select(.state == "OPEN" and (.body | startswith($m))) | [.number, (.body | ltrimstr($m) | split(" ")[0]), .title] | @tsv' "$work/issues" |
 	while IFS=$'\t' read -r number kind title; do
 		grep -qxF -- "$title" "$reported_titles" && continue
 		if [ "$all_ok" = 1 ] || { [ "$kind" = fuzz ] && [ "$fuzz_ok" = 1 ]; }; then
+			# Only when every job it names ran in this run and passed: a
+			# skipped job, or one not in this run, says nothing about it.
+			{
+				jq -r --argjson n "$number" '.[] | select(.number == $n) | .body' "$work/issues"
+				"$gh" api "repos/$REPO/issues/$number/comments?per_page=100" --paginate </dev/null |
+					jq -r --arg m "$marker kind=" '.[] | (.body // "") | select(startswith($m))'
+			} | named | LC_ALL=C sort -u >"$work/named"
+			if [ ! -s "$work/named" ] || [ -n "$(LC_ALL=C comm -23 "$work/named" "$work/passed")" ]; then
+				summary "kept open: #$number, not every job it names ran in this run and passed"
+				continue
+			fi
 			"$gh" issue close "$number" --repo "$REPO" --reason completed \
 				--comment "Passed on \`main\` at $HEAD_SHA in [run $RUN_ID]($RUN_URL). Reopened if it fails again." >/dev/null
 			summary "closed: #$number"

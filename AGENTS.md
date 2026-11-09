@@ -522,7 +522,9 @@ echo (on Windows in an administrator PowerShell, with the node's
   fuzz target or test ("CI on main: FuzzX failing",
   `scripts/ci-report.sh`), with the failure, the run's link and a fuzz
   target's failing input from the run's `fuzz-failing-inputs` artifact; a
-  later run that passes closes it. Fix those before new work: a red main
+  later run that passes closes it, once the jobs it failed in ran in that
+  run (a push skips go-windows and the macOS jobs, so a failure there
+  waits for the weekly run). Fix those before new work: a red main
   teaches everyone to ignore red.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests` (`make test-py`).
