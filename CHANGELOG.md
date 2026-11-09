@@ -10,6 +10,14 @@ for compatibility.
 
 ### Added
 
+- **FrIDE and scheduled agents can rerun a failed check.** A GitHub App
+  made with *Let FrIDE open pull requests* now also gets `actions:
+  write`, so a check that failed for a reason of GitHub's own (a release
+  download that timed out) can be rerun with `gh run rerun --failed`
+  instead of waiting for you. An app made before gets it in its settings
+  on GitHub (*Actions*: *Read and write*), accepted on the installation;
+  a scheduled agent then names `"actions": "write"` in its grant
+  (docs/GITHUB.md).
 - **Fridolin talks with the people it knows.** Once Fridolin has written
   to someone (with your approval the first time), what they write while
   nothing is open with them begins a conversation of its own: Fridolin

@@ -15,7 +15,9 @@ type ManifestOptions struct {
 	HomeURL     string // the app's homepage, which GitHub requires
 	RedirectURL string // where GitHub sends the browser with the code
 	SetupURL    string // where GitHub sends it after an install
-	// PullRequests adds pull_requests: write, for FrIDE (docs/GITHUB.md).
+	// PullRequests adds pull_requests: write, for FrIDE, and actions:
+	// write, so that it can rerun a check of its pull request that failed
+	// for a reason of GitHub's own (docs/GITHUB.md).
 	PullRequests bool
 }
 
@@ -25,6 +27,7 @@ func (o ManifestOptions) Permissions() map[string]string {
 	p := map[string]string{"contents": "read", "issues": "write", "metadata": "read"}
 	if o.PullRequests {
 		p["pull_requests"] = "write"
+		p["actions"] = "write"
 	}
 	return p
 }

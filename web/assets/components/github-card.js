@@ -45,7 +45,7 @@ export function githubCard(ctx) {
   let deleteURL = '';
 
   // The connect form is built once, so what is typed survives a refresh.
-  const prs = toggle({ label: 'Let FrIDE open pull requests (pull_requests: write)' });
+  const prs = toggle({ label: 'Let FrIDE open pull requests and rerun their checks (pull_requests: write, actions: write)' });
   const org = textInput({ placeholder: 'your own account' });
   const connectForm = h('div.settings-fields',
     field({ control: prs, help: 'Off: the app may read code and write issues. FrIDE’s pushes and pull requests need this on; you can change the app’s permissions on GitHub later too.' }),
