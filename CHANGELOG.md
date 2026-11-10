@@ -10,6 +10,14 @@ for compatibility.
 
 ### Added
 
+- **FrIDE and scheduled agents can rerun a failed check.** A GitHub App
+  made with *Let FrIDE open pull requests* now also gets `actions:
+  write`, so a check that failed for a reason of GitHub's own (a release
+  download that timed out) can be rerun with `gh run rerun --failed`
+  instead of waiting for you. An app made before gets it in its settings
+  on GitHub (*Actions*: *Read and write*), accepted on the installation;
+  a scheduled agent then names `"actions": "write"` in its grant
+  (docs/GITHUB.md).
 - **Errands can arrange a time in your calendar.** With
   `errands.calendar` in the core brain's brain.json (`mode` `offer`,
   `book_after_yes` or `book`, and the days, hours, days ahead and longest

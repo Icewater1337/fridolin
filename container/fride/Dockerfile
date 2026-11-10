@@ -53,7 +53,7 @@ RUN set -eu; \
       arm64) gh_sha=ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63 ;; \
       *) echo "unsupported architecture ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSLo gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz"; \
     echo "${gh_sha}  gh.tar.gz" | sha256sum -c -; \
     tar -xzf gh.tar.gz "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh"; \
     install -m 0755 "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh
@@ -62,7 +62,7 @@ RUN set -eu; \
 FROM ${NODE_IMAGE} AS node
 # The version the core's image has (container/Dockerfile).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.316
+ARG CLAUDE_CODE_VERSION=2.1.317
 RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
 

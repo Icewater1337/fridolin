@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,15 +44,35 @@ const (
 )
 
 // TailscaleCLI is the machine's Tailscale driven through its CLI at path
-// (`node run` finds it).
-func TailscaleCLI(path string) Tailscale { return tailscaleCLI{path: path} }
+// (`node run` finds it), run with env (nil: the agent's own). The macOS
+// app's binary is its CLI too, but started without a terminal, as a
+// launchd agent is, it tries to open the app instead and answers "The
+// Tailscale GUI failed to start"; TAILSCALE_BE_CLI=1 makes it the CLI
+// (tailscaleCLIEnv), and other systems' tailscale ignores it.
+func TailscaleCLI(path string, env []string) Tailscale {
+	return tailscaleCLI{path: path, env: env}
+}
 
-type tailscaleCLI struct{ path string }
+// TailscaleCLIEnv is env with what the CLI needs to answer as one.
+func TailscaleCLIEnv(env []string) []string {
+	return append(slices.Clip(env), "TAILSCALE_BE_CLI=1")
+}
+
+type tailscaleCLI struct {
+	path string
+	env  []string
+}
+
+func (t tailscaleCLI) command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, t.path, args...)
+	cmd.Env = t.env
+	return cmd
+}
 
 func (t tailscaleCLI) State(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, t.path, "status", "--json").Output()
+	out, err := t.command(ctx, "status", "--json").Output()
 	// status exits 1 when Tailscale is stopped, and still says so.
 	var st struct{ BackendState string }
 	if jerr := json.Unmarshal(out, &st); jerr != nil || st.BackendState == "" {
@@ -68,7 +89,7 @@ func (t tailscaleCLI) Up(ctx context.Context) error {
 	defer cancel()
 	// Without flags, up only switches Tailscale on, with every setting it
 	// has.
-	if out, err := exec.CommandContext(ctx, t.path, "up").CombinedOutput(); err != nil {
+	if out, err := t.command(ctx, "up").CombinedOutput(); err != nil {
 		return fmt.Errorf("%s up: %w: %s", t.path, err, strings.TrimSpace(string(out)))
 	}
 	return nil

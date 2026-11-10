@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -167,5 +169,38 @@ func TestTailscaleHealWaitStaysCapped(t *testing.T) {
 		if i >= 5 && wait < tailscaleRetryMax-time.Minute {
 			t.Fatalf("try %d: next try in %v, want the hour cap", i, wait)
 		}
+	}
+}
+
+// TestTailscaleCLIAnswersAsCLI: the macOS app's binary, started by a
+// launchd agent, opens the app instead of answering unless
+// TAILSCALE_BE_CLI=1 is set, as it was on the Mac mini (2026-11-10). The
+// fake answers like it: the CLI's answer only with the variable.
+func TestTailscaleCLIAnswersAsCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a shell script stands in for tailscale")
+	}
+	dir := t.TempDir()
+	bin, upped := filepath.Join(dir, "Tailscale"), filepath.Join(dir, "upped")
+	writeScript(t, bin, `if [ "$TAILSCALE_BE_CLI" != 1 ]; then echo "The Tailscale GUI failed to start" >&2; exit 1; fi
+case "$1" in
+status) echo '{"BackendState":"Stopped"}'; exit 1 ;;
+up) : > "`+upped+`" ;;
+esac`)
+	ctx := context.Background()
+
+	if st, err := TailscaleCLI(bin, []string{"PATH=/usr/bin:/bin"}).State(ctx); err == nil {
+		t.Fatalf("without TAILSCALE_BE_CLI the fake answered %q", st)
+	}
+	ts := TailscaleCLI(bin, TailscaleCLIEnv([]string{"PATH=/usr/bin:/bin"}))
+	st, err := ts.State(ctx)
+	if err != nil || st != tailscaleStopped {
+		t.Fatalf("State: %q, %v; want %s", st, err, tailscaleStopped)
+	}
+	if err := ts.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(upped); err != nil {
+		t.Errorf("up did not reach the CLI: %v", err)
 	}
 }
