@@ -304,6 +304,10 @@ func (b *App) errandBookingDecided(a store.Approval) {
 		return
 	case err != nil:
 		log.Printf("errand %s: reading the calendar: %v", e.ID, err)
+		clear()
+		b.auditErrand(e, "not booked", "the calendar cannot be read just now")
+		tell(fmt.Sprintf("%s confirmed %s, but the calendar cannot be read just now: it is not booked. Say %s will come back to them about it.", owner, when, owner))
+		return
 	case !errand.Within(span, free):
 		clear()
 		b.auditErrand(e, "not booked", when+" is no longer free")
