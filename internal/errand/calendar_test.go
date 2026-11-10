@@ -68,6 +68,30 @@ func TestFreeTimes(t *testing.T) {
 	}
 }
 
+// FreeTimes keeps the hours in wall-clock time on the days DST changes (#641).
+func TestFreeTimesAcrossDST(t *testing.T) {
+	zurich, _ := time.LoadLocation("Europe/Zurich")
+	sunday := Hours{Days: []time.Weekday{time.Sunday}, From: 8 * 60, To: 20 * 60, Location: zurich}
+	for _, tc := range []struct {
+		month, day int
+		to         int
+		want       string
+	}{
+		{3, 29, 20 * 60, "Sun 2026-03-29 08:00–20:00"},  // spring forward
+		{10, 25, 20 * 60, "Sun 2026-10-25 08:00–20:00"}, // fall back
+		{11, 8, 20 * 60, "Sun 2026-11-08 08:00–20:00"},  // an ordinary Sunday
+		{3, 29, 24 * 60, "Sun 2026-03-29 08:00–Mon 2026-03-30 00:00"},
+	} {
+		h := sunday
+		h.To = tc.to
+		from := time.Date(2026, time.Month(tc.month), tc.day, 0, 0, 0, 0, zurich)
+		got := FreeTimes(nil, from, from.AddDate(0, 0, 2), h)
+		if len(got) != 1 || FormatSpan(got[0], zurich) != tc.want {
+			t.Errorf("%d-%d to %d: got %v, want %s", tc.month, tc.day, tc.to, got, tc.want)
+		}
+	}
+}
+
 func TestParseBookStart(t *testing.T) {
 	zurich, _ := time.LoadLocation("Europe/Zurich")
 	want := time.Date(2026, 11, 6, 14, 30, 0, 0, zurich)
