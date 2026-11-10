@@ -134,7 +134,7 @@ func TestManifest(t *testing.T) {
 		}
 		want := "map[contents:read issues:write metadata:read]"
 		if prs {
-			want = "map[contents:read issues:write metadata:read pull_requests:write]"
+			want = "map[actions:write contents:read issues:write metadata:read pull_requests:write]"
 		}
 		if fmt.Sprint(m.Permissions) != want || m.Public || m.Hook["active"] != false || len(m.Events) != 0 ||
 			m.Redirect != "http://127.0.0.1:8765/github/created" || m.Setup == "" {

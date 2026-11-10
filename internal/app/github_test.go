@@ -107,7 +107,7 @@ func connectFakeGitHub(t *testing.T, h *harness, fake *ghapptest.Server) {
 		t.Errorf("hand-off page:\n%s", body)
 	}
 	for _, want := range []string{`"redirect_url":"http://` + h.listen + `/github/created"`, `"setup_url":"http://` + h.listen + `/github/installed"`,
-		`"pull_requests":"write"`, `"active":false`, `"public":false`} {
+		`"pull_requests":"write"`, `"actions":"write"`, `"active":false`, `"public":false`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the manifest lacks %s:\n%s", want, body)
 		}

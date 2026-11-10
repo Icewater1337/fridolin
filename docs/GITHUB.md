@@ -16,7 +16,9 @@ Open the dashboard and go to **Integrations → GitHub → Connect GitHub**.
 
 1. **Choose what the app may do.**
    - Tick *Let FrIDE open pull requests* if FrIDE should push and open
-     pull requests (`pull_requests: write`); see [Later](#later).
+     pull requests (`pull_requests: write`), and rerun a check of its
+     own that failed for a reason of GitHub's (`actions: write`); see
+     [FrIDE](#fride).
    - Name an organization if it should own the app. Left empty, the app
      belongs to your own account.
 2. **Continue to GitHub.** A small page of the bridge posts the app's
@@ -28,7 +30,7 @@ Open the dashboard and go to **Integrations → GitHub → Connect GitHub**.
    - **Visibility:** private.
    - **Webhook:** none.
    - **Permissions:** contents read, issues write, metadata read, and
-     pull requests write only when you ticked it.
+     pull requests and actions write only when you ticked it.
 
    Click **Create GitHub App** there.
 3. **GitHub sends the browser back** to `/github/created` on the
@@ -113,6 +115,13 @@ At the run's start, the bridge mints an installation access token:
 - with `contents: read` and `metadata: read` when the grant names no
   permissions.
 
+A grant asks only for what the app has: a scheduled agent that reruns
+failed checks names `"actions": "write"`, which the app must have
+(see [FrIDE](#fride)). A grant that asks for more than the
+installation has gets no token at all: the run goes without GitHub, and
+the bridge's log says why. So give the app the permission first, then
+name it in the grant.
+
 The run gets it as **gh's own login**, not as a variable:
 
 - **Where it is:** `hosts.yml` (with a `config.yml` of version 1) in a
@@ -181,6 +190,14 @@ set *Contents* to *Read and write* in the app's settings on GitHub, and
 on the installation. Until then FrIDE gets no GitHub token, and its
 node's own git login keeps pushing. Without an app, FrIDE gets the typed
 token as it is.
+
+To rerun a check that failed for a reason of GitHub's own (a release
+download that timed out, a runner that went away: `gh run rerun
+--failed`), the token needs *Actions* set to *Read and write*. The app
+made with *Let FrIDE open pull requests* has it; an app made before
+gets it the same way, in its settings on GitHub and then accepted on the
+installation. Without it, GitHub answers "Resource not accessible by
+integration".
 
 The GitHub card's optional commit name and email are what FrIDE commits
 with in a GitHub workspace.
