@@ -221,7 +221,7 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			// The machine's Tailscale, which the agent switches on when it
 			// finds it off while the core is out of reach.
 			if p := findTailscale(); p != "" {
-				a.Tailscale = nodeagent.TailscaleCLI(p)
+				a.Tailscale = nodeagent.TailscaleCLI(p, nodeagent.TailscaleCLIEnv(os.Environ()))
 			}
 		}
 		if a.Config.Box != nil {
