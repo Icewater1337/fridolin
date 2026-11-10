@@ -68,7 +68,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /dl
+# fetch FILE URL retries what a release CDN fails now and then (a 504, a
+# reset connection), so one such answer does not fail the whole build; the
+# SHA-256 check after each download stays the judge of what arrived.
 RUN set -eu; \
+    fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o "$1" "$2"; }; \
     case "${TARGETARCH}" in \
       amd64) restic_sha=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c; \
              rclone_sha=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702; \
@@ -82,19 +86,19 @@ RUN set -eu; \
              cf_sha=3df43aedc9ff291d1735b5cb576cb97e0b157488796db2e32b28aecabb445775 ;; \
       *) echo "unsupported architecture ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSLo restic.bz2 "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2"; \
+    fetch restic.bz2 "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2"; \
     echo "${restic_sha}  restic.bz2" | sha256sum -c -; \
     bunzip2 restic.bz2; install -m 0755 restic /usr/local/bin/restic; \
-    curl -fsSLo rclone.zip "https://github.com/rclone/rclone/releases/download/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-${TARGETARCH}.zip"; \
+    fetch rclone.zip "https://github.com/rclone/rclone/releases/download/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-${TARGETARCH}.zip"; \
     echo "${rclone_sha}  rclone.zip" | sha256sum -c -; \
     unzip -q rclone.zip; install -m 0755 "rclone-v${RCLONE_VERSION}-linux-${TARGETARCH}/rclone" /usr/local/bin/rclone; \
-    curl -fsSLo litestream.tar.gz "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-${ls_arch}.tar.gz"; \
+    fetch litestream.tar.gz "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-${ls_arch}.tar.gz"; \
     echo "${ls_sha}  litestream.tar.gz" | sha256sum -c -; \
     tar -xzf litestream.tar.gz litestream; install -m 0755 litestream /usr/local/bin/litestream; \
-    curl -fsSLo gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz"; \
+    fetch gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz"; \
     echo "${gh_sha}  gh.tar.gz" | sha256sum -c -; \
     tar -xzf gh.tar.gz "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh"; install -m 0755 "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh; \
-    curl -fsSLo cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${TARGETARCH}"; \
+    fetch cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${TARGETARCH}"; \
     echo "${cf_sha}  cloudflared" | sha256sum -c -; \
     install -m 0755 cloudflared /usr/local/bin/cloudflared
 
