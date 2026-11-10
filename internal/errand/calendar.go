@@ -102,7 +102,9 @@ func FreeTimes(busy []Span, from, to time.Time, h Hours) []Span {
 		if !slices.Contains(h.Days, day.Weekday()) {
 			continue
 		}
-		open := Span{Start: day.Add(time.Duration(h.From) * time.Minute), End: day.Add(time.Duration(h.To) * time.Minute)}
+		// time.Date keeps wall-clock time across a DST change; Add would not.
+		y, m, d := day.Date()
+		open := Span{Start: time.Date(y, m, d, 0, h.From, 0, 0, loc), End: time.Date(y, m, d, 0, h.To, 0, 0, loc)}
 		if open.Start.Before(from) {
 			open.Start = from
 		}
