@@ -265,3 +265,39 @@ func TestErrandCalendarNarrows(t *testing.T) {
 		t.Errorf("an unknown calendar mode: %v", err)
 	}
 }
+
+// TestErrandBookingYesWithUnreadableCalendar: a yes on the poll books
+// nothing when the calendar cannot be read then; the run hears why.
+func TestErrandBookingYesWithUnreadableCalendar(t *testing.T) {
+	t.Parallel()
+	h, runs, f := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarAsk, Days: everyDay, DaysAhead: 5})
+	ctx := context.Background()
+	loc := RuntimeConfig(h.b.cfgs).Location()
+	at := h.inTwoDays(14)
+	when := errand.FormatSpan(errand.Span{Start: at, End: at.Add(time.Hour)}, loc)
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	runs.say(bookAnswer(at, "Let me check with Sam!"), `{"action":"reply","text":"Sam will come back to you."}`)
+	h.theyWrite("14:00 the day after tomorrow?")
+	poll := h.waitPoll(harnessDM, "Book "+when+" with Alex")
+	f.mu.Lock()
+	f.broken["you@example.com"] = true
+	f.mu.Unlock()
+	h.vote(poll.ID, "15551234567", outboundmsg.ApprovalYes)
+	h.WaitSent(errandJID, "Sam will come back to you.")
+	if got := h.errandOf(e.ID); got.Booked != "" {
+		t.Errorf("after a yes it could not check: %+v", got)
+	}
+	f.mu.Lock()
+	n := len(f.inserted)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Errorf("%d events booked unchecked", n)
+	}
+	handed := runs.handed()
+	if l := handed[len(handed)-1].Lines; !strings.Contains(l[len(l)-1].Text, "the calendar cannot be read just now: it is not booked") {
+		t.Errorf("what the run heard: %+v", l[len(l)-1])
+	}
+}
