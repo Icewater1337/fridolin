@@ -149,7 +149,12 @@ func (a *Agent) tailscaleHeal(ctx context.Context, err error) {
 		return
 	}
 	h.tries++
-	h.next = now.Add(min(a.tailscaleGrace()<<h.tries, tailscaleRetryMax))
+	wait := tailscaleRetryMax
+	// Compare against the cap shifted right: grace<<tries overflows after a day of outage.
+	if g := a.tailscaleGrace(); g <= tailscaleRetryMax>>h.tries {
+		wait = g << h.tries
+	}
+	h.next = now.Add(wait)
 	st, serr := a.Tailscale.State(ctx)
 	switch {
 	case serr != nil:

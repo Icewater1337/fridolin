@@ -152,6 +152,26 @@ func TestTailscaleHealWaits(t *testing.T) {
 	}
 }
 
+// TestTailscaleHealWaitStaysCapped: however long the outage, the wait
+// between tries never overflows past the hour cap (issue #640).
+func TestTailscaleHealWaitStaysCapped(t *testing.T) {
+	ctx := context.Background()
+	unreachable := &net.DNSError{Err: "no such host", Name: "fridolin-core.example.ts.net", IsNotFound: true}
+	a := &Agent{Logf: func(string, ...any) {}, Tailscale: &fakeTailscale{state: "NeedsLogin"}, TailscaleGrace: 2 * time.Minute}
+	a.ts.down = time.Now().Add(-time.Hour)
+	for i := 1; i <= 100; i++ {
+		a.ts.next = time.Time{}
+		a.tailscaleHeal(ctx, unreachable)
+		wait := time.Until(a.ts.next)
+		if wait < time.Minute || wait > tailscaleRetryMax {
+			t.Fatalf("try %d: next try in %v", i, wait)
+		}
+		if i >= 5 && wait < tailscaleRetryMax-time.Minute {
+			t.Fatalf("try %d: next try in %v, want the hour cap", i, wait)
+		}
+	}
+}
+
 // TestTailscaleCLIAnswersAsCLI: the macOS app's binary, started by a
 // launchd agent, opens the app instead of answering unless
 // TAILSCALE_BE_CLI=1 is set, as it was on the Mac mini (2026-11-10). The
