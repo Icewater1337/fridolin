@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/errand"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -300,4 +301,59 @@ func TestErrandBookingYesWithUnreadableCalendar(t *testing.T) {
 	if l := handed[len(handed)-1].Lines; !strings.Contains(l[len(l)-1].Text, "the calendar cannot be read just now: it is not booked") {
 		t.Errorf("what the run heard: %+v", l[len(l)-1])
 	}
+}
+
+// yesAfterTheEnd asks the owner to book, lets end end the errand, and
+// then votes yes on the poll: nothing is booked, the booking is cleared,
+// and the owner hears it was not booked because the errand had ended
+// (#639).
+func yesAfterTheEnd(t *testing.T, end func(h *harness, runs *errandRuns, e store.Errand)) {
+	t.Helper()
+	h, runs, f := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarAsk, Days: everyDay, DaysAhead: 5})
+	loc := RuntimeConfig(h.b.cfgs).Location()
+	at := h.inTwoDays(14)
+	when := errand.FormatSpan(errand.Span{Start: at, End: at.Add(time.Hour)}, loc)
+	if _, err := h.b.openErrand(context.Background(), h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	runs.say(bookAnswer(at, "Let me check with Sam!"))
+	h.theyWrite("14:00 the day after tomorrow?")
+	poll := h.waitPoll(harnessDM, "Book "+when+" with Alex")
+	h.WaitSent(errandJID, "Let me check with Sam!")
+
+	end(h, runs, e)
+	h.WaitSent(harnessDM, outboundmsg.ErrandBookingEndedNotice("Alex", e.ID, when))
+	h.vote(poll.ID, "15551234567", outboundmsg.ApprovalYes)
+	h.WaitFor("the yes", func() bool { return len(h.auditOf(audit.ApprovalVote)) > 0 })
+	if got := h.errandOf(e.ID); got.Booked != "" {
+		t.Errorf("the booking after the end: %+v", got)
+	}
+	f.mu.Lock()
+	n := len(f.inserted)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Errorf("%d events booked for an errand that had ended", n)
+	}
+}
+
+// TestErrandBookingYesAfterStop: a yes after errand_stop books nothing.
+func TestErrandBookingYesAfterStop(t *testing.T) {
+	t.Parallel()
+	yesAfterTheEnd(t, func(h *harness, _ *errandRuns, e store.Errand) {
+		if err := h.b.stopErrand(context.Background(), "core", e.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// TestErrandBookingYesAfterDone: a yes after the run ended the errand
+// with done books nothing.
+func TestErrandBookingYesAfterDone(t *testing.T) {
+	t.Parallel()
+	yesAfterTheEnd(t, func(h *harness, runs *errandRuns, e store.Errand) {
+		runs.say(`{"action":"done","text":"Bye!","summary":"Asked Sam."}`)
+		h.theyWrite("Thanks, bye")
+		h.WaitFor("the end", func() bool { return h.errandOf(e.ID).State == store.ErrandDone })
+	})
 }

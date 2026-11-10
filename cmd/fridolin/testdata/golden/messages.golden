@@ -708,6 +708,8 @@ errandBookingDraft
 	📅 Alex would like to meet Fri 2026-11-06 14:00–15:00. Shall I put it in your calendar (errand e1a2b3c4)?
 errandBookingFailedNotice
 	⚠️ I could not put Fri 2026-11-06 14:00–15:00 with Alex in your calendar (errand e1a2b3c4): the calendar did not take it. I told them you will come back to them about it.
+errandBookingEndedNotice
+	📅 Not booked: Fri 2026-11-06 14:00–15:00 with Alex (errand e1a2b3c4). The conversation with them had already ended, so they would not hear of it; arrange it with them yourself if you still want it.
 errandBookingQuestion
 	📅 They want to meet, but the time they agreed on could not be booked. Not booked: Fri 2026-11-06 14:00–15:00 is not one of the free times. What should I tell them?
 errandBookingCheckMessage
