@@ -99,7 +99,7 @@ func latestSlot(sc trigger.Schedule, slot, by time.Time) time.Time {
 		// before by (still on the schedule, via Next), so a long outage
 		// costs a few walks, not one per missed slot.
 		jump := by.Add(-2 * slot.Sub(start))
-		if n, ok := sc.Next(jump); ok && n.After(slot) {
+		if n, ok := sc.Next(jump); ok && n.After(slot) && !n.After(by) {
 			slot = n
 		}
 	}

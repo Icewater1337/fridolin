@@ -253,3 +253,33 @@ func TestDecideLongMissedCron(t *testing.T) {
 		t.Errorf("a year missed: %+v", d)
 	}
 }
+
+// A cron that runs only in January, missed past the walk's cap: the jump
+// lands on next January, after by, so it is refused and the walk takes the
+// last January slot, not a future one (#652).
+func TestLatestSlotJumpNotAfterBy(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cron, err := trigger.ParseRecurring("cron * * * 1 *", loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wall := func(s string) time.Time {
+		tm, err := time.ParseInLocation("2006-01-02 15:04", s, loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tm
+	}
+	anchor, by, want := wall("2026-01-10 12:00"), wall("2026-03-01 12:00"), wall("2026-01-31 23:59")
+	slot, _ := cron.Next(anchor)
+	if got := latestSlot(cron, slot, by); !got.Equal(want) {
+		t.Fatalf("latestSlot = %s, want %s", got, want)
+	}
+	d := Decide(cron, anchor, 0, true, by)
+	if d.Run || !d.Skipped || !d.Late || !d.Last.Equal(want) {
+		t.Errorf("missed: skip: %+v", d)
+	}
+}
