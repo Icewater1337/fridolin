@@ -57,7 +57,7 @@ ARG RESTIC_VERSION=0.19.1
 # renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=1.75.2
 # renovate: datasource=github-releases depName=benbjohnson/litestream
-ARG LITESTREAM_VERSION=0.5.17
+ARG LITESTREAM_VERSION=0.5.18
 # What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
 # (quick tunnels to a dev server).
 # renovate: datasource=github-releases depName=cli/cli
