@@ -196,6 +196,7 @@ func TestErrandBookingWaitsForTheOwner(t *testing.T) {
 	runs.say(bookAnswer(later, "I'll ask Sam."), `{"action":"reply","text":"Sorry, Sam can't make it then."}`)
 	h.theyWrite("And 17:00?")
 	no := h.waitPoll(harnessDM, "Book "+laterWhen+" with Alex")
+	h.WaitSent(errandJID, "I'll ask Sam.") // vote once the turn that asked is over, as the owner does
 	h.vote(no.ID, "15551234567", outboundmsg.ApprovalNo)
 	h.WaitSent(errandJID, "Sorry, Sam can't make it then.")
 	if got := h.errandOf(second.ID); got.Booked != "" {
@@ -282,6 +283,7 @@ func TestErrandBookingYesWithUnreadableCalendar(t *testing.T) {
 	runs.say(bookAnswer(at, "Let me check with Sam!"), `{"action":"reply","text":"Sam will come back to you."}`)
 	h.theyWrite("14:00 the day after tomorrow?")
 	poll := h.waitPoll(harnessDM, "Book "+when+" with Alex")
+	h.WaitSent(errandJID, "Let me check with Sam!") // vote once the turn that asked is over, as the owner does
 	f.mu.Lock()
 	f.broken["you@example.com"] = true
 	f.mu.Unlock()
