@@ -55,7 +55,7 @@ ARG TARGETARCH
 # renovate: datasource=github-releases depName=restic/restic
 ARG RESTIC_VERSION=0.19.1
 # renovate: datasource=github-releases depName=rclone/rclone
-ARG RCLONE_VERSION=1.75.2
+ARG RCLONE_VERSION=1.76.0
 # renovate: datasource=github-releases depName=benbjohnson/litestream
 ARG LITESTREAM_VERSION=0.5.18
 # What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
