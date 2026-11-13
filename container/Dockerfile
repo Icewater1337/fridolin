@@ -15,7 +15,7 @@
 
 ARG GO_IMAGE=golang:1.26.10-bookworm
 ARG NODE_IMAGE=node:26.13.0-bookworm-slim
-ARG RUNTIME_IMAGE=debian:bookworm-20261027-slim
+ARG RUNTIME_IMAGE=debian:bookworm-20261104-slim
 
 # ── the bridge ────────────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS build
