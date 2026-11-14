@@ -55,7 +55,7 @@ ARG TARGETARCH
 # renovate: datasource=github-releases depName=restic/restic
 ARG RESTIC_VERSION=0.19.1
 # renovate: datasource=github-releases depName=rclone/rclone
-ARG RCLONE_VERSION=1.75.2
+ARG RCLONE_VERSION=1.76.0
 # renovate: datasource=github-releases depName=benbjohnson/litestream
 ARG LITESTREAM_VERSION=0.5.18
 # What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
@@ -75,12 +75,12 @@ RUN set -eu; \
     fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o "$1" "$2"; }; \
     case "${TARGETARCH}" in \
       amd64) restic_sha=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c; \
-             rclone_sha=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702; \
+             rclone_sha=b00f00b3266c3764413afe599d3ec316f6f43b3e0ea8a0bc1d186d2133e46df7; \
              ls_arch=x86_64; ls_sha=d3687b9fd0f2e9426bbd3da828429ff3f1dfc5c9b74d54fdf028e4ee510e7dea; \
              gh_sha=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d; \
              cf_sha=1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872 ;; \
       arm64) restic_sha=a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465; \
-             rclone_sha=7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10; \
+             rclone_sha=ee169016675e23a69d77240565133ff7dbc9b33d16fa8f7053d4af39f1eaeb78; \
              ls_arch=arm64; ls_sha=922a09e6a7ac67f2095571894dc6382e94e1dd4cdd9674883ddf1a8e74ab982d; \
              gh_sha=ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63; \
              cf_sha=3df43aedc9ff291d1735b5cb576cb97e0b157488796db2e32b28aecabb445775 ;; \
