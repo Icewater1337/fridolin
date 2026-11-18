@@ -21,6 +21,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -152,7 +153,7 @@ func SaveCoreHost(dir string, c CoreHostConfig) error {
 	if err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(dir, CoreHostFile), append(data, '\n'), 0o600)
+	return fsx.WriteFileAtomic(filepath.Join(dir, CoreHostFile), append(data, '\n'), 0o600, false)
 }
 
 // coreHost is the agent's core-host state: the offers waiting for their

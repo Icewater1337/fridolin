@@ -100,6 +100,26 @@ func TestLoginCodeForTheTailnet(t *testing.T) {
 	}
 }
 
+// Only tailnet=1 asks for the longer-lived code for another device: any
+// other value gets the local code (#389).
+func TestLoginCodeTailnetMeansOnlyOne(t *testing.T) {
+	calls := []string{}
+	s := &authSessionsFake{calls: &calls}
+	a := DashboardAuth{Sessions: func() DashboardSessionStore { return s }, TailnetURL: func() string { return "http://fridolin-core.example.ts.net/" }}
+	for _, q := range []string{"", "?tailnet=", "?tailnet=0", "?tailnet=false", "?tailnet=no", "?tailnet=yes", "?tailnet=2"} {
+		w := httptest.NewRecorder()
+		a.LoginCode(w, httptest.NewRequest("POST", "/api/login/code"+q, nil))
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"code":"code"`) || !strings.Contains(w.Body.String(), `"url":""`) {
+			t.Errorf("%q: %d %s, want the local code", q, w.Code, w.Body.String())
+		}
+	}
+	w := httptest.NewRecorder()
+	a.LoginCode(w, httptest.NewRequest("POST", "/api/login/code?tailnet=1", nil))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"code":"code-10m0s"`) || !strings.Contains(w.Body.String(), `"url":"http://fridolin-core.example.ts.net/#login=code-10m0s"`) {
+		t.Errorf("tailnet=1: %d %s, want the code for another device", w.Code, w.Body.String())
+	}
+}
+
 // A code for another device lasts RemoteLoginCodeLifetime, once.
 func TestRemoteLoginCodeLifetime(t *testing.T) {
 	now := time.Now()

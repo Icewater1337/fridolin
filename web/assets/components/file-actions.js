@@ -2,10 +2,12 @@
 // "Changing files"): edit a text or Markdown file in place, upload into a
 // folder, create a file, rename or move, and delete into the folder's
 // trash. The bridge checks every change again, audits it and commits it
-// where the folder is a git repository; these only ask and show.
+// where the folder is a git repository; these only ask and show. Also the
+// trail of links the Files and File pages show above a folder or file.
 
 import { api, get, qs, upload, errorStatus } from '../app/api.js';
 import { h, mount } from '../lib/dom.js';
+import { filesHref } from '../lib/files.js';
 import { btn } from './buttons.js';
 import { spinner, timeAgo } from './common.js';
 import { confirmDialog, openDialog } from './dialog.js';
@@ -14,6 +16,7 @@ import { toast } from './toast.js';
 import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page } from '../app/page.js' */
+/** @import { Child } from '../lib/dom.js' */
 /** @import { FileCommit, FileMoved, FileSaved, FilesUploaded } from '../../types/api.js' */
 
 /** @param {string} p */
@@ -39,6 +42,25 @@ export function takeEditOnOpen(rootId, path) {
   const yes = editNext === `${rootId}\u0000${path}`;
   editNext = '';
   return yes;
+}
+
+/**
+ * The trail "Files / root / folder / …" to path in the root, each part a
+ * link but the last; path '' is the root itself.
+ * @param {string} rootId
+ * @param {string} label
+ * @param {string} path
+ */
+export function crumbs(rootId, label, path) {
+  /** @type {Child[]} */
+  const out = [h('a', { href: '#/files' }, 'Files'), ' / ', h('a', { href: filesHref(rootId, '', true) }, label)];
+  let acc = '';
+  const parts = path ? path.split('/') : [];
+  parts.forEach((seg, i) => {
+    acc = acc ? `${acc}/${seg}` : seg;
+    out.push(' / ', i === parts.length - 1 ? h('span', seg) : h('a', { href: filesHref(rootId, acc, true) }, seg));
+  });
+  return h('nav.files-crumbs', { 'aria-label': 'Folder' }, out);
 }
 
 /**

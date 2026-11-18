@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -385,7 +386,7 @@ func (o instanceOps) pair(ctx context.Context, st *FrideInstanceState) (*frideCo
 	if err != nil {
 		return nil, FrideInfo{}, err
 	}
-	if err := writeFile(filepath.Join(frideInstanceDir(o.dir, st.Name), frideInstanceTokenFile), []byte(tok+"\n"), 0o600); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(frideInstanceDir(o.dir, st.Name), frideInstanceTokenFile), []byte(tok+"\n"), 0o600, false); err != nil {
 		return nil, FrideInfo{}, err
 	}
 	// A FrIDE paired anew has none of the identities from before.

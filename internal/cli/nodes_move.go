@@ -27,9 +27,8 @@ var (
 // nodesMoveCheck runs `fridolin nodes move-check SRC DST`: the pre-flight
 // report, read only. It exits 1 when something blocks the move.
 func nodesMoveCheck(api moveAPI, src, dst string, asJSON bool, stdout, stderr io.Writer) int {
-	var rep nodes.MoveReport
-	if err := api(http.MethodPost, "/api/nodes/move-check", httpapi.MoveRequest{Source: src, Target: dst}, &rep); err != nil {
-		fmt.Fprintf(stderr, "fridolin nodes move-check: %v\n", err)
+	rep, ok := askMoveCheck(api, "move-check", src, dst, stderr)
+	if !ok {
 		return 1
 	}
 	if asJSON {
@@ -43,35 +42,82 @@ func nodesMoveCheck(api moveAPI, src, dst string, asJSON bool, stdout, stderr io
 	return 0
 }
 
+// askMoveCheck asks the core for the pre-flight report; cmd names the
+// command in its error.
+func askMoveCheck(api moveAPI, cmd, src, dst string, stderr io.Writer) (nodes.MoveReport, bool) {
+	var rep nodes.MoveReport
+	if err := api(http.MethodPost, "/api/nodes/move-check", httpapi.MoveRequest{Source: src, Target: dst}, &rep); err != nil {
+		fmt.Fprintf(stderr, "fridolin nodes %s: %v\n", cmd, err)
+		return rep, false
+	}
+	return rep, true
+}
+
+// moveOutput is the one JSON document `nodes move --yes --json` writes on
+// stdout: the pre-flight, and the move's last record (as it started under
+// --no-wait), left out when the move did not start.
+type moveOutput struct {
+	Check nodes.MoveReport  `json:"check"`
+	Move  *nodes.MoveRecord `json:"move,omitempty"`
+}
+
 // nodesMove runs `fridolin nodes move SRC DST`: the pre-flight, and with
 // yes the move itself, which it follows to its end unless noWait. The
 // core stops on SRC on the way and a core on DST answers at the same
 // address (the tailnet name moves with the export), so a CLI that asks
 // over the tailnet sees the move end; one that asks 127.0.0.1 on SRC
 // waits for the core that comes back there after a rollback, or until
-// it gives up and says where to look.
+// it gives up and says where to look. With yes and asJSON, stdout
+// carries only one moveOutput, written at the end, and the progress goes
+// to stderr.
 func nodesMove(api moveAPI, src, dst string, yes, noWait, asJSON bool, stdout, stderr io.Writer) int {
-	if code := nodesMoveCheck(api, src, dst, asJSON, stdout, stderr); code != 0 || !yes {
+	if !yes {
+		code := nodesMoveCheck(api, src, dst, asJSON, stdout, stderr)
 		if code == 0 && !asJSON {
 			fmt.Fprintf(stdout, "\nA dry run: nothing changed. To move the core: fridolin nodes move %s %s --yes\n", src, dst)
 		}
 		return code
 	}
+	if !asJSON {
+		if code := nodesMoveCheck(api, src, dst, false, stdout, stderr); code != 0 {
+			return code
+		}
+		_, code := startMove(api, src, dst, noWait, stdout, stderr)
+		return code
+	}
+	rep, ok := askMoveCheck(api, "move", src, dst, stderr)
+	if !ok {
+		return 1
+	}
+	out, code := moveOutput{Check: rep}, 1
+	if len(rep.Blocking) == 0 {
+		out.Move, code = startMove(api, src, dst, noWait, stderr, stderr)
+	}
+	printIndented(stdout, out)
+	return code
+}
+
+// startMove starts the move and, unless noWait, follows it to its end,
+// with the progress on progress. It returns the move's last record, nil
+// when the move did not start.
+func startMove(api moveAPI, src, dst string, noWait bool, progress, stderr io.Writer) (*nodes.MoveRecord, int) {
 	var resp httpapi.MoveResponse
 	if err := api(http.MethodPost, "/api/nodes/move", httpapi.MoveRequest{Source: src, Target: dst}, &resp); err != nil {
 		fmt.Fprintf(stderr, "fridolin nodes move: %v\n", err)
-		return 1
+		return nil, 1
 	}
-	id := resp.ID
-	fmt.Fprintf(stdout, "\nMove %s runs. Follow it with: fridolin nodes move-status %s\n", id, id)
+	fmt.Fprintf(progress, "\nMove %s runs. Follow it with: fridolin nodes move-status %s\n", resp.ID, resp.ID)
 	if noWait {
-		return 0
+		return &resp.MoveRecord, 0
 	}
-	return followMove(api, id, asJSON, stdout, stderr)
+	return followMove(api, &resp.MoveRecord, progress, stderr)
 }
 
-// followMove prints a move's steps as they come until it ends.
-func followMove(api moveAPI, id string, asJSON bool, stdout, stderr io.Writer) int {
+// followMove prints a move's steps on progress as they come until it
+// ends, and returns the record the core answered with last (last itself
+// while it has not answered).
+func followMove(api moveAPI, last *nodes.MoveRecord, progress, stderr io.Writer) (*nodes.MoveRecord, int) {
+	id := last.ID
 	shown, away := 0, false
 	end := time.Now().Add(moveFollow)
 	for time.Now().Before(end) {
@@ -80,39 +126,36 @@ func followMove(api moveAPI, id string, asJSON bool, stdout, stderr io.Writer) i
 		var apiErr *controlcli.APIError
 		switch {
 		case err == nil:
+			last = &rec
 			if away {
-				fmt.Fprintln(stdout, "The core answers again.")
+				fmt.Fprintln(progress, "The core answers again.")
 				away = false
 			}
 			for ; shown < len(rec.Steps); shown++ {
 				s := rec.Steps[shown]
-				fmt.Fprintf(stdout, "%s  %s: %s\n", s.At.Local().Format("15:04:05"), s.Step, s.Detail)
+				fmt.Fprintf(progress, "%s  %s: %s\n", s.At.Local().Format("15:04:05"), s.Step, s.Detail)
 			}
 			if nodes.MoveFinal(rec.State) {
-				if asJSON {
-					printIndented(stdout, rec)
-				} else {
-					fmt.Fprintf(stdout, "\nMove %s: %s. %s\n", id, rec.State, rec.Detail)
-				}
+				fmt.Fprintf(progress, "\nMove %s: %s. %s\n", id, rec.State, rec.Detail)
 				if rec.State == nodes.MoveDone {
-					return 0
+					return last, 0
 				}
-				return 1
+				return last, 1
 			}
 		case errors.As(err, &apiErr) && apiErr.Status != http.StatusServiceUnavailable:
 			fmt.Fprintf(stderr, "fridolin nodes move: %v\n", err)
-			return 1
+			return last, 1
 		default:
 			// The core stops on the source on the way.
 			if !away {
-				fmt.Fprintf(stdout, "The core does not answer (it stops on the source as planned); waiting for it at the same address... (%v)\n", err)
+				fmt.Fprintf(progress, "The core does not answer (it stops on the source as planned); waiting for it at the same address... (%v)\n", err)
 				away = true
 			}
 		}
 		time.Sleep(moveFollowEvery)
 	}
 	fmt.Fprintf(stderr, "fridolin nodes move: move %s did not end within %s; ask the core that runs now: fridolin nodes move-status %s\n", id, moveFollow, id)
-	return 1
+	return last, 1
 }
 
 // nodesMoveStatus runs `fridolin nodes move-status ID`.

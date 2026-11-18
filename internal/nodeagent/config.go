@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -181,7 +182,7 @@ func SaveConfig(dir string, c Config) error {
 	if err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(dir, ConfigFile), append(data, '\n'), 0o600)
+	return fsx.WriteFileAtomic(filepath.Join(dir, ConfigFile), append(data, '\n'), 0o600, false)
 }
 
 // LoadKey reads dir's device key.
@@ -204,7 +205,7 @@ func NewKey(dir string) (ed25519.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writeFile(filepath.Join(dir, KeyFile), []byte(hex.EncodeToString(key.Seed())+"\n"), 0o600); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(dir, KeyFile), []byte(hex.EncodeToString(key.Seed())+"\n"), 0o600, false); err != nil {
 		return nil, err
 	}
 	return key, nil
@@ -213,31 +214,4 @@ func NewKey(dir string) (ed25519.PrivateKey, error) {
 // DeviceID is the ID of key's device.
 func DeviceID(key ed25519.PrivateKey) string {
 	return nodeproto.DeviceIDFor(key.Public().(ed25519.PublicKey))
-}
-
-// writeFile writes data to path through a temp file and a rename, in a
-// folder only its owner may enter.
-func writeFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
 }

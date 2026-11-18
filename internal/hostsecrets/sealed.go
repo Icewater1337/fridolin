@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/seal"
 )
 
@@ -83,19 +84,7 @@ func (s Sealed) Set(name, value string) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(s.Dir, "."+name+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(sealed); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), p)
+	return fsx.WriteFileAtomic(p, sealed, 0o600, false)
 }
 
 func (s Sealed) Delete(name string) error {

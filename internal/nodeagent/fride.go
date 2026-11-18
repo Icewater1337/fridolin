@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -1143,7 +1144,7 @@ func PairFride(ctx context.Context, o FridePairOptions) (FrideInfo, error) {
 	if err != nil {
 		return FrideInfo{}, err
 	}
-	if err := writeFile(filepath.Join(o.Dir, FrideTokenFile), []byte(token+"\n"), 0o600); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(o.Dir, FrideTokenFile), []byte(token+"\n"), 0o600, false); err != nil {
 		return FrideInfo{}, err
 	}
 	cfg.Fride = fc
