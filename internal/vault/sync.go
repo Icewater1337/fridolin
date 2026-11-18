@@ -352,6 +352,16 @@ func (v *Vault) upload(ctx context.Context, rel string, r row, known bool, prov 
 		err = fmt.Errorf("cold copy has %d bytes, uploaded %d", info.Size, counter.n)
 		r.ColdKey, r.ColdSHA256 = "", "" // cold holds bytes nobody hashed
 	}
+	if cur, serr := v.lstat(rel); err == nil && serr == nil && (cur.Size() != counter.n || cur.ModTime().UnixNano() != r.MtimeNS) {
+		// Written to while uploading. What went up may be torn, unless
+		// the writes ended with just the bytes Put read (a burst that
+		// finished as the upload began): then cold holds the file as it
+		// is now, and its new time is the one to record (#707).
+		if mtime, ok := v.holds(rel, sum, counter.n); ok {
+			r.MtimeNS = mtime.UnixNano()
+			r.LastAccess = max(r.LastAccess, ms(mtime))
+		}
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if err != nil {
@@ -376,6 +386,25 @@ func (v *Vault) upload(ctx context.Context, rel string, r row, known bool, prov 
 	rep.Uploaded = append(rep.Uploaded, rel)
 	rep.UploadedBytes += counter.n
 	return nil
+}
+
+// holds reports whether rel is now a regular file of n bytes that hash to
+// sum, and if so its modification time. It looks at the file before and
+// after hashing it, so the hash is that of the file at that size and time.
+func (v *Vault) holds(rel, sum string, n int64) (time.Time, bool) {
+	fi, err := v.lstat(rel)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() != n {
+		return time.Time{}, false
+	}
+	got, m, err := v.hashFile(rel)
+	if err != nil || got != sum || m != n {
+		return time.Time{}, false
+	}
+	again, err := v.lstat(rel)
+	if err != nil || again.Size() != n || !again.ModTime().Equal(fi.ModTime()) {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
 }
 
 type countingWriter struct{ n int64 }

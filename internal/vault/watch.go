@@ -22,13 +22,18 @@ type WatchOptions struct {
 	MaxDelay time.Duration
 	// OnSync, when set, gets each sync's report.
 	OnSync func(SyncReport, error)
+	// Ready, when set, is called once, when every folder of the hot tier
+	// is watched: a change made from then on reaches a sync. Changes made
+	// before may not.
+	Ready func()
 }
 
 // Watch follows the hot tier with fsnotify until ctx ends, and feeds the
 // paths that changed to SyncPaths once writes settle. It ignores what the
 // vault ignores (vault.db*, bridge.db*, *.tmp, .cold.json). When the
 // kernel drops events, the next round is a full Sync. Watch does no sync
-// of its own at start; run Sync once first to catch up.
+// of its own at start; run Sync once first to catch up (once Ready was
+// called, to miss nothing in between).
 func (v *Vault) Watch(ctx context.Context, opts WatchOptions) error {
 	if opts.Debounce <= 0 {
 		opts.Debounce = 2 * time.Second
@@ -43,6 +48,9 @@ func (v *Vault) Watch(ctx context.Context, opts WatchOptions) error {
 	defer func() { _ = w.Close() }()
 	if err := v.watchTree(w, "."); err != nil {
 		return err
+	}
+	if opts.Ready != nil {
+		opts.Ready()
 	}
 
 	pending := map[string]bool{}
