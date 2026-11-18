@@ -13,6 +13,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/snapshot"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
@@ -353,7 +354,7 @@ func (vs *vaultSnapshots) paths(kind string) (paths, excludes []string) {
 		}
 	}
 	if kind == snapshotHourly {
-		if audit := filepath.Join(data, "audit"); exists(audit) {
+		if audit := filepath.Join(data, "audit"); fsx.Exists(audit) {
 			paths = append(paths, audit)
 		}
 	} else {
@@ -393,11 +394,6 @@ func dataDirExcludes(data string, dbs map[string]string) []string {
 		// snapshot, whose copies go to B2, Drive and the node targets.
 		config.Layout{Root: data}.LocalSecrets(),
 	)
-}
-
-func exists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 // Snapshot takes one now (POST /api/vault/snapshot).

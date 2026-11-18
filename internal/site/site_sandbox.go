@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
@@ -92,7 +93,7 @@ func readModuleCaps(modulesDir, home string) []sandbox.SiteModule {
 				continue // the site refuses the module (validateManifest)
 			}
 			p := sandbox.ResolveModulePath(f.Path, dir, home)
-			c.Files = append(c.Files, sandbox.FileCapability{Name: name, Path: p, Access: f.Access, Folder: strings.HasSuffix(f.Path, "/") || isDir(p)})
+			c.Files = append(c.Files, sandbox.FileCapability{Name: name, Path: p, Access: f.Access, Folder: strings.HasSuffix(f.Path, "/") || platform.IsDir(p)})
 		}
 		sort.Slice(c.Files, func(i, j int) bool { return c.Files[i].Name < c.Files[j].Name })
 		out = append(out, c)

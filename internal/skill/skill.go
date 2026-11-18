@@ -19,6 +19,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
@@ -273,7 +274,7 @@ func Parse(rel string, data []byte) (Skill, error) {
 	case s.Name == "":
 		bad("name", "is missing")
 	case len(s.Name) > maxName || !nameRe.MatchString(s.Name):
-		bad("name", "%q must be lower-case letters, digits and single hyphens, at most %d", truncate(s.Name, 80), maxName)
+		bad("name", "%q must be lower-case letters, digits and single hyphens, at most %d", textx.Truncate(s.Name, 80), maxName)
 	case strings.HasSuffix(rel, "/SKILL.md") && s.Name != path.Base(path.Dir(rel)):
 		bad("name", "%q must be the name of its folder, %q", s.Name, path.Base(path.Dir(rel)))
 	}
@@ -299,12 +300,12 @@ func Parse(rel string, data []byte) (Skill, error) {
 	}
 	for _, e := range s.Requires.Env {
 		if !envRe.MatchString(e) {
-			bad("requires.env", "%q is not a variable name", truncate(e, 40))
+			bad("requires.env", "%q is not a variable name", textx.Truncate(e, 40))
 		}
 	}
 	for _, b := range s.Requires.Bins {
 		if strings.ContainsAny(b, "/\\") {
-			bad("requires.bins", "%q must be a program's name, not a path", truncate(b, 40))
+			bad("requires.bins", "%q must be a program's name, not a path", textx.Truncate(b, 40))
 		}
 	}
 	for _, o := range list("os", root.Get("os"), maxItem) {
@@ -313,7 +314,7 @@ func Parse(rel string, data []byte) (Skill, error) {
 			o = "windows"
 		}
 		if !slices.Contains(OSes, o) {
-			bad("os", "%q is not darwin, linux or windows", truncate(o, 40))
+			bad("os", "%q is not darwin, linux or windows", textx.Truncate(o, 40))
 			continue
 		}
 		if !slices.Contains(s.OS, o) {
@@ -349,7 +350,7 @@ func Parse(rel string, data []byte) (Skill, error) {
 			}.Normalized()
 			for _, v := range s.Policy.Vault {
 				if err := checkVaultPath(v); err != nil {
-					bad("metadata.fridolin.vault", "%q %v", truncate(v, 60), err)
+					bad("metadata.fridolin.vault", "%q %v", textx.Truncate(v, 60), err)
 				}
 			}
 			for _, t := range s.Policy.Triggers {
@@ -455,7 +456,7 @@ func slug(name string) string {
 }
 
 // cut cuts s to at most n bytes at a rune boundary, with no "…": for
-// generated values that must fit a limit (truncate is for messages).
+// generated values that must fit a limit (textx.Truncate is for messages).
 func cut(s string, n int) string {
 	if len(s) <= n {
 		return s
