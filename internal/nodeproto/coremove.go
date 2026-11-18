@@ -334,6 +334,12 @@ type CoreMoveStep struct {
 	Detail string    `json:"detail,omitempty"`
 }
 
+// StepLeaseStale is the source's step once the target stopped renewing
+// the lease. The target's core may still run then, only cut off from
+// the lease store, so a move that fails after it does not offer to
+// forget the target's secrets (#591).
+const StepLeaseStale = "stale"
+
 // CoreMoveState is a move as a host knows it: its role, the phase it is
 // in, whether the core runs here now (Running), and the steps so far.
 type CoreMoveState struct {

@@ -237,6 +237,13 @@ for compatibility.
 
 ### Fixed
 
+- **A core move that fails on a stale lease no longer offers to forget
+  the target's secrets.** When the target stopped renewing the lease and
+  the move failed (or the source could not take the core back), you were
+  still asked whether the target keeps the host secrets, and no vote
+  within 24 hours forgot them, though the core there may still run, only
+  cut off. Such a move now asks nothing, like one that ended unknown; a
+  move the source rolled back still asks.
 - **`fridolin nodes move --yes --json` prints valid JSON.** Its stdout
   held the pre-flight, then lines of progress, then the move's record,
   so nothing could parse it. It now prints one document,

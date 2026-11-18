@@ -496,13 +496,19 @@ func (a *Agent) sourceWatch(ctx context.Context, r CoreRunner, m *moveRun) {
 					return
 				}
 			case nodeproto.LeaseStale:
-				switch {
-				case theirs:
+				// The target's core may still run, cut off from the lease
+				// store: the step says so to the core, which then asks
+				// nothing about the target's secrets should the move fail
+				// (#591).
+				if !theirs && !ours {
+					a.step(m, nodeproto.MoveFailed, nodeproto.StepLeaseStale, "%s stopped renewing the lease and the latest export is not of this move: nothing started here; see fridolin core status", p.Target)
+					return
+				}
+				a.step(m, "", nodeproto.StepLeaseStale, "%s stopped renewing the lease", p.Target)
+				if theirs {
 					a.sourceRollBack(ctx, r, m, true, "%s stopped renewing the lease; its last export of this move comes back, what it received after it is lost (WhatsApp may ask to pair again)", p.Target)
-				case ours:
+				} else {
 					a.sourceRollBack(ctx, r, m, false, "%s stopped renewing the lease and exported nothing; what it received is lost (WhatsApp may ask to pair again)", p.Target)
-				default:
-					a.step(m, nodeproto.MoveFailed, "stale", "%s stopped renewing the lease and the latest export is not of this move: nothing started here; see fridolin core status", p.Target)
 				}
 				return
 			default:
