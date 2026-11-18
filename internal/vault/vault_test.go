@@ -107,6 +107,74 @@ func TestFailedUploadStaysHotAndIsNeverEvicted(t *testing.T) {
 	}
 }
 
+// A file written to while it uploads is in sync at once when the writes
+// ended with the bytes the upload read, as a burst of writes does that
+// ends as the upload begins; before, it failed as "changed during
+// upload", and the next sync only reconciled it, so no report ever said
+// it was uploaded (#707). When it changed after the upload read it, what
+// went up is not the file: it stays hot and the next sync uploads it.
+func TestUploadOfAFileWrittenMeanwhile(t *testing.T) {
+	f := newFixture(t)
+	p := filepath.Join(f.root, "a.md")
+	rewrite := func(content string, later time.Duration) {
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m := time.Now().Add(later)
+		if err := os.Chtimes(p, m, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// On the operation op of a.md's cold copy, a.md is rewritten once.
+	once := func(op, content string, later time.Duration) {
+		done := false
+		f.cold.Fail = func(o, key string) error {
+			if o == op && key == "a.md" && !done {
+				done = true
+				rewrite(content, later)
+			}
+			return nil
+		}
+	}
+
+	f.write("a.md", "a", 0)
+	once("put", "aaaaa", time.Second) // after the upload took size and time, before Put reads
+	rep, err := f.v.SyncPaths(bg, []string{"a.md"})
+	if err != nil || !slices.Equal(rep.Uploaded, []string{"a.md"}) || len(rep.Failed) != 0 {
+		t.Fatalf("a burst that ended as the upload began: %+v, %v", rep, err)
+	}
+	if e := f.entry("a.md"); e.Tier != TierBoth || e.Size != 5 || e.SHA256 != sum("aaaaa") {
+		t.Fatalf("a.md = %+v", e)
+	}
+	if got, _ := f.coldBytes("a.md"); got != "aaaaa" {
+		t.Fatalf("cold a.md = %q", got)
+	}
+	if st, err := f.v.Stats(bg); err != nil || st.LastUpload.IsZero() {
+		t.Fatalf("stats = %+v, %v", st, err)
+	}
+	f.cold.Fail = nil
+	if rep := f.sync(); len(rep.Uploaded)+len(rep.Reconciled)+len(rep.Failed) != 0 {
+		t.Fatalf("the next sync did more: %+v", rep)
+	}
+
+	f.write("a.md", "bb", 0)
+	once("stat", "cccccc", 2*time.Second) // after Put read it
+	rep, err = f.v.SyncPaths(bg, []string{"a.md"})
+	if err != nil || len(rep.Uploaded) != 0 || !strings.Contains(rep.Failed["a.md"], "changed during upload") {
+		t.Fatalf("a change after the upload read the file: %+v, %v", rep, err)
+	}
+	if e := f.entry("a.md"); e.Tier != TierHot {
+		t.Fatalf("a.md = %+v", e)
+	}
+	f.cold.Fail = nil
+	if rep := f.sync(); !slices.Equal(rep.Uploaded, []string{"a.md"}) {
+		t.Fatalf("the next sync: %+v", rep)
+	}
+	if got, _ := f.coldBytes("a.md"); got != "cccccc" {
+		t.Fatalf("cold a.md = %q", got)
+	}
+}
+
 func TestEvictWritesColdListingAndKeepsData(t *testing.T) {
 	f := newFixture(t)
 	files := map[string]time.Duration{
@@ -544,7 +612,9 @@ func TestUploadFailingAfterPutRecordsWhatColdHolds(t *testing.T) {
 		},
 		"changed during upload": func(f *fixture) func(op, key string) error {
 			return func(op, key string) error {
-				if op == "put" {
+				// After Put read it: a change before is just the file
+				// that went up (#707).
+				if op == "stat" {
 					f.cold.Fail = nil
 					f.clock.Advance(time.Minute)
 					f.write("documents/a.md", "B, saved again", 0)

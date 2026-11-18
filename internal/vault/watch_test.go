@@ -18,11 +18,13 @@ func TestWatchDebouncesIntoSyncs(t *testing.T) {
 	f := newFixture(t)
 	ctx, cancel := context.WithCancel(bg)
 	reports := make(chan SyncReport, 16)
+	ready := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
 		done <- f.v.Watch(ctx, WatchOptions{
 			Debounce: 100 * time.Millisecond,
 			OnSync:   func(r SyncReport, _ error) { reports <- r },
+			Ready:    func() { close(ready) },
 		})
 	}()
 	defer func() {
@@ -31,7 +33,12 @@ func TestWatchDebouncesIntoSyncs(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	time.Sleep(200 * time.Millisecond) // let the watches settle
+	// Changes made before the watches are in place may go unseen (#707).
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Watch never said it was ready")
+	}
 
 	// A burst of writes, some to ignored names, and a new folder.
 	for i := range 5 {
