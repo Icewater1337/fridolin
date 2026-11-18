@@ -237,6 +237,13 @@ for compatibility.
 
 ### Fixed
 
+- **A skill's triggers match only whole words.** A trigger matched
+  anywhere in a message, so `pay` made "please repay me" a run of the
+  skill, under its risk, `approve` steps and vault paths. A trigger now
+  counts only as a word or phrase of its own, in any case: `steuer` no
+  longer matches "Steuererklärung", so add the forms a message may use
+  to a skill's triggers (docs/BRAINS.md). Triggers with punctuation
+  ("[Plaud] New recording", "e-mail", ".pdf") match as before.
 - **A note from a conversation reaches you once.** When a call's reply
   was not heard (they hung up, or its speech failed), the turn after it
   could pass the same note on again. Fridolin now remembers the notes

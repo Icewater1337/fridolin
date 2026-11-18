@@ -1,8 +1,9 @@
 // Package trigger holds the keywords that address the bridge in a group
 // chat: how config.json writes them, and where in a message each must
 // appear. Matching is Unicode-aware and reports byte offsets in the
-// original text. It knows nothing of the rest of the bridge and reads no
-// process state.
+// original text; ContainsWord does the same whole-word matching for other
+// keywords (a skill's triggers). It knows nothing of the rest of the
+// bridge and reads no process state.
 package trigger
 
 import (
@@ -166,18 +167,44 @@ func (t Trigger) find(text string) (int, int, bool) {
 	case MatchAnywhere, MatchWord:
 		fallthrough
 	default: // an empty match is MatchAnywhere
-		for i := 0; i < len(text); {
-			if end, ok := hasFoldPrefix(text[i:], t.Text); ok {
-				end += i
-				if t.Match != MatchWord || ((i == 0 || BoundaryBefore(text, i)) && BoundaryAt(text, end)) {
-					return i, end, true
-				}
-			}
-			_, size := utf8.DecodeRuneInString(text[i:])
-			i += size
-		}
-		return 0, 0, false
+		return scanFold(text, t.Text, func(i, end int) bool {
+			return t.Match != MatchWord || ((i == 0 || BoundaryBefore(text, i)) && BoundaryAt(text, end))
+		})
 	}
+}
+
+// ContainsWord reports whether text holds word as a word of its own, under
+// Unicode case folding. Where word begins or ends with a letter or digit,
+// text must not go on with one on that side ("pay" is not in "repay" or
+// "payload"); where it begins or ends with a symbol, that side may touch
+// anything (".pdf" is in "report.pdf", "#pay" in "x#pay"), as with a start
+// trigger. A phrase matches as written, spaces and all ("voice note" is in
+// "Voice note, please" but not in "voice notes").
+func ContainsWord(text, word string) bool {
+	if word == "" || text == "" {
+		return false
+	}
+	_, _, ok := scanFold(text, word, func(i, end int) bool {
+		return (!opensWord(word) || i == 0 || BoundaryBefore(text, i)) &&
+			(!needsBoundary(word) || BoundaryAt(text, end))
+	})
+	return ok
+}
+
+// scanFold returns the first span of text that word covers under Unicode
+// case folding and that accept takes, as byte offsets in text.
+func scanFold(text, word string, accept func(i, end int) bool) (int, int, bool) {
+	for i := 0; i < len(text); {
+		if end, ok := hasFoldPrefix(text[i:], word); ok {
+			end += i
+			if accept(i, end) {
+				return i, end, true
+			}
+		}
+		_, size := utf8.DecodeRuneInString(text[i:])
+		i += size
+	}
+	return 0, 0, false
 }
 
 // hasFoldPrefix reports whether s starts with prefix under Unicode case folding
@@ -201,6 +228,13 @@ func hasFoldPrefix(s, prefix string) (int, bool) {
 // next word ("@c" must not match "@carla"); one ending in a symbol ("©") may.
 func needsBoundary(word string) bool {
 	r, _ := utf8.DecodeLastRuneInString(word)
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// opensWord is needsBoundary for the start of word: one that begins with a
+// letter or digit must not be the end of a longer word ("pay" in "repay").
+func opensWord(word string) bool {
+	r, _ := utf8.DecodeRuneInString(word)
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 

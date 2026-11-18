@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // Risk is how far a skill's steps reach, the highest of them: read
@@ -478,14 +480,13 @@ func firstHeading(body string) string {
 }
 
 // Matches reports whether text, a message, names one of the skill's
-// triggers: as a case-insensitive substring.
+// triggers: as a word or phrase of its own, case-insensitively
+// (trigger.ContainsWord). "pay" is in "Pay the bill" but not in "repay"
+// or "payload": a run that only looks like one of the skill must not
+// come under its policy.
 func (s Skill) Matches(text string) bool {
-	if len(s.Policy.Triggers) == 0 || text == "" {
-		return false
-	}
-	lower := strings.ToLower(text)
 	for _, t := range s.Policy.Triggers {
-		if strings.Contains(lower, strings.ToLower(t)) {
+		if trigger.ContainsWord(text, t) {
 			return true
 		}
 	}
