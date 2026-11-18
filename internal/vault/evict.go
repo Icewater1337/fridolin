@@ -339,6 +339,14 @@ func (v *Vault) recoverEvictions() error {
 	}
 	for _, p := range aside {
 		orig, ok := originalOfTemp(p, evictTemp)
+		if dir, stem, hash, long := longTempName(p, evictTemp); !ok && long {
+			if orig, ok, err = v.longOriginal(context.Background(), dir, stem, hash); err != nil {
+				return err
+			}
+			if !ok {
+				v.log.Warn("vault: a file set aside by an interrupted eviction is kept: the index has no file of its name", "aside", p)
+			}
+		}
 		if !ok {
 			continue
 		}
@@ -357,16 +365,59 @@ func (v *Vault) recoverEvictions() error {
 	return nil
 }
 
-// originalOfTemp undoes tempName: dir/.name.vault-kind-xxxx.tmp → dir/name.
+// originalOfTemp undoes tempName for a name it kept whole:
+// dir/.name.vault-kind-xxxx.tmp → dir/name. A long name's temp name is
+// not one; longTempName reads those.
 func originalOfTemp(p, kind string) (string, bool) {
-	dir, name := path.Split(p)
-	name, ok := strings.CutPrefix(name, ".")
+	dir, name, rest, ok := splitTemp(p, kind)
+	if !ok || strings.Contains(rest, "-") {
+		return "", false
+	}
+	return dir + name, true
+}
+
+// longTempName reads the temp name tempName gives a long name,
+// dir/.stem.vault-kind-random-hash.tmp, back into its folder (with the
+// trailing slash), the stem and the hash of the whole name.
+func longTempName(p, kind string) (dir, stem, hash string, ok bool) {
+	dir, stem, rest, ok := splitTemp(p, kind)
 	if !ok {
-		return "", false
+		return "", "", "", false
 	}
-	i := strings.LastIndex(name, ".vault-"+kind+"-")
+	_, hash, ok = strings.Cut(rest, "-")
+	if !ok || len(hash) != len(nameHash("")) || strings.Contains(hash, "-") {
+		return "", "", "", false
+	}
+	return dir, stem, hash, true
+}
+
+// splitTemp splits dir/.x.vault-kind-rest.tmp into dir/, x and rest.
+func splitTemp(p, kind string) (dir, x, rest string, ok bool) {
+	dir, name := path.Split(p)
+	name, ok = strings.CutPrefix(name, ".")
+	if !ok {
+		return "", "", "", false
+	}
+	name = strings.TrimSuffix(name, ".tmp")
+	marker := ".vault-" + kind + "-"
+	i := strings.LastIndex(name, marker)
 	if i <= 0 {
-		return "", false
+		return "", "", "", false
 	}
-	return dir + name[:i], true
+	return dir, name[:i], name[i+len(marker):], true
+}
+
+// longOriginal finds the file a long name's temp name stands for: the
+// indexed file in dir whose name starts with stem and has hash.
+func (v *Vault) longOriginal(ctx context.Context, dir, stem, hash string) (string, bool, error) {
+	rows, err := queryRows(ctx, v.db, `WHERE path LIKE ? ESCAPE '\'`, likeEscape(dir+stem)+"%")
+	if err != nil {
+		return "", false, err
+	}
+	for _, r := range rows {
+		if d, name := path.Split(r.Path); d == dir && strings.HasPrefix(name, stem) && nameHash(name) == hash {
+			return r.Path, true, nil
+		}
+	}
+	return "", false, nil
 }

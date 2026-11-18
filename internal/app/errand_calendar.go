@@ -284,6 +284,14 @@ func (b *App) errandBookingDecided(a store.Approval) {
 	clear := func() {
 		_, _ = b.store.SetErrandBooking(ctx, e.ID, store.BookingAsking+a.ID, "", time.Time{}, time.Time{})
 	}
+	if e.State != store.ErrandOpen {
+		// Nobody would tell the person of it any more (#639): the owner
+		// hears instead, whatever they answered.
+		clear()
+		b.auditErrand(e, "not booked", "the errand had ended")
+		b.tellErrandOwner(ctx, e, outboundmsg.ErrandBookingEndedNotice(e.Name, e.ID, when))
+		return
+	}
 	if a.Status != store.ApprovalApproved {
 		clear()
 		why := "they said no"
@@ -329,6 +337,17 @@ func (b *App) errandBookingDecided(a store.Approval) {
 	b.auditErrand(e, "booked", when)
 	b.tellErrandOwner(ctx, e, outboundmsg.ErrandBookedNotice(e.Name, e.ID, when))
 	tell(fmt.Sprintf("%s confirmed: %s is booked in their calendar. Tell them.", owner, when))
+}
+
+// denyErrandBooking denies the booking errand id still waits for the
+// owner's yes on, once it ended: errandBookingDecided then clears it and
+// tells the owner.
+func (b *App) denyErrandBooking(ctx context.Context, id string) {
+	// Read again: the turn that ended it may have asked to book.
+	e, err := b.store.GetErrand(ctx, id)
+	if a, ok := strings.CutPrefix(e.Booked, store.BookingAsking); err == nil && ok {
+		b.decide(ctx, a, store.ApprovalDenied, "", "bridge", answerAsMessage)
+	}
 }
 
 // insertErrandEvent books span in the default calendar of errand e's

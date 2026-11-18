@@ -369,17 +369,31 @@ var updateWait = time.Duration(nodeproto.UpdateTrialMinutes)*time.Minute + 3*tim
 // updatePoll is how often the core looks whether the node is back.
 var updatePoll = 250 * time.Millisecond
 
+// errCoreStopped is an update the core's own stop cut off: a restart, a
+// core move, a container stop. Its version did not fail, so auto updates
+// try it again when the node next connects (#684).
+var errCoreStopped = errors.New("the core stopped during the update")
+
 func (s *Service) runUpdate(ctx context.Context, n *Node, bin Binary, path string, o UpdateOptions) (err error) {
 	id := n.ID
 	defer func() {
 		s.mu.Lock()
 		delete(s.updating, id)
+		// Stop marks the service closed before it closes the sessions and
+		// ends s.ctx, so whatever failed from then on failed because the
+		// core stops.
+		stopping := s.closed
 		s.mu.Unlock()
+		if err != nil && stopping && !errors.Is(err, errCoreStopped) {
+			err = fmt.Errorf("%w (%v)", errCoreStopped, err)
+		}
 		s.setUpdate(id, func(u *UpdateStatus, now time.Time) {
 			u.FinishedAt = &now
 			if err != nil {
 				u.State, u.Error = UpdateFailed, err.Error()
-				u.FailedVersion = s.version
+				if !errors.Is(err, errCoreStopped) {
+					u.FailedVersion = s.version
+				}
 				return
 			}
 			u.State, u.Error, u.FailedVersion = UpdateOK, "", ""
@@ -493,7 +507,7 @@ func (s *Service) runBoxUpdate(ctx context.Context, n *Node, key ed25519.Private
 	}
 	s.setUpdate(n.ID, func(u *UpdateStatus, _ time.Time) { u.State = UpdateRestarting })
 	s.logf("nodes: %s (%s) keeps the request for %s (%s); its updater picks it up within %d minutes", n.Name, n.ID, p.Version, p.NodeImage, res.UpdaterMinutes)
-	return s.awaitUpdatedWithin(ctx, n.ID, before, boxUpdateWait(res.UpdaterMinutes))
+	return s.awaitUpdatedWithin(ctx, n.ID, before, boxUpdateWait(res.UpdaterMinutes), n.Version)
 }
 
 // dropUpdate removes a transfer the update leaves on the node.
@@ -506,11 +520,17 @@ func (s *Service) dropUpdate(id, transfer string) {
 // awaitUpdated waits for node id to connect again, on a session other than
 // before, and checks the version it runs.
 func (s *Service) awaitUpdated(ctx context.Context, id string, before *session) error {
-	return s.awaitUpdatedWithin(ctx, id, before, updateWait)
+	return s.awaitUpdatedWithin(ctx, id, before, updateWait, "")
 }
 
-// awaitUpdatedWithin is awaitUpdated with its own wait.
-func (s *Service) awaitUpdatedWithin(ctx context.Context, id string, before *session, wait time.Duration) error {
+// awaitUpdatedWithin is awaitUpdated with its own wait. pending is the
+// version a box runs until its updater applies the request, "" for a
+// native node, which restarts at once: a box that connects again on it
+// only lost its connection meanwhile (its host slept, the network
+// dropped), so the wait goes on, and only the updater's report of a
+// failure or the wait running out fails the update (#683). A native node
+// that connects again on another version than the core's went back.
+func (s *Service) awaitUpdatedWithin(ctx context.Context, id string, before *session, wait time.Duration, pending string) error {
 	s.setUpdate(id, func(u *UpdateStatus, now time.Time) {
 		until := now.Add(wait)
 		u.WaitUntil = &until
@@ -539,22 +559,79 @@ func (s *Service) awaitUpdatedWithin(ctx context.Context, id string, before *ses
 			if n.Version == s.version {
 				return nil
 			}
-			// The old version is back: the node rolled back. Its report
-			// (EventUpdate) says why, when it comes.
-			why := s.awaitReport(ctx, id)
-			if why == "" {
-				why = "it runs " + n.Version + " again"
+			if pending != "" && n.Version == pending {
+				// A failure report on this connection still ends the
+				// wait, above.
+				s.logf("nodes: %s (%s) connected again on %s before its updater applied %s; the core keeps waiting", n.Name, id, n.Version, s.version)
+				before = cur
+			} else {
+				// The old version is back: the node rolled back. Its
+				// report (EventUpdate) says why, when it comes.
+				why := s.awaitReport(ctx, id)
+				if why == "" {
+					why = "it runs " + n.Version + " again"
+				}
+				return fmt.Errorf("the node went back to %s: %s", n.Version, why)
 			}
-			return fmt.Errorf("the node went back to %s: %s", n.Version, why)
 		}
 		select {
 		case <-ctx.Done():
 			if s.ctx.Err() != nil {
-				return errors.New("the core stopped before the node came back")
+				return fmt.Errorf("%w, before the node came back", errCoreStopped)
 			}
 			return fmt.Errorf("the node did not connect again within %v", wait)
 		case <-t.C:
 		}
+	}
+}
+
+// endInterruptedLocked records the updates nodes.json says are under way,
+// which no update of this process runs, as cut off by the core: the core
+// process before this one ended during them without recording how they
+// went (an OOM kill, SIGKILL, a container's stop timeout, power loss).
+// Their version did not fail, so auto updates try it again (#682). Serve
+// calls it, with s.mu held, before any node can connect.
+func (s *Service) endInterruptedLocked() {
+	list, err := s.reg.List()
+	if err != nil {
+		s.logf("nodes: reading the updates under way: %v", err)
+		return
+	}
+	for _, n := range list {
+		if !n.Update.Running() || s.updating[n.ID] {
+			continue
+		}
+		s.setUpdate(n.ID, func(u *UpdateStatus, now time.Time) {
+			if u.Running() {
+				u.State, u.Error, u.FinishedAt = UpdateFailed, errCoreStopped.Error(), &now
+			}
+		})
+		s.logf("nodes: the update of %s (%s) from %s to %s was under way when the core stopped; it is recorded as cut off, not as a failure of %s", n.Name, n.ID, n.Update.From, n.Update.To, n.Update.To)
+	}
+}
+
+// updateArrived records the update of node n, which connected on the
+// version the core recorded its last update failed to bring it to, as
+// done after all: a box whose updater applied the request after the core
+// stopped waiting, or an update that outlived the core that started it
+// (#683).
+func (s *Service) updateArrived(n *Node) {
+	if u := n.Update; u == nil || u.State != UpdateFailed || u.To == "" || u.To != n.Version {
+		return
+	}
+	done := false
+	_, err := s.reg.change(n.ID, func(cur *Node, now time.Time) error {
+		if u := cur.Update; u != nil && u.State == UpdateFailed && u.To != "" && u.To == cur.Version {
+			u.State, u.Error, u.FailedVersion, u.FinishedAt = UpdateOK, "", "", &now
+			done = true
+		}
+		return nil
+	})
+	switch {
+	case err != nil:
+		s.logf("nodes: recording the update of %s: %v", n.ID, err)
+	case done:
+		s.logf("nodes: %s (%s) runs %s now: its update went through after all", n.Name, n.ID, n.Version)
 	}
 }
 
