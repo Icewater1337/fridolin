@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -266,7 +267,7 @@ func initRepo(ctx context.Context, git, dest, name string) error {
 	if _, err := runRepoTool(ctx, repoStepTimeout, dest, git, "init", "--quiet", "--initial-branch=main"); err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(dest, "README.md"), []byte("# "+name+"\n"), 0o644); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(dest, "README.md"), []byte("# "+name+"\n"), 0o644, false); err != nil {
 		return err
 	}
 	for _, args := range [][]string{{"add", "--", "README.md"}, {"commit", "--quiet", "--no-verify", "-m", "Initial commit"}} {

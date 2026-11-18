@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
@@ -124,7 +125,7 @@ func (a *Agent) writeReceived(s coreReceivedState) error {
 		s.Names = []string{}
 	}
 	data, _ := json.Marshal(s)
-	return writeFile(p, append(data, '\n'), 0o600)
+	return fsx.WriteFileAtomic(p, append(data, '\n'), 0o600, false)
 }
 
 // coreReceived are the host secrets core.secrets.forget would remove.
@@ -318,7 +319,7 @@ func (a *Agent) waitMovesEnd(ctx context.Context) bool {
 	deadline := time.Now().Add(3 * a.movePoll())
 	for {
 		a.moves.mu.Lock()
-		busy := slices.ContainsFunc(mapValues(a.moves.runs), func(o *moveRun) bool { return !nodeproto.MoveFinal(o.State.Phase) })
+		busy := a.moveRunning()
 		a.moves.mu.Unlock()
 		if !busy {
 			return true

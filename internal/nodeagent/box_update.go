@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -67,7 +68,7 @@ func (a *Agent) boxUpdate(raw json.RawMessage) (any, *nodeproto.Error) {
 	if err != nil {
 		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 	}
-	if err := writeFile(filepath.Join(a.Dir, BoxUpdateFile), append(data, '\n'), 0o600); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(a.Dir, BoxUpdateFile), append(data, '\n'), 0o600, false); err != nil {
 		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "keeping the request: %v", err)
 	}
 	a.logf("node: box: the core asked for %s (%s); the box's updater picks it up within %d minutes", p.Version, p.NodeImage, nodeproto.BoxUpdaterMinutes)
@@ -103,7 +104,7 @@ func (a *Agent) boxStatus(connected bool) {
 		return
 	}
 	data, _ := json.Marshal(BoxStatus{Connected: connected, Version: a.Version, At: time.Now().UTC()})
-	if err := writeFile(filepath.Join(a.Dir, BoxStatusFile), append(data, '\n'), 0o600); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(a.Dir, BoxStatusFile), append(data, '\n'), 0o600, false); err != nil {
 		a.logf("node: box: recording the status: %v", err)
 	}
 }
@@ -194,7 +195,7 @@ func FinishBoxUpdate(dir string, r nodeproto.UpdateReport) error {
 	if err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(dir, BoxUpdateResultFile), append(data, '\n'), 0o600); err != nil {
+	if err := fsx.WriteFileAtomic(filepath.Join(dir, BoxUpdateResultFile), append(data, '\n'), 0o600, false); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Join(dir, BoxUpdateTakenFile)); err != nil && !errors.Is(err, os.ErrNotExist) {

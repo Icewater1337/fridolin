@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // Names of the secrets, which are the keychain's service names.
@@ -288,19 +290,7 @@ func (f Files) Set(name, value string) error {
 	if err := os.Chmod(f.Dir, 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(f.Dir, "."+name+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(value + "\n"); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), p)
+	return fsx.WriteFileAtomic(p, []byte(value+"\n"), 0o600, false)
 }
 
 func (f Files) Delete(name string) error {

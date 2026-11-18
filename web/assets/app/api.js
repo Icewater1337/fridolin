@@ -20,7 +20,7 @@ import { withDeadline } from '../lib/abort.js';
 import { h } from '../lib/dom.js';
 import { errorName } from '../lib/errors.js';
 
-/** @import { GetResponse } from '../../types/api.js' */
+/** @import { GetResponse, NodeCallResult } from '../../types/api.js' */
 /** @import { Credential } from './router.js' */
 
 /**
@@ -283,6 +283,21 @@ export const post = (path, body, opts) => api('POST', path, body, opts);
 export const put = (path, body, opts) => api('PUT', path, body, opts);
 /** @type {(path: string, opts?: CallOptions) => Promise<any>} */
 export const del = (path, opts) => api('DELETE', path, undefined, opts);
+
+/**
+ * Calls method on node through the dashboard's generic call route; resolves
+ * with its result, {} when it answers with none. Typed by method where
+ * types/api.d.ts knows it (NodeCalls).
+ * @template {string} M
+ * @param {string} node
+ * @param {M} method
+ * @param {Record<string, unknown>} [params]
+ * @returns {Promise<NodeCallResult<M>>}
+ */
+export async function nodeCall(node, method, params) {
+  const r = await post(`/api/nodes/${encodeURIComponent(node)}/call`, { method, params: params || {} });
+  return r.result || {};
+}
 
 /**
  * Builds a query string from an object, skipping empty values.

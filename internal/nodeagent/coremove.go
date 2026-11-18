@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -92,6 +93,17 @@ type coreMoves struct {
 	ctx   context.Context
 	wg    sync.WaitGroup
 	alive bool
+}
+
+// moveRunning says whether a move on this machine has not ended yet.
+// The caller holds a.moves.mu.
+func (a *Agent) moveRunning() bool {
+	for _, o := range a.moves.runs {
+		if !nodeproto.MoveFinal(o.State.Phase) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Agent) movePoll() time.Duration {
@@ -219,7 +231,7 @@ func (a *Agent) saveMove(m *moveRun) {
 		var p string
 		if p, err = a.movePath(m.State.Move); err == nil {
 			if err = os.MkdirAll(filepath.Dir(p), 0o700); err == nil {
-				err = writeFile(p, append(data, '\n'), 0o600)
+				err = fsx.WriteFileAtomic(p, append(data, '\n'), 0o600, false)
 			}
 		}
 	}
@@ -290,7 +302,7 @@ func (a *Agent) coreMoveAccept(raw json.RawMessage, role string) (any, *nodeprot
 		}
 		seen = err == nil
 	}
-	busy := slices.ContainsFunc(mapValues(a.moves.runs), func(o *moveRun) bool { return !nodeproto.MoveFinal(o.State.Phase) })
+	busy := a.moveRunning()
 	alive := a.moves.alive
 	if !seen && !busy && alive {
 		a.moves.runs[p.Move] = m
@@ -309,14 +321,6 @@ func (a *Agent) coreMoveAccept(raw json.RawMessage, role string) (any, *nodeprot
 		role, p.Move, p.Source, p.Target, p.Version, p.HandoffDeadline.Format(time.RFC3339), p.Ready())
 	a.goMove(m)
 	return a.moveState(m), nil
-}
-
-func mapValues[K comparable, V any](m map[K]V) []V {
-	out := make([]V, 0, len(m))
-	for _, v := range m {
-		out = append(out, v)
-	}
-	return out
 }
 
 // goMove runs m's half in the background, with the agent's lifetime.
@@ -496,13 +500,19 @@ func (a *Agent) sourceWatch(ctx context.Context, r CoreRunner, m *moveRun) {
 					return
 				}
 			case nodeproto.LeaseStale:
-				switch {
-				case theirs:
+				// The target's core may still run, cut off from the lease
+				// store: the step says so to the core, which then asks
+				// nothing about the target's secrets should the move fail
+				// (#591).
+				if !theirs && !ours {
+					a.step(m, nodeproto.MoveFailed, nodeproto.StepLeaseStale, "%s stopped renewing the lease and the latest export is not of this move: nothing started here; see fridolin core status", p.Target)
+					return
+				}
+				a.step(m, "", nodeproto.StepLeaseStale, "%s stopped renewing the lease", p.Target)
+				if theirs {
 					a.sourceRollBack(ctx, r, m, true, "%s stopped renewing the lease; its last export of this move comes back, what it received after it is lost (WhatsApp may ask to pair again)", p.Target)
-				case ours:
+				} else {
 					a.sourceRollBack(ctx, r, m, false, "%s stopped renewing the lease and exported nothing; what it received is lost (WhatsApp may ask to pair again)", p.Target)
-				default:
-					a.step(m, nodeproto.MoveFailed, "stale", "%s stopped renewing the lease and the latest export is not of this move: nothing started here; see fridolin core status", p.Target)
 				}
 				return
 			default:
@@ -696,7 +706,7 @@ func (a *Agent) coreRehearse(ctx context.Context, p nodeproto.CoreRehearseParams
 		return nil, perr
 	}
 	a.moves.mu.Lock()
-	busy := slices.ContainsFunc(mapValues(a.moves.runs), func(o *moveRun) bool { return !nodeproto.MoveFinal(o.State.Phase) })
+	busy := a.moveRunning()
 	a.moves.mu.Unlock()
 	if busy {
 		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "a core move runs on this machine")

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // The frontmatter of a skill is YAML, of which this reads the part that
@@ -419,7 +421,7 @@ func splitKey(text string) (key, rest string, err error) {
 			break
 		}
 	}
-	return "", "", fmt.Errorf("expected key: value, not %q", truncate(text, 40))
+	return "", "", fmt.Errorf("expected key: value, not %q", textx.Truncate(text, 40))
 }
 
 // quotedPrefix reads the quoted scalar at the start of s and returns it
@@ -462,7 +464,7 @@ func unquoteDouble(q string) (string, error) {
 	}
 	v, err := strconv.Unquote(q)
 	if err != nil {
-		return "", fmt.Errorf("bad escape in %s", truncate(q, 40))
+		return "", fmt.Errorf("bad escape in %s", textx.Truncate(q, 40))
 	}
 	return v, nil
 }
@@ -478,7 +480,7 @@ func scalar(s string) (string, error) {
 			return "", err
 		}
 		if rest = strings.TrimSpace(rest); rest != "" && !strings.HasPrefix(rest, "#") {
-			return "", fmt.Errorf("unexpected %q after the quoted string", truncate(rest, 40))
+			return "", fmt.Errorf("unexpected %q after the quoted string", textx.Truncate(rest, 40))
 		}
 		return v, nil
 	}
@@ -486,16 +488,6 @@ func scalar(s string) (string, error) {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s), nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n] + "…"
 }
 
 // flowParser reads a flow collection: [a, "b"], {"k": [1, 2]}.
@@ -596,7 +588,7 @@ func (f *flowParser) sep(closing byte) error {
 		f.pos++
 		return nil
 	}
-	return fmt.Errorf("expected , or %c, not %q", closing, truncate(f.s[f.pos:], 20))
+	return fmt.Errorf("expected , or %c, not %q", closing, textx.Truncate(f.s[f.pos:], 20))
 }
 
 func (f *flowParser) scalar(key bool) (string, error) {

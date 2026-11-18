@@ -53,8 +53,56 @@ func TestParseReadsTheFormat(t *testing.T) {
 	if !reflect.DeepEqual(s, want) {
 		t.Errorf("got  %+v\nwant %+v", s, want)
 	}
-	if !s.Matches("Can you do my Steuererklärung?") || s.Matches("hello") {
-		t.Error("triggers match case-insensitively as substrings")
+	if !s.Matches("Can you do my Steuer?") || !s.Matches("ELSTER says no") || s.Matches("hello") {
+		t.Error("triggers match case-insensitively as words")
+	}
+}
+
+// A trigger counts only as a word or phrase of its own, so that a message
+// that merely contains it does not come under the skill's policy (#388).
+// Phrases and triggers with punctuation keep matching as before.
+func TestMatchesWholeWords(t *testing.T) {
+	cases := []struct {
+		trigger, text string
+		want          bool
+	}{
+		{"pay", "pay the bill", true},
+		{"pay", "Can you PAY it?", true},
+		{"pay", "please repay me", false},
+		{"pay", "the payload is big", false},
+		{"go", "good morning", false},
+		{"go", "a week ago", false},
+		{"go", "let's go!", true},
+		// German compounds are words of their own.
+		{"steuer", "Can you do my Steuererklärung?", false},
+		{"steuererklärung", "STEUERERKLÄRUNG 2025, bitte", true},
+		{"elster", "über ELSTER.", true},
+		// Phrases match as written, at word boundaries.
+		{"voice note", "Voice note, please", true},
+		{"voice note", "here are my voice notes", false},
+		{"pay the bill", "could you pay the bill today", true},
+		{"pay the bill", "repay the bills", false},
+		// Punctuation inside or at the edge of a trigger.
+		{"[Plaud] New recording", `[Plaud] New recording "Team sync" (2026-11-18 09:00, 12:03).`, true},
+		{"e-mail", "send an E-Mail to the bank", true},
+		{"e-mail", "send e-mails", false},
+		{"#invoice", "see #invoice", true},
+		{"#invoice", "re#invoice", true}, // a symbol edge needs no boundary
+		{"#invoice", "see #invoices", false},
+		{".pdf", "the report.pdf attached", true},
+		{"c++", "a c++20 build", true},
+		{"c++", "abc++ code", false},
+		{"x:y", "go x:y now", true},
+		{"pay", "", false},
+	}
+	for _, c := range cases {
+		s := Skill{Policy: Policy{Triggers: []string{c.trigger}}}
+		if got := s.Matches(c.text); got != c.want {
+			t.Errorf("trigger %q in %q: %v, want %v", c.trigger, c.text, got, c.want)
+		}
+	}
+	if (Skill{}).Matches("pay") {
+		t.Error("a skill without triggers matched")
 	}
 }
 

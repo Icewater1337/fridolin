@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
 )
@@ -67,7 +68,7 @@ func coreFiles(args []string, env coreEnv) int {
 			return 1
 		}
 		if dir != "" {
-			if out.Files, err = secretxfer.ReadFiles(expandTilde(dir, home)); err != nil {
+			if out.Files, err = secretxfer.ReadFiles(fsx.ExpandHome(dir, home)); err != nil {
 				fmt.Fprintf(env.stderr, "fridolin core files export: %v\n", err)
 				return 1
 			}
@@ -116,7 +117,7 @@ func coreFiles(args []string, env coreEnv) int {
 			fmt.Fprintf(env.stderr, "fridolin core files import: %v\n", err)
 			return 2
 		}
-		stored, kept, err := secretxfer.StoreFiles(expandTilde(in.Dir, home), creds)
+		stored, kept, err := secretxfer.StoreFiles(fsx.ExpandHome(in.Dir, home), creds)
 		res.Stored, res.Kept = append(res.Stored, stored...), append(res.Kept, kept...)
 		if err != nil {
 			return failed(err)
@@ -168,10 +169,6 @@ func credentialsDir(env coreEnv, home string) (string, error) {
 		return "", nil
 	}
 	return dir, secretxfer.CheckFilesDir(dir)
-}
-
-func expandTilde(dir, home string) string {
-	return filepath.Join(home, strings.TrimPrefix(dir, "~/"))
 }
 
 // coreFilesForget is core files forget: it reads {"dir": "~/x", "names":
@@ -229,7 +226,7 @@ func coreFilesForget(home, dataDir string, derr error, env coreEnv) int {
 			return 1
 		}
 	}
-	dir := expandTilde(in.Dir, home)
+	dir := fsx.ExpandHome(in.Dir, home)
 	for _, n := range names {
 		p := filepath.Join(dir, n)
 		st, err := os.Lstat(p)

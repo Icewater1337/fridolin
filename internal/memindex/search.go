@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // Hit is one chunk a search found.
@@ -107,7 +109,7 @@ func Recall(ctx context.Context, b Brain, message string, opts RecallOptions) ([
 		if budget < 80 {
 			break
 		}
-		h.Text = truncate(h.Text, budget)
+		h.Text = textx.Truncate(h.Text, budget)
 		budget -= len(h.Text)
 		out = append(out, h)
 	}

@@ -761,6 +761,10 @@ fridolin nodes move SRC DST --yes       # move the core, and follow it to its en
 fridolin nodes move-status ID           # how move ID went (GET /api/nodes/moves/{id})
 ```
 
+With `--json`, `nodes move --yes` prints one JSON document on stdout,
+`{"check": …, "move": …}`: the pre-flight and the move's last record
+(left out when it did not start); its progress goes to stderr.
+
 SRC and DST are each a node's id or its name, in any case
 (`fridolin nodes move-check mac-mini fridolin-droplet`). A name more
 than one node has is refused, with each node's id.
@@ -966,8 +970,10 @@ dir when a move's import put it into an empty one. No vote within 24
 hours forgets them. After a move that clearly failed once the secrets
 had gone to DST (SRC refused to release the core or was never asked, or
 SRC says the move failed or rolled back), the same poll asks about DST.
-When it is unclear where the core runs (the move ended unknown, or SRC
-never answered the release), nothing is asked and DST keeps them.
+When it is unclear where the core runs (the move ended unknown, SRC
+never answered the release, or the move failed once DST stopped
+renewing the lease, as its core may still run there, only cut off),
+nothing is asked and DST keeps them.
 Revoking a core host (`!revoke`,
 the Nodes page, `fridolin nodes revoke`) has it forget them first when
 it is connected, and `!revoke` says what it forgot.

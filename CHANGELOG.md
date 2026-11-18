@@ -237,6 +237,25 @@ for compatibility.
 
 ### Fixed
 
+- **A core move that fails on a stale lease no longer offers to forget
+  the target's secrets.** When the target stopped renewing the lease and
+  the move failed (or the source could not take the core back), you were
+  still asked whether the target keeps the host secrets, and no vote
+  within 24 hours forgot them, though the core there may still run, only
+  cut off. Such a move now asks nothing, like one that ended unknown; a
+  move the source rolled back still asks.
+- **`fridolin nodes move --yes --json` prints valid JSON.** Its stdout
+  held the pre-flight, then lines of progress, then the move's record,
+  so nothing could parse it. It now prints one document,
+  `{"check": …, "move": …}` (the pre-flight, and the move's last record,
+  left out when the move did not start), and the progress on stderr.
+- **A skill's triggers match only whole words.** A trigger matched
+  anywhere in a message, so `pay` made "please repay me" a run of the
+  skill, under its risk, `approve` steps and vault paths. A trigger now
+  counts only as a word or phrase of its own, in any case: `steuer` no
+  longer matches "Steuererklärung", so add the forms a message may use
+  to a skill's triggers (docs/BRAINS.md). Triggers with punctuation
+  ("[Plaud] New recording", "e-mail", ".pdf") match as before.
 - **Auto updates of a node no longer stop for good after a core
   restart.** A core that died during a node's update (an OOM kill, a
   container's stop timeout, power loss) left it "sending" or
