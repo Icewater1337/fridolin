@@ -237,6 +237,11 @@ for compatibility.
 
 ### Fixed
 
+- **`fridolin nodes move --yes --json` prints valid JSON.** Its stdout
+  held the pre-flight, then lines of progress, then the move's record,
+  so nothing could parse it. It now prints one document,
+  `{"check": …, "move": …}` (the pre-flight, and the move's last record,
+  left out when the move did not start), and the progress on stderr.
 - **A skill's triggers match only whole words.** A trigger matched
   anywhere in a message, so `pay` made "please repay me" a run of the
   skill, under its risk, `approve` steps and vault paths. A trigger now
