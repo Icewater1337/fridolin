@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -129,7 +130,7 @@ func readCoreKey(dir string) ([]byte, error) {
 }
 
 func writeCoreKey(dir string, key []byte) error {
-	return writeFile(filepath.Join(dir, CoreKeyFile), []byte(hex.EncodeToString(key)+"\n"), 0o600)
+	return fsx.WriteFileAtomic(filepath.Join(dir, CoreKeyFile), []byte(hex.EncodeToString(key)+"\n"), 0o600, false)
 }
 
 // CoreKeyFingerprint names the core key node dir pinned, "" for none.
@@ -221,7 +222,7 @@ func (a *Agent) writeMarker(m *updateMarker) error {
 	if err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(a.Dir, updateMarkerFile), append(data, '\n'), 0o600)
+	return fsx.WriteFileAtomic(filepath.Join(a.Dir, updateMarkerFile), append(data, '\n'), 0o600, false)
 }
 
 func (a *Agent) removeMarker() { _ = os.Remove(filepath.Join(a.Dir, updateMarkerFile)) }

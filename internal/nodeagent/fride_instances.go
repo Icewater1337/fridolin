@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -175,7 +176,7 @@ func saveFrideInstance(dir string, st *FrideInstanceState) error {
 	if err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(d, frideInstanceFile), append(b, '\n'), 0o600)
+	return fsx.WriteFileAtomic(filepath.Join(d, frideInstanceFile), append(b, '\n'), 0o600, false)
 }
 
 // listFrideInstances reads every instance's state in dir, by name; one
@@ -325,7 +326,7 @@ func saveFrideHost(dir string, h FrideHostState) error {
 	if err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(dir, frideHostFile), append(b, '\n'), 0o600)
+	return fsx.WriteFileAtomic(filepath.Join(dir, frideHostFile), append(b, '\n'), 0o600, false)
 }
 
 // FrideHostConfig is node.json's fride_host section.

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -220,7 +221,7 @@ func (a *Agent) execProgramsCall(raw json.RawMessage) (any, *nodeproto.Error) {
 		if err != nil {
 			return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 		}
-		if err := writeFile(filepath.Join(a.Dir, ExecProgramsFile), append(data, '\n'), 0o600); err != nil {
+		if err := fsx.WriteFileAtomic(filepath.Join(a.Dir, ExecProgramsFile), append(data, '\n'), 0o600, false); err != nil {
 			return nil, nodeproto.Errorf(nodeproto.CodeFailed, "keeping the programs: %v", err)
 		}
 	}

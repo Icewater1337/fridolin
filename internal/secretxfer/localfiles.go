@@ -10,6 +10,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // The local files: what stays on the machines (internal/gitident), in
@@ -77,7 +79,7 @@ func StoreLocalFiles(dataDir string, files map[string][]byte) (stored, replaced 
 		if had && bytes.Equal(old, files[n]) {
 			continue
 		}
-		if err := writeFileAtomic(p, files[n]); err != nil {
+		if err := fsx.WriteFileAtomic(p, files[n], 0o600, false); err != nil {
 			return stored, replaced, err
 		}
 		if had {
@@ -115,26 +117,4 @@ func RemoveLocalFiles(dataDir string, names []string) ([]string, error) {
 		removed = append(removed, LocalDir+"/"+strings.TrimPrefix(n, LocalPrefix))
 	}
 	return removed, nil
-}
-
-// writeFileAtomic writes data to path, 0600, through a temporary file in
-// the same folder.
-func writeFileAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // Per-host tokens of a sandbox (docs/NODES.md, "Tokens as placeholders"):
@@ -134,11 +136,11 @@ func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token st
 		if ph, err = newPlaceholder(); err != nil {
 			return "", err
 		}
-		if err := writeFile(phFile, []byte(ph+"\n"), 0o600); err != nil {
+		if err := fsx.WriteFileAtomic(phFile, []byte(ph+"\n"), 0o600, false); err != nil {
 			return "", err
 		}
 	}
-	if err := writeFile(tokFile, []byte(tok), 0o600); err != nil {
+	if err := fsx.WriteFileAtomic(tokFile, []byte(tok), 0o600, false); err != nil {
 		return "", err
 	}
 	// redact keeps the token out of what sbx says, should it ever say it.
