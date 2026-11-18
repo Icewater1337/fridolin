@@ -14,6 +14,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // Provenance is where a chunk's text came from, as the indexer tells it
@@ -104,7 +105,7 @@ func parseMeta(text string) (string, noteMeta) {
 			case "triggers":
 				for t := range strings.SplitSeq(val, ",") {
 					if t = strings.TrimSpace(t); t != "" && len(m.triggers) < 20 {
-						m.triggers = append(m.triggers, truncate(t, 100))
+						m.triggers = append(m.triggers, textx.Truncate(t, 100))
 					}
 				}
 			case "importance":
@@ -303,7 +304,7 @@ func historyChunk(owners map[string]bool, n int, line []byte) (chunk, bool) {
 	}
 	ts, _ := time.Parse(time.RFC3339, e.TS)
 	return chunk{
-		path: HistoryFile, anchor: anchor, text: truncate(e.Text, maxHistoryChunk),
+		path: HistoryFile, anchor: anchor, text: textx.Truncate(e.Text, maxHistoryChunk),
 		prov: historyProvenance(owners, e), ts: ts, who: e.From, chat: e.Chat,
 	}, true
 }
@@ -330,17 +331,6 @@ func historyProvenance(owners map[string]bool, e history.Entry) Provenance {
 		return System
 	}
 	return Untrusted
-}
-
-// truncate cuts s to at most n bytes, on a rune boundary, marking the cut.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n] + "…"
 }
 
 // LineAnchor reports whether a history chunk's anchor is its line number

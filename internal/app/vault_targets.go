@@ -627,10 +627,10 @@ func (r *targetRun) drill(ctx context.Context) {
 		}
 		rec.Checks = append(rec.Checks, c)
 	}
-	if staged := in(r.stagingDir()); exists(staged) {
+	if staged := in(r.stagingDir()); fsx.Exists(staged) {
 		for _, name := range []string{"bridge.db", "vault.db"} {
 			p := filepath.Join(staged, name)
-			if !exists(p) {
+			if !fsx.Exists(p) {
 				continue
 			}
 			c := drillCheck{Name: "database copy " + name}
