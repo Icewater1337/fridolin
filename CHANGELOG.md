@@ -237,6 +237,11 @@ for compatibility.
 
 ### Fixed
 
+- **`fridolin nodes move --yes --json` prints valid JSON.** Its stdout
+  held the pre-flight, then lines of progress, then the move's record,
+  so nothing could parse it. It now prints one document,
+  `{"check": …, "move": …}` (the pre-flight, and the move's last record,
+  left out when the move did not start), and the progress on stderr.
 - **Auto updates of a node no longer stop for good after a core
   restart.** A core that died during a node's update (an OOM kill, a
   container's stop timeout, power loss) left it "sending" or
