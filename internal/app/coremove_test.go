@@ -776,17 +776,27 @@ func TestSecretsQuestionFor(t *testing.T) {
 		steps      []nodeproto.CoreMoveStep
 		unanswered bool
 		want       string
+		// source is what the source last said of the move.
+		source []nodeproto.CoreMoveStep
 	}{
-		{"done", nodes.MoveDone, released, false, "src"},
-		{"failed before the secrets went", nodes.MoveFailed, steps("start"), false, ""},
-		{"failed before the release", nodes.MoveFailed, secrets, false, "dst"},
-		{"release refused", nodes.MoveFailed, released, false, "dst"},
-		{"rolled back", nodes.MoveRolledBack, released, false, "dst"},
-		{"failed after an unanswered release", nodes.MoveFailed, released, true, ""},
-		{"rolled back after an unanswered release", nodes.MoveRolledBack, released, true, ""},
-		{"unknown", nodes.MoveUnknown, released, false, ""},
+		{"done", nodes.MoveDone, released, false, "src", nil},
+		{"failed before the secrets went", nodes.MoveFailed, steps("start"), false, "", nil},
+		{"failed before the release", nodes.MoveFailed, secrets, false, "dst", nil},
+		{"release refused", nodes.MoveFailed, released, false, "dst", nil},
+		{"rolled back", nodes.MoveRolledBack, released, false, "dst", nil},
+		{"failed after an unanswered release", nodes.MoveFailed, released, true, "", nil},
+		{"rolled back after an unanswered release", nodes.MoveRolledBack, released, true, "", nil},
+		{"unknown", nodes.MoveUnknown, released, false, "", nil},
+		// The target's core may still run once its lease went stale (#591).
+		{"failed, the target's lease stale", nodes.MoveFailed, released, false, "", steps("release", "export", nodeproto.StepLeaseStale)},
+		{"rollback failed after a stale lease", nodes.MoveFailed, released, false, "", steps("release", nodeproto.StepLeaseStale, "import", "promote")},
+		{"rolled back after a stale lease", nodes.MoveRolledBack, released, false, "dst", steps("release", nodeproto.StepLeaseStale, "import", "started")},
+		{"source failed otherwise", nodes.MoveFailed, released, false, "dst", steps("release", "export", "start")},
 	} {
 		r := nodes.MoveRecord{Source: "src", SourceName: "src", Target: "dst", TargetName: "dst", State: c.state, Steps: c.steps, ReleaseUnanswered: c.unanswered}
+		if c.source != nil {
+			r.SourceState = &nodeproto.CoreMoveState{Role: "source", Steps: c.source}
+		}
 		if got, _ := secretsQuestionFor(r); got != c.want {
 			t.Errorf("%s: asked about %q, want %q", c.name, got, c.want)
 		}

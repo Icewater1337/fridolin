@@ -608,7 +608,7 @@ metadata:
     risk: irreversible          # read | write | irreversible
     vault: ["documents/taxes/**"]
     approve: [submit]           # steps that stop for your yes
-    triggers: [steuer, taxes, elster]
+    triggers: [steuer, steuererklärung, taxes, elster]
 ---
 # Taxes
 ...
@@ -624,7 +624,7 @@ metadata:
 | `metadata.fridolin.risk` | the highest risk of any of its steps: `read` (search, summarise), `write` (files, a calendar event; undone by a revert) or `irreversible` (submit, send to someone else, pay, delete, publish); `read` when left out |
 | `metadata.fridolin.approve` | the steps that stop for your yes |
 | `metadata.fridolin.vault` | the vault paths it uses, relative, globs allowed |
-| `metadata.fridolin.triggers` | words or phrases that make a message a run of this skill |
+| `metadata.fridolin.triggers` | words or phrases that make a message a run of this skill, each matched as a whole word, in any case: `pay` is in "Pay the bill", not in "repay" or "payload", and `steuer` not in "Steuererklärung", so list the forms a message may use |
 
 A file without a frontmatter, from before, is a skill too, read-only and
 without triggers. The bridge reads these files itself, through the

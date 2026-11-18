@@ -95,6 +95,37 @@ func TestTriggerWordMatch(t *testing.T) {
 	}
 }
 
+// ContainsWord wants a word boundary where the word begins or ends with a
+// letter or digit, and none where it begins or ends with a symbol.
+func TestContainsWord(t *testing.T) {
+	cases := []struct {
+		text, word string
+		want       bool
+	}{
+		{"hey bot, help", "bot", true},
+		{"BOT", "bot", true},
+		{"robotics", "bot", false},
+		{"bots", "bot", false},
+		{"İİ Straße", "STRASSE", false}, // folding is rune by rune
+		{"İİ STRAßE!", "straße", true},
+		{"rent 2026", "2026", true},
+		{"rent 20261", "2026", false},
+		{"see #pay", "#pay", true},
+		{"x#pay", "#pay", true},
+		{"x#payment", "#pay", false},
+		{"report.pdf", ".pdf", true},
+		{"a voice note.", "voice note", true},
+		{"a voice notebook", "voice note", false},
+		{"", "bot", false},
+		{"bot", "", false},
+	}
+	for _, c := range cases {
+		if got := ContainsWord(c.text, c.word); got != c.want {
+			t.Errorf("ContainsWord(%q, %q) = %v, want %v", c.text, c.word, got, c.want)
+		}
+	}
+}
+
 func TestTriggerStripKeepsByteOffsetsWithUnicode(t *testing.T) {
 	// "İ" lowercases to a longer byte sequence; offsets must come from the
 	// original text, not a lowercased copy.
