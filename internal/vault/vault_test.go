@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var bg = context.Background()
@@ -720,6 +722,113 @@ func TestRecoverInterruptedEviction(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
+		t.Fatalf("documents/ holds %d entries", len(entries))
+	}
+}
+
+// Every name the file system takes (255 bytes) has temp names it takes
+// too, and they read back to the name (#669).
+func TestTempNamesFitAndReadBack(t *testing.T) {
+	for _, name := range []string{
+		"a.md",
+		strings.Repeat("a", 220) + ".pdf", // 224 bytes: the hydrate temp name was 256
+		strings.Repeat("b", 251) + ".pdf", // 255 bytes
+		strings.Repeat("文", 83) + ".pdf",  // 253 bytes; the stem must not cut a character
+		"x.vault-evict-0011aa.tmp.pdf",
+	} {
+		rel := "documents/" + name
+		for _, kind := range []string{"put", "write", evictTemp, hydrateTemp} {
+			tmp := tempName(rel, kind)
+			base := path.Base(tmp)
+			if len(base) > maxNameBytes || path.Dir(tmp) != "documents" || !IgnoredName(base) || !utf8.ValidString(base) {
+				t.Fatalf("tempName(%d bytes, %s) = %q (%d bytes)", len(name), kind, base, len(base))
+			}
+			orig, whole := originalOfTemp(tmp, kind)
+			dir, stem, hash, long := longTempName(tmp, kind)
+			switch {
+			case whole && !long && orig == rel:
+			case !whole && long && dir == "documents/" && strings.HasPrefix(name, stem) && hash == nameHash(name):
+			default:
+				t.Fatalf("%q reads back as %q, %v / %q %q %q, %v", tmp, orig, whole, dir, stem, hash, long)
+			}
+		}
+	}
+}
+
+// A file whose name is up to 255 bytes long can be put, evicted and
+// fetched back; before, the temp names added up to 32 bytes to the name,
+// so 224 bytes evicted but never came back (#669).
+func TestLongNamesEvictAndComeBack(t *testing.T) {
+	f := newFixture(t)
+	names := []string{
+		"documents/" + strings.Repeat("a", 220) + ".pdf", // 224 bytes
+		"documents/" + strings.Repeat("b", 222) + ".pdf", // 226 bytes
+		"documents/" + strings.Repeat("文", 83) + ".pdf",  // 253 bytes
+		"documents/" + strings.Repeat("c", 251) + ".pdf", // 255 bytes
+	}
+	for _, rel := range names {
+		f.write(rel, "content of "+rel, nDays(100))
+	}
+	f.sync()
+	ev := f.evict()
+	if len(ev.Evicted) != len(names) || len(ev.Failed) != 0 {
+		t.Fatalf("evict = %d evicted, failed %v", len(ev.Evicted), ev.Failed)
+	}
+	for _, rel := range names {
+		if _, ok := f.read(rel); ok {
+			t.Fatalf("%d bytes: still on disk", len(path.Base(rel)))
+		}
+		p, err := f.v.Get(bg, rel, GetOptions{})
+		if err != nil {
+			t.Fatalf("Get of a %d-byte name: %v", len(path.Base(rel)), err)
+		}
+		if got := readAll(t, p); got != "content of "+rel {
+			t.Fatalf("%d bytes: fetched back %q", len(path.Base(rel)), got)
+		}
+	}
+	put := "documents/" + strings.Repeat("d", 251) + ".pdf"
+	if e, err := f.v.Put(bg, put, strings.NewReader("put"), ProvenanceOwner); err != nil || e.Tier != TierBoth {
+		t.Fatalf("Put of a 255-byte name = %+v, %v", e, err)
+	}
+}
+
+// An eviction of a long name interrupted after the move aside is undone
+// at the next start, by the hash its temp name carries (#669).
+func TestRecoverInterruptedEvictionOfALongName(t *testing.T) {
+	f := newFixture(t)
+	long := "documents/" + strings.Repeat("a", 240) + ".md"
+	neighbour := "documents/" + strings.Repeat("a", 241) + ".md" // same stem, other name
+	f.write(long, "content", nDays(100))
+	f.write(neighbour, "neighbour", nDays(100))
+	f.sync()
+	if err := f.v.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A crash right after the move aside, a half download, and an aside
+	// whose name the index does not hold.
+	aside := tempName(long, evictTemp)
+	if err := os.Rename(filepath.Join(f.root, filepath.FromSlash(long)), filepath.Join(f.root, filepath.FromSlash(aside))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.root, filepath.FromSlash(tempName(neighbour, hydrateTemp))), []byte("part"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	orphan := tempName("documents/"+strings.Repeat("z", 240)+".md", evictTemp)
+	if err := os.WriteFile(filepath.Join(f.root, filepath.FromSlash(orphan)), []byte("orphan"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.open()
+	if c, ok := f.read(long); !ok || c != "content" {
+		t.Fatal("the long-named file set aside was not put back")
+	}
+	if c, ok := f.read(neighbour); !ok || c != "neighbour" {
+		t.Fatal("the neighbour changed")
+	}
+	if c, ok := f.read(orphan); !ok || c != "orphan" {
+		t.Fatal("an aside without a known original was not kept")
+	}
+	entries, _ := os.ReadDir(filepath.Join(f.root, "documents"))
+	if len(entries) != 3 {
 		t.Fatalf("documents/ holds %d entries", len(entries))
 	}
 }
