@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
 )
@@ -443,10 +444,43 @@ func (v *Vault) Put(ctx context.Context, rel string, r io.Reader, prov Provenanc
 	return v.Stat(ctx, rel)
 }
 
-// tempName is a hidden temp file beside rel, which the vault ignores.
+// maxNameBytes is the longest file name Linux and APFS take.
+const maxNameBytes = 255
+
+// tempStemBytes is how much of a name too long for a whole-name temp
+// name its temp names keep.
+const tempStemBytes = 64
+
+// tempName is a hidden temp file beside rel, which the vault ignores:
+// dir/.name.vault-kind-random.tmp. When that is longer than a file name
+// may be, it keeps only the name's first tempStemBytes and a hash of the
+// whole name instead (dir/.stem.vault-kind-random-hash.tmp), so every name
+// the file system takes can be put, evicted and fetched back (#669).
+// originalOfTemp and longTempName read them back.
 func tempName(rel, kind string) string {
 	dir, name := path.Split(rel)
-	return dir + "." + name + ".vault-" + kind + "-" + randomSuffix() + ".tmp"
+	tail := ".vault-" + kind + "-" + randomSuffix()
+	if t := "." + name + tail + ".tmp"; len(t) <= maxNameBytes {
+		return dir + t
+	}
+	return dir + "." + truncateName(name, tempStemBytes) + tail + "-" + nameHash(name) + ".tmp"
+}
+
+// nameHash identifies a long name in its temp names.
+func nameHash(name string) string {
+	h := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(h[:8])
+}
+
+// truncateName cuts name to at most n bytes, at a character boundary.
+func truncateName(name string, n int) string {
+	if len(name) <= n {
+		return name
+	}
+	for n > 0 && !utf8.RuneStart(name[n]) {
+		n--
+	}
+	return name[:n]
 }
 
 func randomSuffix() string {

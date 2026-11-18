@@ -493,6 +493,69 @@ func TestUpdateAuto(t *testing.T) {
 	}
 }
 
+// setStoredUpdate writes node id's update status into the nodes.json in
+// dir, as a core that ended without recording how an update went leaves
+// it.
+func setStoredUpdate(t *testing.T, dir, id string, u nodes.UpdateStatus) {
+	t.Helper()
+	path := filepath.Join(dir, nodes.RegistryFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f map[string]any
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := f["nodes"].([]any)
+	found := false
+	for _, n := range list {
+		if m, ok := n.(map[string]any); ok && m["id"] == id {
+			m["update"], found = u, true
+		}
+	}
+	if !found {
+		t.Fatalf("no node %s in %s", id, path)
+	}
+	if data, err = json.MarshalIndent(f, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A core that died during an auto update (an OOM kill, SIGKILL, power
+// loss) left it under way in nodes.json. The core that starts next does
+// not take it for an update that runs: auto updates go on when the node
+// connects (#682).
+func TestAnUpdateTheCoreDiedDuringIsTriedAgain(t *testing.T) {
+	const vA, vB = "v1.0.0", "v1.1.0"
+	opts := nodes.Options{Dir: t.TempDir(), Version: vB, BinariesDir: writeBinaries(t, vB, fakeBinary(vB))}
+	c1 := startCoreWith(t, opts)
+	n := newUpdNode(t, c1, vA)
+	a := n.start()
+	id := a.ID()
+	waitFor(t, "the node to connect", func() bool { return c1.svc.Online(id) })
+	approveUpd(t, c1, id)
+	waitFor(t, "the approval", func() bool { return a.State().Approved.Update != nil })
+
+	c1.svc.Stop()
+	started := time.Now().UTC().Add(-time.Minute)
+	setStoredUpdate(t, opts.Dir, id, nodes.UpdateStatus{Auto: true, State: nodes.UpdateSending, From: vA, To: vB, StartedAt: &started})
+
+	c2 := startCoreWith(t, opts)
+	if u := nodeOf(t, c2, id).Update; u.Running() || u.FailedVersion != "" || !u.Auto {
+		t.Fatalf("the update the core before left under way is %+v", u)
+	}
+	n.tweak = func(a *Agent) { a.Config.Core = c2.addr }
+	n.restart()
+	waitFor(t, "the auto update", func() bool {
+		nd := nodeOf(t, c2, id)
+		return nd.Version == vB && nd.Update.State == nodes.UpdateOK
+	})
+}
+
 // A new binary that keeps dying before it connects goes back to the old
 // one at its fourth start.
 func TestUpdateTrialStartsAreCounted(t *testing.T) {

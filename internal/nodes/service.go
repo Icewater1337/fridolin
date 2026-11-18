@@ -193,6 +193,7 @@ func (s *Service) Serve(ln net.Listener) error {
 		_ = ln.Close()
 		return errors.New("the node port is already open")
 	}
+	s.endInterruptedLocked()
 	// The node port serves the nodes' WebSocket, and a machine that holds
 	// a join code the fridolin it installs (join_binary.go); none of the
 	// dashboard's routes.
@@ -332,6 +333,7 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	s.updateArrived(node)
 	ss.id = node.ID
 	conn.SetReadLimit(nodeproto.MaxMessageBytes)
 	if s.handshook != nil {

@@ -1039,6 +1039,12 @@ digest, without ever reaching the box's Docker:
    agent reports it to the core, which shows it on the Nodes page like
    any update. The updater logs to `update.log` beside the compose file.
 
+The core waits for the box to come back on the new version for the
+updater's interval and 30 minutes more. A box that connects again on its
+old version meanwhile (its host slept, the network dropped) keeps the
+wait going: only the updater's report of a failure, or the wait running
+out, fails the update.
+
 Removing the updater: `launchctl bootout gui/$(id -u)/ai.fridolin.box-updater`
 and its plist in `~/Library/LaunchAgents` (macOS), `systemctl --user
 disable --now fridolin-box-updater.timer` (Linux), `crontab -e`, or
@@ -2545,7 +2551,11 @@ core runs a newer version than the node's: when it connects, and while it
 is connected, never while it is busy. It only moves a node from a version
 known to be older (by its number, or one the core itself ran before, in
 `nodes/core-versions.json`), and leaves a version that failed alone until
-the owner turns auto on again. `fridolin doctor` warns about approved
+the owner turns auto on again. An update the core itself cut off, because
+it stopped or died during it, is no failure of the version: auto tries it
+again when the node next connects. A node that comes back on the version
+of an update recorded as failed (a box whose updater applied it late) is
+recorded as updated. `fridolin doctor` warns about approved
 nodes that run an older version than the core, and about a last update
 that failed.
 

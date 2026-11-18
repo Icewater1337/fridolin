@@ -11,8 +11,9 @@ import (
 // ClaudeInfo finds the CLI and its version. The version is cached until the
 // binary changes: `claude` on the PATH is a symlink the CLI moves to each
 // new release it installs, and the dashboard must not show the old one for
-// as long as the bridge runs. A CLI that is not found is looked up again
-// every time, so installing it shows at once. It runs the CLI with a
+// as long as the bridge runs. A `--version` run that failed is tried again
+// after claudecli.FailedProbeRetry. A CLI that is not found is looked up
+// again every time, so installing it shows at once. It runs the CLI with a
 // brain's environment, taken from env: a claude_path wrapper may run what
 // a brain can change.
 func ClaudeInfo(env Environment, path string, passthrough []string) claudecli.Status {

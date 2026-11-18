@@ -20,16 +20,25 @@ import (
 // itself, so an older one usually means auto-updates are off.
 const TestedClaudeVersion = "2.1.302"
 
+// FailedProbeRetry is how long a `--version` run that failed (it timed
+// out on a cold start, or exited non-zero) is remembered before Info runs
+// the CLI again. Only a version found stays until the binary changes.
+const FailedProbeRetry = time.Minute
+
 type claudeCacheEntry struct {
 	file string // the binary, symlinks resolved
 	mod  time.Time
 	size int64
 	st   Status
+	// retry is when a failed probe may run again; zero once a version was
+	// found.
+	retry time.Time
 }
 
 type Prober struct {
 	mu    sync.Mutex
 	cache map[string]claudeCacheEntry
+	now   func() time.Time // time.Now when nil; tests set it
 }
 
 // ParseClaudeVersion reads the release from `claude --version` output such
@@ -78,6 +87,8 @@ func VersionWarning(st Status) string {
 	return ""
 }
 
+// Info runs `resolved --version` and caches what it found per path: a
+// version until the binary changes, a failed run for FailedProbeRetry.
 func (probe *Prober) Info(path, resolved string, env []string) Status {
 	file, err := filepath.EvalSymlinks(resolved)
 	if err != nil {
@@ -94,7 +105,12 @@ func (probe *Prober) Info(path, resolved string, env []string) Status {
 	if probe.cache == nil {
 		probe.cache = make(map[string]claudeCacheEntry)
 	}
-	if c, ok := probe.cache[path]; ok && c.file == file && c.mod.Equal(mod) && c.size == size {
+	now := time.Now
+	if probe.now != nil {
+		now = probe.now
+	}
+	if c, ok := probe.cache[path]; ok && c.file == file && c.mod.Equal(mod) && c.size == size &&
+		(c.retry.IsZero() || now().Before(c.retry)) {
 		return c.st
 	}
 	st := Status{Path: resolved, Found: true}
@@ -103,9 +119,16 @@ func (probe *Prober) Info(path, resolved string, env []string) Status {
 	cmd.Env = env
 	out, err := cmd.Output()
 	cancel()
-	if err == nil {
-		st.Version = strings.TrimSpace(string(out))
+	entry := claudeCacheEntry{file: file, mod: mod, size: size}
+	if v := strings.TrimSpace(string(out)); err == nil && v != "" {
+		st.Version = v
+	} else {
+		// A failed run (a timeout on a cold start, a bad exit) must not
+		// stick: the version, and with it VersionWarning, would be gone
+		// until the binary changes.
+		entry.retry = now().Add(FailedProbeRetry)
 	}
-	probe.cache[path] = claudeCacheEntry{file: file, mod: mod, size: size, st: st}
+	entry.st = st
+	probe.cache[path] = entry
 	return st
 }
