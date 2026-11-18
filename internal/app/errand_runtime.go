@@ -720,6 +720,7 @@ func (b *App) errandTurn(id string) {
 	if !ok {
 		if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandStopped, "errands are off for its brain", time.Now()); ended {
 			b.auditErrand(e, "ended", store.ErrandStopped+": errands are off for its brain")
+			b.denyErrandBooking(ctx, e.ID)
 		}
 		return
 	}
@@ -809,6 +810,7 @@ func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, 
 			}
 		}
 		b.auditErrand(e, "ended", store.ErrandDone)
+		b.denyErrandBooking(ctx, e.ID)
 		defer b.hearLate(ctx, e, len(lines))
 		if ans.Stop {
 			// They asked not to be written to: the next errand with them
@@ -930,6 +932,7 @@ func (b *App) abortErrand(ctx context.Context, e store.Errand, reason string, li
 	// ends, since errand_stop and expiry end one without a word to them.
 	ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandAborted, reason, time.Now())
 	if ended {
+		b.denyErrandBooking(ctx, e.ID)
 		if err := ch.sayEnding(ch.abort); err != nil {
 			log.Printf("errand %s: sending the end: %v", e.ID, err)
 		}
@@ -954,6 +957,7 @@ func (b *App) expireErrand(ctx context.Context, e store.Errand, why string) bool
 	}
 	b.auditErrand(e, "ended", store.ErrandExpired+": "+why)
 	b.tellErrandOwner(ctx, e, outboundmsg.ErrandExpiredNotice(e.Name, e.ID, why))
+	b.denyErrandBooking(ctx, e.ID)
 	return true
 }
 
@@ -1265,6 +1269,7 @@ func (b *App) stopErrandFor(ctx context.Context, brain, id, why string) error {
 		// denial goes nowhere and errandDecided never hears of it.
 		b.decide(ctx, e.Approval, store.ApprovalDenied, "", "bridge", callerAnswers)
 	}
+	b.denyErrandBooking(ctx, e.ID)
 	b.auditErrand(e, "ended", store.ErrandStopped)
 	return nil
 }

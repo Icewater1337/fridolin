@@ -1302,6 +1302,12 @@ func ErrandBookingFailedNotice(name, id, when string) string {
 	return fmt.Sprintf("⚠️ I could not put %s with %s in your calendar (errand %s): the calendar did not take it. I told them you will come back to them about it.", when, name, id)
 }
 
+// ErrandBookingEndedNotice says the booking of when with name, errand
+// id, which waited for the owner's yes, was not made: the errand ended.
+func ErrandBookingEndedNotice(name, id, when string) string {
+	return fmt.Sprintf("📅 Not booked: %s with %s (errand %s). The conversation with them had already ended, so they would not hear of it; arrange it with them yourself if you still want it.", when, name, id)
+}
+
 // ErrandBookingQuestion asks the owner what to tell someone who agreed on
 // a time the bridge could not book, twice: why, as the bridge said it.
 func ErrandBookingQuestion(why string) string {
