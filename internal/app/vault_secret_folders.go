@@ -355,7 +355,8 @@ type secretFoldersStatus struct {
 	Last   *secretBackupRecord `json:"last,omitempty"`
 	LastOK *secretBackupRecord `json:"last_ok,omitempty"`
 	// Versions are the versions in the bucket, the oldest first, as the
-	// last backup or prune listed them.
+	// last prune listed them, with each version taken since: a LastOK is
+	// in it from the moment it is LastOK.
 	Versions []secretVersion `json:"versions,omitempty"`
 	// Fingerprint is the folders' as the last version took them: names,
 	// sizes, modes and times, hashed.
@@ -507,6 +508,7 @@ func (sf *vaultSecretFolders) backupLocked(ctx context.Context, reason string) *
 	var entries []secretEntry
 	var views []secretFolderView
 	var fp string
+	var size int64
 	if err == nil {
 		entries, views, fp, err = scanSecretFolders(folders)
 	}
@@ -516,7 +518,7 @@ func (sf *vaultSecretFolders) backupLocked(ctx context.Context, reason string) *
 			rec.Bytes += v.Bytes
 		}
 		rec.Version = now.Format(secretVersionLayout) + ".tar"
-		err = sf.put(ctx, rec.Version, secretManifest{Version: 1, At: now, Folders: views}, folders, entries)
+		size, err = sf.put(ctx, rec.Version, secretManifest{Version: 1, At: now, Folders: views}, folders, entries)
 	}
 	if ctx.Err() != nil {
 		return rec
@@ -536,6 +538,9 @@ func (sf *vaultSecretFolders) backupLocked(ctx context.Context, reason string) *
 		st.Last = rec
 		if err == nil {
 			prev, st.LastOK, st.Fingerprint = st.LastOK, rec, fp
+			// The version is in the bucket: the status lists it with
+			// LastOK, not only once the prune below listed the bucket.
+			st.Versions = withSecretVersion(st.Versions, secretVersion{Version: rec.Version, At: now, Bytes: size})
 			if prev != nil && snapshot.MassDeletion(prev.Files, rec.Files) && st.PruneHold == nil {
 				st.PruneHold = &deletionHold{Since: rec.At, Snapshot: rec.Version, Kind: "secret-folders", PrevFiles: prev.Files, Files: rec.Files}
 				sf.s.log.Warn("vault: a version of the secret folders lost most of the files of the one before; pruning waits until you allow it on the Vault page",
@@ -550,14 +555,15 @@ func (sf *vaultSecretFolders) backupLocked(ctx context.Context, reason string) *
 }
 
 // put uploads one version, streamed, and checks that it is there; a
-// version that did not go up whole is deleted again.
-func (sf *vaultSecretFolders) put(ctx context.Context, key string, man secretManifest, folders []secretFolder, entries []secretEntry) error {
+// version that did not go up whole is deleted again. It returns the
+// version's size in the bucket, as a listing gives it.
+func (sf *vaultSecretFolders) put(ctx context.Context, key string, man secretManifest, folders []secretFolder, entries []secretEntry) (int64, error) {
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(writeSecretArchive(pw, man, folders, entries)) }()
 	err := sf.store.Put(ctx, key, pr)
 	pr.CloseWithError(errors.New("vault: the secret folders' upload ended"))
+	var info cloud.ObjectInfo
 	if err == nil {
-		var info cloud.ObjectInfo
 		if info, err = sf.store.Stat(ctx, key); err == nil && info.Size <= 0 {
 			err = errors.New("the version uploaded is empty")
 		}
@@ -566,8 +572,19 @@ func (sf *vaultSecretFolders) put(ctx context.Context, key string, man secretMan
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		_ = sf.store.Delete(dctx, key)
 		cancel()
+		return 0, err
 	}
-	return err
+	return info.Size, nil
+}
+
+// withSecretVersion is versions with v added, the oldest first; v takes
+// the place of a version of the same name, as its upload replaced that
+// one in the bucket.
+func withSecretVersion(versions []secretVersion, v secretVersion) []secretVersion {
+	out := slices.DeleteFunc(slices.Clone(versions), func(x secretVersion) bool { return x.Version == v.Version })
+	out = append(out, v)
+	slices.SortStableFunc(out, func(a, b secretVersion) int { return a.At.Compare(b.At) })
+	return out
 }
 
 // listVersions lists the versions in the bucket, the oldest first.

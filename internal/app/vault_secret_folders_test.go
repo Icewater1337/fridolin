@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/doctor"
 )
@@ -273,6 +274,120 @@ func TestVaultSecretFoldersOnChange(t *testing.T) {
 	}).SecretFolders
 	if st.LastOK.Reason != "changed" || st.LastOK.Files != 4 || len(st.Versions) != 2 {
 		t.Errorf("after the change: %+v %+v", st.LastOK, st.Versions)
+	}
+}
+
+// heldLists holds each listing of the secret folders' bucket until the
+// test lets it through: on B2 a listing takes a while.
+type heldLists struct {
+	cloud.ObjectStore
+	let chan struct{}
+}
+
+func (s heldLists) List(ctx context.Context, prefix string) ([]cloud.ObjectInfo, error) {
+	select {
+	case <-s.let:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.ObjectStore.List(ctx, prefix)
+}
+
+// TestVaultSecretFoldersListTheNewVersion: the status lists a version
+// from the moment it names it LastOK, not only once the prune after the
+// backup listed the bucket; a status read in between named a version its
+// own list lacked (issue #387).
+func TestVaultSecretFoldersListTheNewVersion(t *testing.T) {
+	t.Parallel()
+	setenv(t, vaultLocalEnv, t.TempDir())
+	optionsOf(t).waits.vaultTick = 50 * time.Millisecond
+	optionsOf(t).waits.secretFoldersChange = time.Millisecond
+	let := make(chan struct{})
+	optionsOf(t).hooks.vaultBackends = func(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error) {
+		b, err := defaultVaultBackends(ctx, s, cfg)
+		if b.secretFolders != nil {
+			b.secretFolders = heldLists{b.secretFolders, let}
+		}
+		return b, err
+	}
+	h := newHarness(t, `{"vault": {"enabled": true, "hot_budget_gb": 3}, "sandbox": {"credentials_dir": "~/.app-secrets"}}`)
+	t.Cleanup(func() { close(let) }) // before the harness stops the vault
+	creds, _ := writeSecretFolders(t, h.Home())
+	h.startVault()
+
+	var taken []string
+	backup := func(what string) *secretFoldersStatus {
+		t.Helper()
+		st := h.vaultWait(what, func(st vaultStatus) bool {
+			return st.SecretFolders != nil && st.SecretFolders.LastOK != nil && !slices.Contains(taken, st.SecretFolders.LastOK.Version)
+		}).SecretFolders
+		taken = append(taken, st.LastOK.Version)
+		// The prune after the backup waits for its listing.
+		var names []string
+		for _, v := range st.Versions {
+			names = append(names, v.Version)
+		}
+		if !slices.Equal(names, taken) || st.Versions[len(st.Versions)-1].Bytes <= 0 {
+			t.Fatalf("%s: LastOK %+v, versions %+v, want %q", what, st.LastOK, st.Versions, taken)
+		}
+		select {
+		case let <- struct{}{}:
+		case <-time.After(time.Minute):
+			t.Fatalf("%s: the prune never listed the bucket", what)
+		}
+		pruned := h.vaultWait(what+" pruned", func(st vaultStatus) bool {
+			p := st.SecretFolders.LastPrune
+			return p != nil && p.At.Equal(st.SecretFolders.LastOK.At)
+		}).SecretFolders
+		// The listing says what the backup said.
+		if !sameSecretVersions(pruned.Versions, st.Versions) || pruned.LastPrune.Error != "" {
+			t.Errorf("%s: the backup listed %+v, the prune %+v (%+v)", what, st.Versions, pruned.Versions, pruned.LastPrune)
+		}
+		return st
+	}
+	first := backup("the first version")
+	time.Sleep(time.Until(first.LastOK.At.Add(time.Second))) // versions are named by the second
+	writeFile(t, filepath.Join(creds, "google_calendar_token_work.json"), `{"t":1}`)
+	if st := backup("a version after the change"); st.LastOK.Reason != "changed" || st.LastOK.Files != 4 {
+		t.Errorf("after the change: %+v", st.LastOK)
+	}
+}
+
+func sameSecretVersions(a, b []secretVersion) bool {
+	return slices.EqualFunc(a, b, func(a, b secretVersion) bool {
+		return a.Version == b.Version && a.At.Equal(b.At) && a.Bytes == b.Bytes
+	})
+}
+
+func TestWithSecretVersion(t *testing.T) {
+	t.Parallel()
+	v := func(stamp string, size int64) secretVersion {
+		at, err := time.Parse(secretVersionLayout, stamp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return secretVersion{Version: stamp + ".tar", At: at, Bytes: size}
+	}
+	old := []secretVersion{v("20261101T080000Z", 10), v("20261102T080000Z", 20)}
+	given := slices.Clone(old)
+	for _, tc := range []struct {
+		name string
+		add  secretVersion
+		want []secretVersion
+	}{
+		{"newest", v("20261103T080000Z", 30), []secretVersion{old[0], old[1], v("20261103T080000Z", 30)}},
+		{"in between", v("20261101T120000Z", 15), []secretVersion{old[0], v("20261101T120000Z", 15), old[1]}},
+		{"same name", v("20261102T080000Z", 25), []secretVersion{old[0], v("20261102T080000Z", 25)}},
+	} {
+		if got := withSecretVersion(old, tc.add); !sameSecretVersions(got, tc.want) {
+			t.Errorf("%s: %+v, want %+v", tc.name, got, tc.want)
+		}
+		if !sameSecretVersions(old, given) {
+			t.Fatalf("%s: withSecretVersion changed what it was given: %+v", tc.name, old)
+		}
+	}
+	if got := withSecretVersion(nil, old[0]); !sameSecretVersions(got, old[:1]) {
+		t.Errorf("into none: %+v", got)
 	}
 }
 
