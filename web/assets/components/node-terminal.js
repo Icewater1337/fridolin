@@ -5,24 +5,12 @@
 // sent with Enter. Full-screen programs (an editor, top) do not draw
 // here; that is what the node's own terminal is for.
 
-import { post } from '../app/api.js';
+import { nodeCall } from '../app/api.js';
 import { h } from '../lib/dom.js';
 import { fromBase64, termText } from '../lib/nodes.js';
 import { btn } from './buttons.js';
 import { textInput } from './fields.js';
 import { errorMessage } from '../lib/errors.js';
-
-/**
- * Calls method on node through the bridge; resolves with its result.
- * @param {string} node
- * @param {string} method
- * @param {Record<string, unknown>} [params]
- * @returns {Promise<any>} what the node's method answers
- */
-async function nodeCall(node, method, params) {
-  const r = await post(`/api/nodes/${encodeURIComponent(node)}/call`, { method, params: params || {} });
-  return r.result || {};
-}
 
 /**
  * nodeTerminal({node, folder}) opens a terminal and returns {el, close}:

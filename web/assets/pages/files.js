@@ -15,12 +15,11 @@ import { icon } from '../components/icons.js';
 import { btn } from '../components/buttons.js';
 import { badge, empty, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { textInput, select } from '../components/fields.js';
-import { deleteFile, editOnOpen, moveFile, newFile, uploadButton } from '../components/file-actions.js';
+import { crumbs, deleteFile, editOnOpen, moveFile, newFile, uploadButton } from '../components/file-actions.js';
 import { toast } from '../components/toast.js';
 import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
-/** @import { Child } from '../lib/dom.js' */
 /** @import { FileEntry, FileRoot, FileRootKind, FilesList, FilesSearch, FileUpload, UploadRule } from '../../types/api.js' */
 
 /**
@@ -63,23 +62,6 @@ function rootsView(box, ctx) {
       return list.length ? h('section.files-group', h('h2', label), h('div.files-roots', list.map(rootCard))) : null;
     })));
   }, (err) => { if (!ctx.dead) paint(box, 'error', () => h('div.card', empty('Could not list the folders', err.message))); });
-}
-
-/**
- * @param {string} rootId
- * @param {string} label
- * @param {string} path
- */
-function crumbs(rootId, label, path) {
-  /** @type {Child[]} */
-  const out = [h('a', { href: '#/files' }, 'Files'), ' / ', h('a', { href: filesHref(rootId, '', true) }, label)];
-  let acc = '';
-  const parts = path ? path.split('/') : [];
-  parts.forEach((seg, i) => {
-    acc = acc ? `${acc}/${seg}` : seg;
-    out.push(' / ', i === parts.length - 1 ? h('span', seg) : h('a', { href: filesHref(rootId, acc, true) }, seg));
-  });
-  return h('nav.files-crumbs', { 'aria-label': 'Folder' }, out);
 }
 
 /** @type {[string, string][]} */
