@@ -237,6 +237,11 @@ for compatibility.
 
 ### Fixed
 
+- **`fridolin nodes move --yes --json` prints valid JSON.** Its stdout
+  held the pre-flight, then lines of progress, then the move's record,
+  so nothing could parse it. It now prints one document,
+  `{"check": …, "move": …}` (the pre-flight, and the move's last record,
+  left out when the move did not start), and the progress on stderr.
 - **A note from a conversation reaches you once.** When a call's reply
   was not heard (they hung up, or its speech failed), the turn after it
   could pass the same note on again. Fridolin now remembers the notes

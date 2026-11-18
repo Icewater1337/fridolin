@@ -761,6 +761,10 @@ fridolin nodes move SRC DST --yes       # move the core, and follow it to its en
 fridolin nodes move-status ID           # how move ID went (GET /api/nodes/moves/{id})
 ```
 
+With `--json`, `nodes move --yes` prints one JSON document on stdout,
+`{"check": …, "move": …}`: the pre-flight and the move's last record
+(left out when it did not start); its progress goes to stderr.
+
 SRC and DST are each a node's id or its name, in any case
 (`fridolin nodes move-check mac-mini fridolin-droplet`). A name more
 than one node has is refused, with each node's id.
