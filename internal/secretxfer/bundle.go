@@ -26,17 +26,12 @@ var MoveNames = []string{
 	hostsecrets.GitHubToken,
 }
 
-// SealBundle encrypts secrets, from the host named from, to recipient: a
-// post-quantum age recipient (ML-KEM-768 + X25519), the bundle core send
-// sends. Nothing of it stays in clear.
-func SealBundle(from string, secrets map[string]string, recipient string) ([]byte, error) {
-	return SealBundleFiles(from, secrets, nil, "", recipient)
-}
-
-// SealBundleFiles is SealBundle with the secret files of the core's
-// credentials folder (FileNames) beside the secrets, and that folder
-// under ~ (dir), and the local files of its data dir (LocalFileName),
-// which need no folder.
+// SealBundleFiles encrypts secrets, from the host named from, to
+// recipient: a post-quantum age recipient (ML-KEM-768 + X25519). Beside
+// the secrets go the secret files of the core's credentials folder
+// (FileNames) and that folder under ~ (dir), and the local files of its
+// data dir (LocalFileName), which need no folder; core send sends none
+// (nil, ""). Nothing of it stays in clear.
 func SealBundleFiles(from string, secrets map[string]string, files map[string][]byte, dir, recipient string) ([]byte, error) {
 	if err := checkFiles(files); err != nil {
 		return nil, err
@@ -79,14 +74,9 @@ func SealBundleFiles(from string, secrets map[string]string, files map[string][]
 	return ct.Bytes(), nil
 }
 
-// OpenBundle decrypts a bundle with id, in memory, and reads it.
-func OpenBundle(ct []byte, id age.Identity) (map[string]string, string, error) {
-	secrets, _, _, from, err := OpenBundleFiles(ct, id)
-	return secrets, from, err
-}
-
-// OpenBundleFiles is OpenBundle with the bundle's secret files and the
-// folder under ~ they belong in.
+// OpenBundleFiles decrypts a bundle with id, in memory, and reads it: its
+// secrets, its secret files and the folder under ~ they belong in, and
+// the host it is from.
 func OpenBundleFiles(ct []byte, id age.Identity) (map[string]string, map[string][]byte, string, string, error) {
 	r, err := age.Decrypt(bytes.NewReader(ct), id)
 	if err != nil {

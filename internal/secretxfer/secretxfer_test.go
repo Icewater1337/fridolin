@@ -2,10 +2,12 @@ package secretxfer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"slices"
 	"strings"
@@ -372,6 +374,38 @@ func TestCodeAndWords(t *testing.T) {
 	}
 	if len(wordList) != 256 {
 		t.Errorf("%d words", len(wordList))
+	}
+}
+
+// encodeBundle is the plaintext of a bundle of secrets alone, as core
+// send seals it.
+func encodeBundle(from string, secrets map[string]string) ([]byte, error) {
+	return json.Marshal(bundle{V: Version, From: from, Secrets: secrets})
+}
+
+// TestSealBundleWithoutFiles: a bundle sealed without files holds the
+// same bytes core send sealed before it went through SealBundleFiles
+// (#664), so an older receiver reads it.
+func TestSealBundleWithoutFiles(t *testing.T) {
+	id, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := map[string]string{hostsecrets.AgeIdentity: "AGE-SECRET-KEY-1X", hostsecrets.ResticPassword: "pw"}
+	ct, err := SealBundleFiles("mini", secrets, nil, "", id.Recipient().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := age.Decrypt(bytes.NewReader(ct), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := encodeBundle("mini", secrets); !bytes.Equal(plain, want) {
+		t.Errorf("sealed %s, want %s", plain, want)
 	}
 }
 
