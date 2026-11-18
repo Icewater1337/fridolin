@@ -319,7 +319,7 @@ func (a *Agent) waitMovesEnd(ctx context.Context) bool {
 	deadline := time.Now().Add(3 * a.movePoll())
 	for {
 		a.moves.mu.Lock()
-		busy := slices.ContainsFunc(mapValues(a.moves.runs), func(o *moveRun) bool { return !nodeproto.MoveFinal(o.State.Phase) })
+		busy := a.moveRunning()
 		a.moves.mu.Unlock()
 		if !busy {
 			return true

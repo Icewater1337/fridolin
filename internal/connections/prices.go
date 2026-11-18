@@ -3,6 +3,7 @@ package connections
 import (
 	"maps"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -72,7 +73,7 @@ func rateOf[T any](table map[string]T, model string, highest func([]T) T) T {
 	if best != "" {
 		return table[best]
 	}
-	return highest(mapValues(table))
+	return highest(slices.Collect(maps.Values(table)))
 }
 
 func highestTranscribe(rs []transcribeRate) transcribeRate {
@@ -145,12 +146,4 @@ func speechUsage(chars int64) Usage {
 // sttUsage is what ElevenLabs' speech-to-text cost, for seconds of audio.
 func sttUsage(model string, seconds float64) Usage {
 	return Usage{AudioSeconds: seconds, USD: seconds / 60 * rateOf(elevenLabsSTTPerMinute, model, highestFloat)}
-}
-
-func mapValues[T any](m map[string]T) []T {
-	var out []T
-	for v := range maps.Values(m) {
-		out = append(out, v)
-	}
-	return out
 }

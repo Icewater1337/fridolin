@@ -95,6 +95,17 @@ type coreMoves struct {
 	alive bool
 }
 
+// moveRunning says whether a move on this machine has not ended yet.
+// The caller holds a.moves.mu.
+func (a *Agent) moveRunning() bool {
+	for _, o := range a.moves.runs {
+		if !nodeproto.MoveFinal(o.State.Phase) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Agent) movePoll() time.Duration {
 	if a.MovePoll > 0 {
 		return a.MovePoll
@@ -291,7 +302,7 @@ func (a *Agent) coreMoveAccept(raw json.RawMessage, role string) (any, *nodeprot
 		}
 		seen = err == nil
 	}
-	busy := slices.ContainsFunc(mapValues(a.moves.runs), func(o *moveRun) bool { return !nodeproto.MoveFinal(o.State.Phase) })
+	busy := a.moveRunning()
 	alive := a.moves.alive
 	if !seen && !busy && alive {
 		a.moves.runs[p.Move] = m
@@ -310,14 +321,6 @@ func (a *Agent) coreMoveAccept(raw json.RawMessage, role string) (any, *nodeprot
 		role, p.Move, p.Source, p.Target, p.Version, p.HandoffDeadline.Format(time.RFC3339), p.Ready())
 	a.goMove(m)
 	return a.moveState(m), nil
-}
-
-func mapValues[K comparable, V any](m map[K]V) []V {
-	out := make([]V, 0, len(m))
-	for _, v := range m {
-		out = append(out, v)
-	}
-	return out
 }
 
 // goMove runs m's half in the background, with the agent's lifetime.
@@ -703,7 +706,7 @@ func (a *Agent) coreRehearse(ctx context.Context, p nodeproto.CoreRehearseParams
 		return nil, perr
 	}
 	a.moves.mu.Lock()
-	busy := slices.ContainsFunc(mapValues(a.moves.runs), func(o *moveRun) bool { return !nodeproto.MoveFinal(o.State.Phase) })
+	busy := a.moveRunning()
 	a.moves.mu.Unlock()
 	if busy {
 		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "a core move runs on this machine")
