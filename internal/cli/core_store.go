@@ -78,7 +78,9 @@ func longLived(st cloud.ObjectStore) cloud.ObjectStore {
 	return d.Store(r.Remote)
 }
 
-// envLookup returns a getenv over environ, a list of NAME=value.
+// envLookup returns a getenv over environ, a list of NAME=value: the last
+// NAME= wins, as in the environment os/exec hands a child, and an unset
+// name is "".
 func envLookup(environ []string) func(string) string {
 	return func(name string) string {
 		for i := len(environ) - 1; i >= 0; i-- {

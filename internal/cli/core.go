@@ -825,7 +825,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		d.docker, _ = exec.LookPath("docker")
 	} else {
 		env.environ = withDockerPath(env.environ, d.goos, d.home)
-		d.docker = lookPathIn("docker", envValue(env.environ, "PATH"))
+		d.docker = lookPathIn("docker", env.getenv("PATH"))
 	}
 	d.apparmor, d.apparmorDir = hostAppArmor, "/etc/apparmor.d"
 	d.git = func(dir string, args ...string) (string, error) {
@@ -844,7 +844,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 	}
 	gh, _ := exec.LookPath("gh")
 	if d.goos != "windows" {
-		gh = lookGh(envValue(env.environ, "PATH"), d.home)
+		gh = lookGh(env.getenv("PATH"), d.home)
 	}
 	if gh == "" {
 		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install a current one (brew install gh, winget install GitHub.cli, on Linux from GitHub's apt repository: https://cli.github.com)"
@@ -924,7 +924,7 @@ func withDockerPath(environ []string, goos, home string) []string {
 	if len(dirs) == 0 {
 		return environ
 	}
-	path := envValue(environ, "PATH")
+	path := envLookup(environ)("PATH")
 	have := filepath.SplitList(path)
 	for _, d := range dirs {
 		if !slices.Contains(have, d) {
@@ -933,16 +933,6 @@ func withDockerPath(environ []string, goos, home string) []string {
 	}
 	out := slices.DeleteFunc(slices.Clone(environ), func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
 	return append(out, "PATH="+strings.Join(have, string(os.PathListSeparator)))
-}
-
-// envValue is name's value in environ, "" when unset.
-func envValue(environ []string, name string) string {
-	for _, kv := range environ {
-		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
-			return v
-		}
-	}
-	return ""
 }
 
 // lookGh finds gh on path, then in ~/.local/bin and ~/bin, where gh's own
