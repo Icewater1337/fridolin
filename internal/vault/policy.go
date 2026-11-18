@@ -182,7 +182,8 @@ func days(n int) time.Duration { return time.Duration(n) * 24 * time.Hour }
 
 // Classify places one file. The rules, first match wins:
 //
-//  1. pinned patterns, and audit/ of the current month: pinned;
+//  1. pinned patterns, and audit/ of the current month (in UTC, as the
+//     audit log names its files) or a later one: pinned;
 //  2. referenced by an open thread, or hydrated within HydratedHoldDays:
 //     active;
 //  3. media originals with a companion, run logs unused for RunLogDays,
@@ -198,7 +199,12 @@ func (p Policy) Classify(f Facts, now time.Time) Decision {
 		return Decision{ClassPinned, true, ReasonPinned}
 	}
 	month, isAudit := auditMonth(f.Path)
-	if isAudit && month == now.Format("2006-01") {
+	// The audit log names its files by the UTC month (internal/audit), so
+	// "this month" is the UTC one, whatever zone the process runs in: in
+	// the hours between the local and the UTC month change the two differ,
+	// and the live file must not count as past. A later month than that
+	// is not past either. Both are YYYY-MM, so the strings order as months.
+	if isAudit && month >= now.UTC().Format("2006-01") {
 		return Decision{ClassPinned, true, ReasonAuditCurrent}
 	}
 	if f.InOpenThread {
