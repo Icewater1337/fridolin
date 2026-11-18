@@ -347,15 +347,32 @@ func (b *App) coreMoveEnded(r nodes.MoveRecord) {
 
 // secretsQuestionFor names the machine whose host secrets the owner is
 // asked about once r ended, none when it stays unclear where the core runs:
-// forgetting could then hit the machine that runs it (#555).
+// forgetting could then hit the machine that runs it (#555). A move that
+// failed once the target's lease went stale is unclear too: the core there
+// may still run, only cut off from the lease store (#591).
 func secretsQuestionFor(r nodes.MoveRecord) (id, name string) {
 	switch {
 	case r.State == nodes.MoveDone:
 		return r.Source, r.SourceName
+	case r.State == nodes.MoveFailed && sourceStep(r, nodeproto.StepLeaseStale):
+		return "", ""
 	case (r.State == nodes.MoveFailed || r.State == nodes.MoveRolledBack) && secretsSent(r) && !r.ReleaseUnanswered:
 		return r.Target, r.TargetName
 	}
 	return "", ""
+}
+
+// sourceStep reports whether r's source logged step, as it last said.
+func sourceStep(r nodes.MoveRecord, step string) bool {
+	if r.SourceState == nil {
+		return false
+	}
+	for _, s := range r.SourceState.Steps {
+		if s.Step == step {
+			return true
+		}
+	}
+	return false
 }
 
 // secretsSent reports whether r's host secrets went to its target.
