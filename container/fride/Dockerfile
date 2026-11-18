@@ -21,7 +21,7 @@
 # and their SHA-256, the base images to version tags at least two weeks
 # old when they were chosen.
 
-ARG GO_IMAGE=golang:1.27.3-bookworm
+ARG GO_IMAGE=golang:1.27.4-bookworm
 ARG NODE_IMAGE=node:26.13.0-bookworm-slim
 
 # ── FrIDE and ponytail ────────────────────────────────────────────────────
