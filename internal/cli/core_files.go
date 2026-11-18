@@ -55,7 +55,7 @@ func coreFiles(args []string, env coreEnv) int {
 		fmt.Fprintln(env.stderr, "usage: fridolin core files export|import|forget (in the core's container: fridolin core run core files …)")
 		return 2
 	}
-	home := envValue(env.environ, "HOME")
+	home := env.getenv("HOME")
 	dataDir, derr := insideDataDir(insideFlags{}, env)
 	if args[0] == "forget" {
 		return coreFilesForget(home, dataDir, derr, env)
@@ -142,7 +142,7 @@ func coreFiles(args []string, env coreEnv) int {
 // read from its config as written; "" when it is unset or in the data
 // dir, whose files travel in the export anyway.
 func credentialsDir(env coreEnv, home string) (string, error) {
-	path := envValue(env.environ, "FRIDOLIN_CONFIG")
+	path := env.getenv("FRIDOLIN_CONFIG")
 	if path == "" {
 		path = "/data/config.json"
 	}

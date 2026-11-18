@@ -408,3 +408,38 @@ func TestWithDockerPath(t *testing.T) {
 		t.Fatalf("lookPathIn did not find docker in %s", bin)
 	}
 }
+
+// The core commands read their environment through one rule, getenv:
+// the last NAME= wins, as in the environment os/exec hands a child. Until
+// #582, HOME, FRIDOLIN_CONFIG and PATH were read with the first instead.
+// Both give the same value for every environment these commands get: the
+// process's own, in which Go keeps one of each name, and withDockerPath's,
+// which holds one PATH.
+func TestCoreEnvGetenv(t *testing.T) {
+	env := coreEnv{environ: []string{"HOME=/root", "PATH=/usr/bin", "HOME=/Users/you", "EMPTY=", "X==y"}}
+	for name, want := range map[string]string{"HOME": "/Users/you", "PATH": "/usr/bin", "EMPTY": "", "X": "=y", "HOM": "", "UNSET": ""} {
+		if got := env.getenv(name); got != want {
+			t.Errorf("getenv(%q) = %q, want %q", name, got, want)
+		}
+	}
+	// withDockerPath drops every PATH= and appends one.
+	path := withDockerPath([]string{"PATH=/usr/bin", "HOME=/home/you"}, "linux", "/home/you")
+	if n := len(slices.DeleteFunc(slices.Clone(path), func(kv string) bool { return !strings.HasPrefix(kv, "PATH=") })); n != 1 {
+		t.Fatalf("withDockerPath left %d PATH entries: %q", n, path)
+	}
+	if got, want := (coreEnv{environ: path}).getenv("PATH"), strings.Join([]string{"/usr/bin", "/usr/local/bin", "/snap/bin"}, string(os.PathListSeparator)); got != want {
+		t.Errorf("PATH after withDockerPath = %q, want %q", got, want)
+	}
+	if runtime.GOOS == "windows" {
+		return // the core commands that read PATH run off Windows
+	}
+	// coreCmd's environment is os.Environ(), where a name never repeats.
+	seen := map[string]bool{}
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if seen[name] {
+			t.Errorf("os.Environ() repeats %s", name)
+		}
+		seen[name] = true
+	}
+}
