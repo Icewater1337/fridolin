@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -219,7 +220,7 @@ func (a *Agent) saveMove(m *moveRun) {
 		var p string
 		if p, err = a.movePath(m.State.Move); err == nil {
 			if err = os.MkdirAll(filepath.Dir(p), 0o700); err == nil {
-				err = writeFile(p, append(data, '\n'), 0o600)
+				err = fsx.WriteFileAtomic(p, append(data, '\n'), 0o600, false)
 			}
 		}
 	}

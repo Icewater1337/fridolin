@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -262,7 +263,7 @@ func (a *Agent) savePushedIdentities(ids []string) error {
 		return nil
 	}
 	data, _ := json.Marshal(map[string][]string{"pushed": ids})
-	return writeFile(p, append(data, '\n'), 0o600)
+	return fsx.WriteFileAtomic(p, append(data, '\n'), 0o600, false)
 }
 
 // legacyFrideSandboxService is the service of the second node a

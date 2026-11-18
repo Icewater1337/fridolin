@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
@@ -80,7 +81,7 @@ func LoadCoreRole(dir string) (string, error) {
 
 func saveCoreRole(dir, role string) error {
 	data, _ := json.Marshal(coreRole{Role: role, Since: time.Now().UTC().Truncate(time.Second)})
-	return writeFile(filepath.Join(dir, CoreRoleFile), append(data, '\n'), 0o600)
+	return fsx.WriteFileAtomic(filepath.Join(dir, CoreRoleFile), append(data, '\n'), 0o600, false)
 }
 
 // BoxSecretStore is a box's store of host secrets: sealed files in the

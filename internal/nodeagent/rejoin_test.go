@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
@@ -69,7 +70,7 @@ func TestRejoinMovesTheOldStoresAside(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range []string{coreReceivedFile, filepath.Join(coreMovesDir, testMove+".json")} {
-		if err := writeFile(filepath.Join(dir, f), []byte("{}\n"), 0o600); err != nil {
+		if err := fsx.WriteFileAtomic(filepath.Join(dir, f), []byte("{}\n"), 0o600, false); err != nil {
 			t.Fatal(err)
 		}
 	}
