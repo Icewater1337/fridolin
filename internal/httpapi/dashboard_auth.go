@@ -119,9 +119,11 @@ func (a *DashboardAuth) Logout(w http.ResponseWriter, r *http.Request) {
 // the token from the data dir. With ?tailnet=1 (`fridolin open --tailnet`)
 // the code is for another device of the tailnet: it lasts
 // RemoteLoginCodeLifetime, and the answer has the link at the
-// dashboard's tailnet address, which the dashboard must have.
+// dashboard's tailnet address, which the dashboard must have. Only "1"
+// asks for one: any other value (tailnet=0, tailnet=false) gets the
+// short-lived local code, never the longer-lived remote one by mistake.
 func (a *DashboardAuth) LoginCode(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("tailnet") == "" {
+	if r.URL.Query().Get("tailnet") != "1" {
 		code, exp := a.Sessions().NewCode()
 		WriteJSON(w, http.StatusOK, LoginCodeResponse{Code: code, ExpiresAt: exp})
 		return
