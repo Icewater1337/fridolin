@@ -899,6 +899,22 @@ export interface NodeFSBrowse {
   truncated?: boolean;
 }
 
+/**
+ * What each node call the dashboard makes through POST
+ * /api/nodes/{node}/call answers with, by method.
+ */
+export interface NodeCalls {
+  'fs.roots': NodeFSRoots;
+  'fs.browse': NodeFSBrowse;
+}
+
+/**
+ * What nodeCall resolves with for method M: its NodeCalls entry, each field
+ * optional, as a call that answers with no result gives {}; any for a
+ * method not listed yet (terminal.*).
+ */
+export type NodeCallResult<M extends string> = M extends keyof NodeCalls ? Partial<NodeCalls[M]> : any;
+
 /** GET /api/nodes. */
 export interface NodesResponse {
   /** nodes.enabled as the bridge started. */

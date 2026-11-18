@@ -17,13 +17,12 @@ import { h, mount, paint } from '../lib/dom.js';
 import { fmtBytes } from '../lib/format.js';
 import { filesHref, parentOf, rawHref, siteFileHref, whatsappHref, wikiHref } from '../lib/files.js';
 import { btn, copyButton } from '../components/buttons.js';
-import { deleteFile, historyBox, moveFile, takeEditOnOpen, textEditor } from '../components/file-actions.js';
+import { crumbs, deleteFile, historyBox, moveFile, takeEditOnOpen, textEditor } from '../components/file-actions.js';
 import { icon } from '../components/icons.js';
 import { callout, empty, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { markdownDoc, markdownToc } from '../components/markdown.js';
 
 /** @import { PageModule } from '../app/page.js' */
-/** @import { Child } from '../lib/dom.js' */
 /** @import { MarkdownLinks } from '../components/markdown.js' */
 /** @import { FileRoot, FileRootKind, FileView, SiteSettings } from '../../types/api.js' */
 
@@ -31,23 +30,6 @@ import { markdownDoc, markdownToc } from '../components/markdown.js';
  * The root a file is in; kind '' when the bridge no longer lists it.
  * @typedef {Pick<FileRoot, 'id' | 'label' | 'brain'> & {kind: FileRootKind | '', writable?: boolean}} Root
  */
-
-/**
- * @param {string} rootId
- * @param {string} label
- * @param {string} path
- */
-function crumbs(rootId, label, path) {
-  /** @type {Child[]} */
-  const out = [h('a', { href: '#/files' }, 'Files'), ' / ', h('a', { href: filesHref(rootId, '', true) }, label)];
-  const parts = path.split('/');
-  let acc = '';
-  parts.forEach((seg, i) => {
-    acc = acc ? `${acc}/${seg}` : seg;
-    out.push(' / ', i === parts.length - 1 ? h('span', seg) : h('a', { href: filesHref(rootId, acc, true) }, seg));
-  });
-  return h('nav.files-crumbs', { 'aria-label': 'Folder' }, out);
-}
 
 /**
  * Where a rendered Markdown file's links go, from root.

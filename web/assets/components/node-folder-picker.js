@@ -2,7 +2,7 @@
 // volumes (fs.roots), then folder names below one (fs.browse). The node
 // lists names of folders only, never a file or its content.
 
-import { post } from '../app/api.js';
+import { nodeCall } from '../app/api.js';
 import { h, mount } from '../lib/dom.js';
 import { icon } from './icons.js';
 import { btn } from './buttons.js';
@@ -11,26 +11,7 @@ import { badge, spinner } from './common.js';
 import { fmtBytes } from '../lib/format.js';
 import { errorMessage } from '../lib/errors.js';
 
-/** @import { NodeFSBrowse, NodeFSRoots } from '../../types/api.js' */
-
-/**
- * What each node call this picker makes answers with.
- * @typedef {{'fs.roots': NodeFSRoots, 'fs.browse': NodeFSBrowse}} FolderCalls
- */
-
-/**
- * One call on the node through the dashboard's generic call route; {} when
- * it answers with no result.
- * @template {keyof FolderCalls} M
- * @param {string} node
- * @param {M} method
- * @param {Record<string, unknown>} [params]
- * @returns {Promise<Partial<FolderCalls[M]>>}
- */
-async function nodeCall(node, method, params) {
-  const r = await post(`/api/nodes/${encodeURIComponent(node)}/call`, { method, params: params || {} });
-  return r.result || {};
-}
+/** @import { NodeFSBrowse } from '../../types/api.js' */
 
 /**
  * joinPath joins a folder name to a path in the node's own spelling.
