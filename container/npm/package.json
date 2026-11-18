@@ -4,7 +4,7 @@
   "description": "The npm CLIs of the core image (container/Dockerfile), installed with npm ci from package-lock.json",
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.322",
-    "@openai/codex": "0.167.0",
+    "@openai/codex": "0.167.1",
     "@plaud-ai/cli": "0.3.15"
   }
 }
