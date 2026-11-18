@@ -56,6 +56,9 @@ const defaultPlaudMessage = `Handle it as skills/plaud.md says. Without that ski
 var (
 	errPlaudAuth     = errors.New("the Plaud login expired")
 	errPlaudNotFound = errors.New("the recording is not in Plaud any more")
+	// errPlaudMovedOn: the recording is no longer waiting as the check
+	// read it (its run ended meanwhile, say), so the check leaves it alone.
+	errPlaudMovedOn = errors.New("the recording changed during the check")
 	// plaudRowRe is a row of `plaud files`: the id in the first column,
 	// padded, then two spaces before the name. Only the first column
 	// counts: a name may well contain something that looks like an id.
@@ -850,11 +853,14 @@ func (p *Manager) accountID(ctx context.Context) (string, error) {
 // forward hands one waiting recording to br, whose answer goes to jid, and
 // says what it handed over: nil while Plaud has not finished the
 // transcript. It notes the recording's name in item once Plaud said it.
+// item is the recording as the check read it: errPlaudMovedOn means it
+// is no longer so (see markHanded), and nothing was handed over.
 func (p *Manager) forward(ctx context.Context, cfg *Snapshot, id string, item *plaudPending, br *Target, jid string) (*Forward, error) {
 	fetch := p.fetchCloud
 	if plaudPhoneDir(cfg) != "" {
 		fetch = fetchPhone
 	}
+	read := *item
 	rec, err := fetch(ctx, cfg, id, item)
 	if rec == nil || err != nil {
 		return nil, err
@@ -868,7 +874,7 @@ func (p *Manager) forward(ctx context.Context, cfg *Snapshot, id string, item *p
 	// Marked as handed before the brain gets it, so that a run that ends
 	// at once finds it so.
 	fw := Forward{ID: id, Name: rec.name, Brain: br.ID(), At: time.Now(), Status: plaudRunHanded}
-	if err := p.markHanded(fw); err != nil {
+	if err := p.markHanded(fw, read); err != nil {
 		return nil, err
 	}
 	if err := p.submit(br, jid, "plaud", text, []string{path}, p.runEnded(id)); err != nil {
@@ -1077,20 +1083,36 @@ func phoneRecording(name string, t time.Time, transcript string) *plaudRecording
 }
 
 // markHanded notes that the recording fw.ID is about to go to a brain.
-func (p *Manager) markHanded(fw Forward) error {
-	p.mu.Lock()
-	p.inFlight[fw.ID] = true
-	p.mu.Unlock()
-	return p.update(func(st *plaudState) error {
-		if cur := st.Pending[fw.ID]; cur != nil {
-			cur.Handed, cur.Brain = fw.At, fw.Brain
+// read is the recording as the check read it: when it is no longer
+// waiting so (an earlier hand-off's run ended meanwhile: done, stopped,
+// failed and waiting for its retry, given up; or it was sent again from
+// the dashboard), it changes nothing and returns errPlaudMovedOn.
+func (p *Manager) markHanded(fw Forward, read plaudPending) error {
+	if err := p.update(func(st *plaudState) error {
+		if !st.stillWaiting(fw.ID, read) {
+			return errPlaudMovedOn
 		}
+		cur := st.Pending[fw.ID]
+		cur.Handed, cur.Brain = fw.At, fw.Brain
 		st.Forwarded = append(slices.DeleteFunc(st.Forwarded, func(f Forward) bool { return f.ID == fw.ID }), fw)
 		if len(st.Forwarded) > plaudForwardedKeep {
 			st.Forwarded = st.Forwarded[len(st.Forwarded)-plaudForwardedKeep:]
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.inFlight[fw.ID] = true
+	p.mu.Unlock()
+	return nil
+}
+
+// stillWaiting says whether recording id is waiting as read had it: still
+// pending, and neither handed over nor put off since.
+func (st *plaudState) stillWaiting(id string, read plaudPending) bool {
+	cur := st.Pending[id]
+	return cur != nil && cur.Handed.Equal(read.Handed) && cur.NextTry.Equal(read.NextTry)
 }
 
 // unmarkHanded undoes markHanded for a recording the brain did not take.
@@ -1299,6 +1321,18 @@ func (p *Manager) update(fn func(st *plaudState) error) error {
 	return p.saveState(st)
 }
 
+// movedOn says whether recording id is no longer waiting as read had it
+// (see plaudState.stillWaiting), from state.json as it is now.
+func (p *Manager) movedOn(id string, read plaudPending) (bool, error) {
+	p.stMu.Lock()
+	defer p.stMu.Unlock()
+	st, err := p.loadState()
+	if err != nil {
+		return false, err
+	}
+	return st == nil || !st.stillWaiting(id, read), nil
+}
+
 // newPlaudState is the state before the first sync.
 func newPlaudState() *plaudState {
 	return &plaudState{Version: plaudStateVersion, Pending: map[string]*plaudPending{}}
@@ -1493,11 +1527,25 @@ func (p *Manager) poll(ctx context.Context) error {
 			if running {
 				continue
 			}
+		}
+		// Fetching the recordings before it took time, in which an
+		// earlier hand-off's run may have ended (done, stopped, failed):
+		// st is what the check read before, and its run now decides.
+		if moved, err := p.movedOn(id, item); err != nil {
+			return err
+		} else if moved {
+			continue
+		}
+		if !item.Handed.IsZero() {
 			log.Printf("plaud %s: handed over before a restart and not answered, handing it over again", id)
 		}
 		fw, err := p.forward(ctx, cfg, id, &item, br, jid)
 		if errors.Is(err, errPlaudAuth) {
 			return err
+		}
+		if errors.Is(err, errPlaudMovedOn) {
+			log.Printf("plaud %s: changed during the check (its run ended, say), so not handed over now", id)
+			continue
 		}
 		// brain_access moved the login, or you disconnected, while it was
 		// fetched: what failed may have run with the login in the new home,
@@ -1533,6 +1581,7 @@ func (p *Manager) poll(ctx context.Context) error {
 		case err != nil:
 			failed = append(failed, fmt.Errorf("recording %s (will retry): %w", id, err))
 		}
+		gaveUp := false
 		if err := p.update(func(st *plaudState) error {
 			cur := st.Pending[id]
 			if cur == nil {
@@ -1542,11 +1591,14 @@ func (p *Manager) poll(ctx context.Context) error {
 			switch {
 			case fw != nil:
 				return nil // markHanded noted it; its run decides the rest
+			case !st.stillWaiting(id, item):
+				return nil // an earlier hand-off's run decided meanwhile
 			case why != "":
 				st.GivenUp = append(st.GivenUp, plaudGivenUp{ID: id, Name: item.Name, At: time.Now(), Reason: why})
 				if len(st.GivenUp) > plaudGivenUpKeep {
 					st.GivenUp = st.GivenUp[len(st.GivenUp)-plaudGivenUpKeep:]
 				}
+				gaveUp = true
 			default:
 				cur.Tries++
 				cur.NextTry = time.Now().Add(plaudRetryDelay(cur.Tries))
@@ -1560,7 +1612,7 @@ func (p *Manager) poll(ctx context.Context) error {
 		}
 		// You deleted it yourself; the rest you hear about, since a
 		// recording that never arrives is otherwise easy to miss.
-		if why != "" && !deleted {
+		if gaveUp && !deleted {
 			p.noticeGivenUp(br.ID(), jid, cmp.Or(item.Name, id), why)
 		}
 	}
