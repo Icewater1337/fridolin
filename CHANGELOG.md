@@ -242,6 +242,17 @@ for compatibility.
   so nothing could parse it. It now prints one document,
   `{"check": …, "move": …}` (the pre-flight, and the move's last record,
   left out when the move did not start), and the progress on stderr.
+- **Auto updates of a node no longer stop for good after a core
+  restart.** A core that died during a node's update (an OOM kill, a
+  container's stop timeout, power loss) left it "sending" or
+  "restarting" in `nodes.json`, and auto updates never touched that node
+  again; a core that stopped cleanly during one recorded its version as
+  failed, which auto updates leave alone. Both are now recorded as cut
+  off by the core, and auto tries again when the node next connects. A
+  box that loses its connection while it waits for its updater is no
+  longer taken to have gone back, and a node that comes back on the
+  version of an update recorded as failed is recorded as updated, so
+  `fridolin doctor` stops warning about it.
 - **A note from a conversation reaches you once.** When a call's reply
   was not heard (they hung up, or its speech failed), the turn after it
   could pass the same note on again. Fridolin now remembers the notes

@@ -466,6 +466,93 @@ func TestPlaudBacklogTricklesInAsRunsEnd(t *testing.T) {
 	}
 }
 
+// A recording whose run ends while a check works through the recordings
+// before it is not handed over again from the check's copy of the state:
+// done or stopped it stays seen, and the card says how its run went;
+// failed it waits for its retry delay (#673).
+func TestPlaudRunEndingDuringACheckIsNotHandedOverAgain(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		runErr error
+		status string
+		// ownFetch: the run ends while the check fetches the recording
+		// itself, which it took for one handed over before a restart.
+		ownFetch bool
+	}{
+		{"done", nil, plaudRunDone, false},
+		{"stopped", context.Canceled, plaudRunStopped, false},
+		{"failed", errors.New("the run failed"), plaudRunFailed, false},
+		{"done during its own fetch", nil, plaudRunDone, true},
+		{"failed during its own fetch", errors.New("the run failed"), plaudRunFailed, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb, fp := plaudService(t, "")
+			rec := &plaudServiceRecorder{}
+			tb.plaud.submit = rec.submit
+			plaudServiceSignIn(t, tb)
+			// waiting is older, so the check fetches it first; running was
+			// handed to the brain before, and its run has not ended.
+			waiting, running := servicePlaudOld2, servicePlaudNew
+			first := time.Now().Add(-time.Hour)
+			st := plaudServiceSeededState("u_1", servicePlaudOld1)
+			st.Pending[waiting] = &plaudPending{FirstSeen: first}
+			st.Pending[running] = &plaudPending{FirstSeen: first.Add(time.Minute), Handed: first.Add(2 * time.Minute), Brain: "p"}
+			st.Forwarded = []Forward{{ID: running, Brain: "p", At: first.Add(2 * time.Minute), Status: plaudRunHanded}}
+			if err := tb.plaud.saveState(st); err != nil {
+				t.Fatal(err)
+			}
+			fetchedWhenItEnds := running
+			if !c.ownFetch {
+				fetchedWhenItEnds = waiting
+				tb.plaud.mu.Lock()
+				tb.plaud.inFlight[running] = true
+				tb.plaud.mu.Unlock()
+			}
+			fp.Files(running, waiting, servicePlaudOld1)
+			fp.Recording(waiting, true)
+			fp.Recording(running, true)
+			run := tb.plaud.run
+			ended := false
+			tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
+				if !ended && len(args) == 2 && args[0] == "file" && args[1] == fetchedWhenItEnds {
+					ended = true
+					tb.plaud.runEnded(running)(c.runErr)
+				}
+				return run(ctx, args...)
+			}
+			if err := tb.plaud.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if !ended {
+				t.Fatalf("the check did not fetch %s", fetchedWhenItEnds)
+			}
+			rec.mu.Lock()
+			handed := slices.Clone(rec.handed)
+			rec.mu.Unlock()
+			if !slices.Equal(handed, []string{waiting}) {
+				t.Errorf("handed over %v, want only %s", handed, waiting)
+			}
+			st, err := tb.plaud.loadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fw := st.forwardOf(running); fw == nil || fw.Status != c.status {
+				t.Errorf("card entry = %+v, want status %s", fw, c.status)
+			}
+			cur := st.Pending[running]
+			if c.runErr == nil || c.status == plaudRunStopped {
+				if cur != nil || !slices.Contains(st.Seen, running) {
+					t.Errorf("pending %+v, seen %v: want it seen", cur, st.Seen)
+				}
+				return
+			}
+			if cur == nil || !cur.Handed.IsZero() || !cur.NextTry.After(time.Now()) {
+				t.Errorf("pending %+v: want it waiting for its retry delay", cur)
+			}
+		})
+	}
+}
+
 // The first sync remembers every page of recordings, oldest first, so
 // that trimming the list drops the oldest.
 func TestPlaudFirstSyncReadsEveryPage(t *testing.T) {
