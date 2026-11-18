@@ -348,10 +348,6 @@ func DecodeBundle(data []byte) (map[string]string, string, error) {
 	return b.Secrets, b.From, nil
 }
 
-func encodeBundle(from string, secrets map[string]string) ([]byte, error) {
-	return json.Marshal(bundle{V: Version, From: from, Secrets: secrets})
-}
-
 // ── receiving ─────────────────────────────────────────────────────────────
 
 // ReceiveOptions are the receiver's.
@@ -478,27 +474,13 @@ func Receive(ctx context.Context, o ReceiveOptions) (res Result, err error) {
 	if err != nil {
 		return res, c.fail(errors.New("the bundle is not base64"))
 	}
-	r, err := age.Decrypt(bytes.NewReader(ct), id)
-	if err != nil {
-		return res, c.fail(fmt.Errorf("decrypting the bundle: %w", err))
-	}
-	plain, err := io.ReadAll(io.LimitReader(r, maxMessage))
-	if err != nil {
-		return res, c.fail(fmt.Errorf("decrypting the bundle: %w", err))
-	}
-	secrets, from, err := DecodeBundle(plain)
-	clear(plain)
+	secrets, _, _, from, err := OpenBundleFiles(ct, id)
 	if err != nil {
 		return res, c.fail(err)
 	}
 	res.From = from
-	for name := range secrets {
-		if !slices.Contains(o.Allowed, name) {
-			return res, c.fail(fmt.Errorf("the bundle holds %s, which this machine does not take", name))
-		}
-	}
 	storing = true
-	res.Stored, res.Unchanged, err = storeAll(o.Store, secrets, o.Replace)
+	res.Stored, res.Unchanged, err = StoreBundle(o.Store, secrets, o.Allowed, o.Replace)
 	if err != nil {
 		return res, c.fail(err)
 	}
@@ -642,8 +624,7 @@ func Send(ctx context.Context, o SendOptions) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	recipient, err := age.ParseHybridRecipient(hello.Pub)
-	if err != nil {
+	if _, err := age.ParseHybridRecipient(hello.Pub); err != nil {
 		return res, c.fail(errors.New("the receiver's key is not a post-quantum age key: update fridolin on the receiving machine"))
 	}
 	id, err := age.GenerateX25519Identity()
@@ -668,24 +649,11 @@ func Send(ctx context.Context, o SendOptions) (Result, error) {
 		}
 		return res, ErrNotConfirmed
 	}
-	plain, err := encodeBundle(o.From, o.Secrets)
+	ct, err := SealBundleFiles(o.From, o.Secrets, nil, "", hello.Pub)
 	if err != nil {
 		return res, err
 	}
-	var ct bytes.Buffer
-	w, err := age.Encrypt(&ct, recipient)
-	if err != nil {
-		return res, err
-	}
-	_, err = w.Write(plain)
-	clear(plain)
-	if err == nil {
-		err = w.Close()
-	}
-	if err != nil {
-		return res, err
-	}
-	if err := c.send(message{Type: msgBundle, Data: base64.StdEncoding.EncodeToString(ct.Bytes())}); err != nil {
+	if err := c.send(message{Type: msgBundle, Data: base64.StdEncoding.EncodeToString(ct)}); err != nil {
 		return res, err
 	}
 	done, err := c.read(msgDone)

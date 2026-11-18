@@ -327,7 +327,7 @@ func TestCoreSecretsReceiveRefusesUnknownNames(t *testing.T) {
 	if perr != nil {
 		t.Fatal(perr)
 	}
-	ct, err := secretxfer.SealBundle("mini", map[string]string{hostsecrets.ClaudeOAuthToken: "test-oauth-test", hostsecrets.TailscaleAuthKey: "tskey-auth-test"}, offer.Recipient)
+	ct, err := secretxfer.SealBundleFiles("mini", map[string]string{hostsecrets.ClaudeOAuthToken: "test-oauth-test", hostsecrets.TailscaleAuthKey: "tskey-auth-test"}, nil, "", offer.Recipient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestCoreSecretsReceiveRefusesUnknownNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	offer, _ = callCore[nodeproto.CoreSecretsOffer](t, dst, nodeproto.MethodCoreSecretsOffer, nodeproto.CoreSecretsOfferParams{Move: testMove})
-	ct, _ = secretxfer.SealBundle("mini", map[string]string{hostsecrets.ClaudeOAuthToken: "test-oauth-new"}, offer.Recipient)
+	ct, _ = secretxfer.SealBundleFiles("mini", map[string]string{hostsecrets.ClaudeOAuthToken: "test-oauth-new"}, nil, "", offer.Recipient)
 	if _, perr = callCore[nodeproto.CoreSecretsReceived](t, dst, nodeproto.MethodCoreSecretsReceive, nodeproto.CoreSecretsReceiveParams{Move: testMove, From: "4f1e2d3c4b5a", Ciphertext: ct}); perr == nil {
 		t.Fatal("a different value replaced the stored one without replace")
 	}
