@@ -33,6 +33,14 @@ func (c *clock) Advance(d time.Duration) {
 	c.t = c.t.Add(d)
 }
 
+// Set moves the clock to t, in t's zone, as time.Now reads it in a
+// process whose local zone that is.
+func (c *clock) Set(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = t
+}
+
 // start is the fake clock's first instant: mid-month, so "the current
 // month" is stable across a few days of advancing.
 var start = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)

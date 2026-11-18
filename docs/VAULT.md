@@ -44,10 +44,11 @@ cold file with its hash for a rebuild, goes up at most every ten minutes
 and when the vault stops. Files then leave the hot tier by the
 policy of PLAN.md: pinned files (`config.json`, `secrets/`, every
 `brain.json`, `brain-prompt.md`, `skills/`, `memories/**/*.md`,
-`conversation-history.jsonl`, this month's `audit/`) never; a recording or
-other binary in `media/` as soon as its transcript or summary exists
-beside it (`<name>.transcript.md`, `<name>.md`, `<name>.txt`, …);
-documents after `activity_days` unused; a binary without any markdown
+`conversation-history.jsonl`, this month's `audit/`, by the UTC month
+the audit log names its files with) never; a recording or other binary
+in `media/` as soon as its transcript or summary exists beside it
+(`<name>.transcript.md`, `<name>.md`, `<name>.txt`, …); documents
+after `activity_days` unused; a binary without any markdown
 companion only after `cold_after_days`; past months of `audit/` and
 archived workspaces at once; and, while the hot tier is over its budget
 less the headroom, whatever was used longest ago. A file is deleted from

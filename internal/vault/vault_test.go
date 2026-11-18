@@ -173,6 +173,31 @@ func TestEvictWritesColdListingAndKeepsData(t *testing.T) {
 	}
 }
 
+// Just after local midnight on the 1st east of UTC, the audit log still
+// writes the UTC month's file: eviction must leave it on disk, or the next
+// line starts a new file that the next sync uploads over the month (#668).
+func TestEvictKeepsTheLiveAuditFileAroundTheMonthChange(t *testing.T) {
+	f := newFixture(t)
+	f.clock.Set(time.Date(2026, 12, 1, 0, 30, 0, 0, time.FixedZone("CET", 3600)))
+	f.write("audit/2026-11.jsonl", "november", 0)
+	f.write("audit/2026-10.jsonl", "october", nDays(31))
+	f.sync()
+	ev := f.evict()
+	var evicted []string
+	for _, e := range ev.Evicted {
+		evicted = append(evicted, e.Path)
+	}
+	if !slices.Equal(evicted, []string{"audit/2026-10.jsonl"}) {
+		t.Fatalf("evicted %v, want only last month's audit file", evicted)
+	}
+	if got, ok := f.read("audit/2026-11.jsonl"); !ok || got != "november" {
+		t.Fatalf("the live audit file on disk: %q, %v", got, ok)
+	}
+	if e := f.entry("audit/2026-11.jsonl"); e.Tier != TierBoth || !e.Pinned || e.Class != ClassPinned {
+		t.Fatalf("the live audit file: %+v", e)
+	}
+}
+
 func TestEvictRefusesWhenTheColdCopyIsWrong(t *testing.T) {
 	f := newFixture(t)
 	f.write("documents/a.md", "the real bytes", nDays(100))

@@ -70,6 +70,40 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// The audit log names its files by the UTC month, so around the month
+// change a process east or west of UTC must still keep the file the log
+// writes now, and may let go of the one it no longer writes (#668).
+func TestClassifyAuditMonthIsTheUTCMonth(t *testing.T) {
+	p := DefaultPolicy()
+	cet := time.FixedZone("CET", 3600)
+	cest := time.FixedZone("CEST", 2*3600)
+	est := time.FixedZone("EST", -5*3600)
+	cases := []struct {
+		name   string
+		now    time.Time
+		path   string
+		class  Class
+		reason string
+	}{
+		// East of UTC, after local midnight on the 1st: still November in UTC.
+		{"east: the live file", time.Date(2026, 12, 1, 0, 30, 0, 0, cet), "audit/2026-11.jsonl", ClassPinned, ReasonAuditCurrent},
+		{"east: next month", time.Date(2026, 12, 1, 0, 30, 0, 0, cet), "audit/2026-12.jsonl", ClassPinned, ReasonAuditCurrent},
+		{"east: the month before", time.Date(2026, 12, 1, 0, 30, 0, 0, cet), "audit/2026-10.jsonl", ClassColdEligible, ReasonAuditPast},
+		{"east in summer: the live file", time.Date(2026, 7, 1, 1, 30, 0, 0, cest), "audit/2026-06.jsonl", ClassPinned, ReasonAuditCurrent},
+		{"east over the year: the live file", time.Date(2027, 1, 1, 0, 30, 0, 0, cet), "audit/2026-12.jsonl", ClassPinned, ReasonAuditCurrent},
+		{"east, month folder: the live file", time.Date(2026, 12, 1, 0, 30, 0, 0, cet), "audit/2026-11/thread.jsonl", ClassPinned, ReasonAuditCurrent},
+		// West of UTC, before local midnight: already December in UTC.
+		{"west: the live file", time.Date(2026, 11, 30, 20, 0, 0, 0, est), "audit/2026-12.jsonl", ClassPinned, ReasonAuditCurrent},
+		{"west: the month the log left", time.Date(2026, 11, 30, 20, 0, 0, 0, est), "audit/2026-11.jsonl", ClassColdEligible, ReasonAuditPast},
+	}
+	for _, c := range cases {
+		d := p.Classify(Facts{Path: c.path, LastAccess: c.now}, c.now)
+		if d.Class != c.class || d.Reason != c.reason || d.Pinned != (c.class == ClassPinned) {
+			t.Errorf("%s: Classify(%s at %s) = %+v, want %s/%s", c.name, c.path, c.now.Format(time.RFC3339), d, c.class, c.reason)
+		}
+	}
+}
+
 func TestDefaultCompanions(t *testing.T) {
 	got := DefaultCompanions("media/2026-10-01 - call.m4a")
 	want := map[string]bool{"media/2026-10-01 - call.txt": true, "media/2026-10-01 - call.md": true, "media/2026-10-01 - call.m4a.md": true}
