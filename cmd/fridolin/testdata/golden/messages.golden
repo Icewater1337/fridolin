@@ -31,6 +31,7 @@ helpReply("")
 	• `!approve`, `!deny` — owner only, direct chat: approve, or turn down, what waits for you (a poll asks which when several wait)
 	• `!revoke <ref>` — owner only, direct chat: shut a node out
 	• `!unblock <number>` — owner only, direct chat: let me hear someone again whom I stopped listening to in an errand
+	• `!undo <run>` — owner only, direct chat: put back the files a run changed in its brain's folder (`!undo` lists the runs)
 helpReply("@claude")
 	🤖 *Fridolin*
 
@@ -48,6 +49,7 @@ helpReply("@claude")
 	• `!approve`, `!deny` — owner only, direct chat: approve, or turn down, what waits for you (a poll asks which when several wait)
 	• `!revoke <ref>` — owner only, direct chat: shut a node out
 	• `!unblock <number>` — owner only, direct chat: let me hear someone again whom I stopped listening to in an errand
+	• `!undo <run>` — owner only, direct chat: put back the files a run changed in its brain's folder (`!undo` lists the runs)
 
 	In this group, start your message with `@claude` or reply to one of mine to address me, commands included.
 queuedNotice(2)
@@ -136,9 +138,9 @@ fleetReply(true, nodes)
 nodesOffNotice
 	🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md).
 ownerCommandGroupNotice
-	🔒 !join, !dashboard, !approve, !deny, !revoke and !movecore answer only in the owner's direct chat.
+	🔒 !join, !dashboard, !approve, !deny, !revoke, !movecore, !unblock and !undo answer only in the owner's direct chat.
 ownerCommandOwnerOnly
-	🔒 Only the owner can ask for join codes and sign-in links, approve and turn things down, or move the core.
+	🔒 Only the owner can ask for join codes and sign-in links, approve and turn things down, move the core, or undo a run.
 ownerCommandRateLimited
 	⏳ !join answered 5 times in the last hour, the most allowed. Try again later, or use the dashboard.
 nodeCommandUsage
@@ -720,6 +722,47 @@ notBlockedReply
 	❓ +15551234567 is not blocked, so nothing changed.
 unblockUsage
 	🔓 `!unblock <number>`, with the country code, lets Fridolin hear someone it stopped listening to in an errand.
+undoUsage
+	⏪ `!undo` lists the runs that changed files in their brain's folder; `!undo <run>` shows what putting one back would do, and `!undo <run> yes` does it.
+undoListReply(none)
+	⏪ No run changed files in its brain's folder in the last 14 days.
+undoListReply
+	⏪ *Runs that changed files*, newest first:
+
+	• `rAb12Cd34Ef5` — taxes, 12 min ago
+	  1 created, 2 changed: drafts/2025.md, notes.md and 1 more
+	• `rXy98Zw76Vu5` — home, 26 h ago, undone
+	  1 deleted: shopping.md
+
+	Send `!undo <run>` to see what putting one back would do.
+undoPlanReply
+	⏪ Run `rAb12Cd34Ef5` of taxes ended 12 min ago and changed 4 files. Undoing it would:
+	• move drafts/2025.md to the folder's trash (the run created it)
+	• write back notes.md as it was
+	• bring back shopping.md (the run deleted it)
+	• leave summary.md: it changed since the run
+
+	Send `!undo rAb12Cd34Ef5 yes` to do it.
+undoPlanReply(nothing)
+	⏪ Run `rAb12Cd34Ef5` of taxes ended 3 h ago and changed 2 files. It was undone 1 h ago by 15551234567. There is nothing to put back:
+	• leave notes.md: it is as it was before the run
+	• leave drafts/2025.md: it is gone already
+undoDoneReply
+	✅ Run `rAb12Cd34Ef5` is undone: 1 file written back, 1 file moved to the folder's trash (.fridolin-trash, where they stay until you empty it).
+
+	Left as they are, as they changed since the run:
+	• summary.md: it changed since the run
+undoDoneReply(failed)
+	⚠️ Run `rAb12Cd34Ef5` is partly undone: 0 files written back, 0 files moved to the folder's trash (.fridolin-trash, where they stay until you empty it).
+
+	Could not be put back:
+	• notes.md: permission denied
+undoNoRecordReply
+	❓ There is no record of files run `rAb12Cd34Ef5` changed: it changed none, ended more than 14 days ago, or is no run. `!undo` lists the runs that did.
+undoRunningReply
+	⏳ Run `rAb12Cd34Ef5` has not ended yet. Undo it once it has.
+undoNotRecordedReply
+	❓ The files of run `rAb12Cd34Ef5` were not recorded (its folders hold more than 20000 files), so there is nothing to put back.
 errandCallDraft
 	📞 Fridolin would call Alex (+15551234567) and open with:
 

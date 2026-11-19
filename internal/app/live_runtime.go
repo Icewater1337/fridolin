@@ -470,6 +470,7 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 	m := spec.Message
 	run := runInfoFor(spec.ID, m)
 	run.Policy = pol
+	run.Slot = spec.Slot
 	if pol != nil {
 		run.ID = pol.ID
 	}
