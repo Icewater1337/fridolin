@@ -28,6 +28,8 @@ export function outcomeBadge(outcome) {
   if (o === 'ok' || o === 'approved' || o === 'answered') return badge(o, 'ok');
   if (o === 'running' || o === 'pending') return badge(o, 'info');
   if (o === 'stopped' || o === 'expired' || o.startsWith('ignored') || o === 'draft shown') return badge(o, 'neutral');
+  // A scheduled agent's run that found nothing, or whose gate kept the brain asleep.
+  if (o === 'nothing' || o === 'gated') return badge(o, 'neutral');
   if (o.startsWith('refused') || o.startsWith('lockdown')) return badge(o, 'warn');
   return badge(o, 'bad');
 }

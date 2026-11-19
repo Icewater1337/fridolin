@@ -54,5 +54,7 @@
   "schedules": {},
   "fride": {},
   "connections": {},
-  "calls": {}
+  "calls": {},
+  "run_files": {},
+  "whatsapp": {}
 }

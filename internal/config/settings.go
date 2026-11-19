@@ -74,6 +74,13 @@ type Live struct {
 	Fride                      FrideConfig
 	Connections                ConnectionsConfig
 	Calls                      CallsConfig
+	RunFiles                   RunFilesSettings
+	WhatsApp                   WhatsAppSettings
+}
+
+// WhatsAppSettings is WhatsAppConfig resolved.
+type WhatsAppSettings struct {
+	Presence bool
 }
 type QueueSettings struct {
 	Mode       QueueMode
@@ -169,6 +176,8 @@ func liveOf(c *File) Live {
 		Fride:                      c.Fride,
 		Connections:                c.Connections,
 		Calls:                      c.Calls,
+		RunFiles:                   runFilesSettingsOf(c.RunFiles),
+		WhatsApp:                   WhatsAppSettings{Presence: *c.WhatsApp.Presence},
 	}
 }
 func queueSettingsOf(c QueueConfig) QueueSettings {
@@ -286,6 +295,8 @@ func fileOf(c Live) File {
 		Fride:                      c.Fride,
 		Connections:                c.Connections,
 		Calls:                      c.Calls,
+		RunFiles:                   runFilesConfigOf(c.RunFiles),
+		WhatsApp:                   WhatsAppConfig{Presence: new(c.WhatsApp.Presence)},
 	}
 }
 func queueConfigOf(c QueueSettings) QueueConfig {

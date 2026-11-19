@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/audit"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -373,6 +374,50 @@ func (g leaseGate) SendPoll(ctx context.Context, jid, q string, opts []string, m
 		return "", errLeaseLost
 	}
 	return g.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
+}
+
+func (g leaseGate) SendFile(ctx context.Context, jid string, f chat.File) error {
+	if g.lost() {
+		return errLeaseLost
+	}
+	return g.Messenger.SendFile(ctx, jid, f)
+}
+
+// Typing is outbound.Presence's, where the messenger has it; without,
+// it shows nothing.
+func (g leaseGate) Typing(ctx context.Context, jid string, on bool) error {
+	p, ok := g.Messenger.(outboundmsg.Presence)
+	if !ok {
+		return nil
+	}
+	if g.lost() {
+		return errLeaseLost
+	}
+	return p.Typing(ctx, jid, on)
+}
+
+// MarkRead is outbound.Presence's, as Typing.
+func (g leaseGate) MarkRead(ctx context.Context, jid string, ids []string) error {
+	p, ok := g.Messenger.(outboundmsg.Presence)
+	if !ok {
+		return nil
+	}
+	if g.lost() {
+		return errLeaseLost
+	}
+	return p.MarkRead(ctx, jid, ids)
+}
+
+// MarkPlayed is outbound.Presence's, as Typing.
+func (g leaseGate) MarkPlayed(ctx context.Context, jid string, ids []string) error {
+	p, ok := g.Messenger.(outboundmsg.Presence)
+	if !ok {
+		return nil
+	}
+	if g.lost() {
+		return errLeaseLost
+	}
+	return p.MarkPlayed(ctx, jid, ids)
 }
 
 // ── the tailnet ───────────────────────────────────────────────────────────

@@ -384,6 +384,10 @@ func (b *App) deliverRun(br *brainruntime.Brain, m brainruntime.Inbound, res cla
 		return
 	}
 	b.pipeline.Finished(br, m, res)
+	if res.Err == nil && len(m.Media) > 0 {
+		// The run listened to the voice notes among its files.
+		b.markRead(br, m, true)
+	}
 }
 
 // workingNotice tells a chat that a run is at work on its message; a

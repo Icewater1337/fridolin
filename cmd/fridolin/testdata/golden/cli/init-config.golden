@@ -38,6 +38,7 @@
   },
   "policy": {},
   "queue": {},
+  "run_files": {},
   "sandbox": {
     "allow_paths": [],
     "deny_paths": [],
@@ -56,5 +57,6 @@
     "enabled": false
   },
   "version": 3,
-  "viewer": false
+  "viewer": false,
+  "whatsapp": {}
 }

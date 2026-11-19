@@ -10,6 +10,88 @@ for compatibility.
 
 ### Added
 
+- **Each run keeps a record of the files it changed.** As a brain run
+  starts and ends, the bridge walks the brain's folder and keeps what
+  the run created, changed and deleted, with the earlier contents, in
+  `run-files/` of the data dir (one store under SHA-256 shared by all
+  runs, so an unchanged file is stored once), and writes an audit line
+  of kind `run_files`. The bridge's own files, `.git/`, what
+  `backup.exclude` and `.gitignore` leave out and secret files stay out;
+  a folder over `run_files.max_files` (20000) or `max_mb` (1024) is not
+  walked, and the record says so. New `run_files` settings (`enabled`,
+  `max_files`, `max_mb`, `keep_days` 14, `max_store_mb` 4096); the
+  housekeeping job prunes the records. No snapshot, Drive backup or
+  core export takes `run-files/`.
+  [docs/BRAINS.md](docs/BRAINS.md#what-a-run-changed)
+- **Calls say how they ended, and fall back to messages.** A call's
+  audit line now says whether it was `declined`, had `no_answer`, was
+  `hung_up` or `failed`, and why. An errand call they decline no longer
+  ends the errand: its message goes to them as a message instead. A call
+  that fails (WhatsApp's server refuses it, or the audio never starts)
+  tells you it failed instead of that they did not pick up. When no sound
+  comes from the other side in the first five seconds, Fridolin says it
+  cannot hear them, hangs up and writes instead: an errand goes on by
+  message, and your own call ends with a note in the chat.
+  [docs/CALLS.md](docs/CALLS.md)
+- **Gates for scheduled agents: a cheap check decides whether the brain
+  wakes.** An agent's file may name a `gate`, a program that runs before
+  each brain run, in the brain's sandbox with no token of a run, or on a
+  node through its exec. Its last line of output is JSON: `{"wake":
+  false}` ends the run as *gated*, with no model run; `{"wake": true,
+  "data": {...}}` starts the brain run with the data in its task. A gate
+  that times out (30 s by default), writes more than 1 MiB, exits
+  non-zero or gives no decision fails the run. Checks like "anything new
+  in the inbox?" can now run every few minutes almost for free. The gate
+  is approved with the agent; the Schedules page shows it and the gated
+  runs. [docs/BRAINS.md](docs/BRAINS.md#gates)
+- **Brains send files into their chat.** A run that answers someone in
+  a WhatsApp chat has a new tool, `reply_file(path, caption, as)`: it
+  sends a file of the brain's folder, media inbox or temp folder into
+  that chat as an image (JPEG or PNG, with a preview), a document or a
+  voice note, at most `max_media_mb`. Audio such as `elevenlabs_speak`'s
+  MP3 becomes a voice note with ffmpeg when it is installed, and goes as
+  a document when it is not. The bridge keeps a copy in
+  `<data_dir>/outbox-files/` and sends it through the outbox like any
+  reply, with its retries and its hour; no snapshot or core export
+  takes the copy. A write action: refused in a lockdown and for a run
+  whose risk level is `read`, and a caption that looks like a secret
+  needs your approval, as for the other outbound tools. Going back to
+  an older version while a file waits in the outbox sends its caption,
+  not the file. [docs/BRAINS.md](docs/BRAINS.md#sending-files)
+- **A brain's page shows its live session.** For a brain with
+  `"live_session": "owner_dm"`, *Current run* now says whether the session
+  is ready (since when, and its turns), in a turn, starting, not running,
+  or did not come up, with why and when the bridge tries again; and when
+  the bridge's settings rule a session out (Codex,
+  `dangerously_skip_permissions` off, `inherit_claude_user_config` on), it
+  says so instead of every message quietly running `claude -p`. The same
+  is in `/api/status` and `/api/brains/{id}` (`runtime.live`), and
+  `fridolin check` says of each such brain whether a session can start.
+  [docs/BRAINS.md](docs/BRAINS.md#live-session)
+- **A scheduled agent's run that a restart cut short runs once more.**
+  An update or crash in the middle of a scheduled agent's brain run no
+  longer loses it until its next time, often a day or a week later. A
+  run cut short before it sent anything runs once more when the bridge
+  is back ("retried after restart" on the Schedules page), told to check
+  first what the cut run already did and not to repeat it. Only once,
+  and only while the approved agent is unchanged and runs on its
+  schedule. `"retry_interrupted": false` in an agent's file (or *Cut
+  short by a restart* in the wizard) keeps the old behaviour, for an
+  agent whose side effects cannot be checked afterwards. A run cut short
+  counts as no failure in system_status's `consecutive_failures`. The
+  runs of a stopping bridge now end as *interrupted*, not *stopped*.
+  [docs/BRAINS.md](docs/BRAINS.md#scheduled-agents)
+- **Fridolin types while it works and reads what it took.** While a
+  brain works on a message, its chat shows "typing…", and once a brain
+  took a message it is marked read (blue ticks), a voice note played
+  once its run answered. The bridge shows itself online when it
+  connects, which WhatsApp wants before it shows typing. Untagged
+  chatter, files handed in, scheduled runs and delegated tasks show
+  none of it. New setting `whatsapp.presence` (default on) turns it all
+  off, and `"presence": false` in a brain's brain.json for that brain's
+  chats; turn it off if the bridge is linked to your own number, whose
+  phone may hold back notifications while a linked device is online.
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md#whatsapppresence)
 - **A secret does not leave in a tool call without your yes.** The
   bridge's tools that send text off the machine (`contact_person`,
   `errand_answer`, `errand_contact`'s brief, `elevenlabs_speak`,
@@ -177,6 +259,20 @@ for compatibility.
 
 ### Changed
 
+- **A brain's calendar writes follow the policy.** `fridolin calendar
+  create` and `delete` are now refused in a run whose risk level is
+  `read` and in a lockdown, as the bridge's own tools that write are. An
+  invitation Google emails (`create --attendees …` without
+  `--send-updates none`) and deleting an event with other attendees need
+  your yes first: the brain asks with `request_approval` and passes the
+  id as `--approval-id` (in the API, `approval_id` in the event and
+  `?approval_id=` on the delete), and so does an event with attendees
+  whose text looks like a secret. Before a delete the bridge asks Google
+  for the event, to see its attendees. Each write is a `calendar_write`
+  line in the audit log, without the event's title or attendees. A
+  brain's own script that created events with attendees through
+  `/brain/calendar/events` now gets `403` until it passes an approval or
+  `"send_updates": "none"`. [docs/CALENDAR.md](docs/CALENDAR.md#what-a-brains-calendar-writes-need)
 - **A box needs a signed-in `gh` to start.** `box.sh` and `box.ps1` went on
   without checking the images' build provenance when `gh` was missing or
   not signed in, and when they did check, took an image built from any

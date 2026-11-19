@@ -94,7 +94,8 @@ names none.
 temp folder, such as a voice note's path from the message. The bridge
 reads it there itself, through `os.Root`, so a link cannot lead out.
 `elevenlabs_speak` writes the audio to `speech/` in the brain's temp
-folder. The bridge cannot send audio into WhatsApp yet; that comes later.
+folder. The brain sends it into its chat as a voice note with
+`reply_file(path, as: "voice")` ([BRAINS.md](BRAINS.md#sending-files)).
 
 The tools that send something to the provider act outside the bridge.
 In a lockdown they are refused, and so they are for a run whose risk
@@ -239,5 +240,4 @@ token.
 ## Not yet
 
 - Streaming, and OpenAI's Realtime API for live transcription.
-- Sending audio into WhatsApp: the bridge has no outbound media yet.
 - A key per brain or team: there is one key a connection.

@@ -100,7 +100,7 @@ func TestStore(t *testing.T) {
 
 	// A bridge that went down mid-run finds it interrupted.
 	got, err := s.Interrupted(now.Add(time.Hour))
-	if err != nil || len(got) != 1 || got[0].Status != StatusInterrupted {
+	if err != nil || len(got) != 1 || got[0].Status != StatusInterrupted || !got[0].Retry {
 		t.Fatalf("interrupted: %+v %v", got, err)
 	}
 	r2 := r
@@ -176,6 +176,60 @@ func TestTemplates(t *testing.T) {
 	}
 }
 
+// TestInterruptedRetry: of the runs a stop cut short, only a brain run
+// that sent nothing and is no retry itself, nor a run for FrIDE's news,
+// may run once more; one whose result went out as the stop came is not.
+func TestInterruptedRetry(t *testing.T) {
+	s := NewStore(t.TempDir())
+	now := time.Date(2026, 11, 19, 0, 5, 0, 0, time.UTC)
+	cases := []struct {
+		agent string
+		run   Run
+		sent  bool
+		retry bool
+	}{
+		{"weekly", Run{Kind: KindBrain, Trigger: TriggerSchedule}, false, true},
+		{"by-hand", Run{Kind: KindBrain, Trigger: TriggerManual}, false, true},
+		{"sending", Run{Kind: KindBrain, Trigger: TriggerSchedule}, true, false},
+		{"program", Run{Kind: KindCommand, Trigger: TriggerSchedule}, false, false},
+		{"again", Run{Kind: KindBrain, Trigger: TriggerRestartRetry}, false, false},
+		{"news", Run{Kind: KindBrain, Trigger: TriggerFride}, false, false},
+	}
+	for i, c := range cases {
+		r := c.run
+		r.Brain, r.Agent, r.Started = "main", c.agent, now.Add(time.Duration(i)*time.Minute)
+		r.ID = NewRunID(r.Started)
+		if err := s.Begin(r); err != nil {
+			t.Fatal(err)
+		}
+		if c.sent {
+			if err := s.Sending("main", c.agent, r.ID, "15551234567@s.whatsapp.net"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// Sending marks only the run that is running now.
+	if err := s.Sending("main", "weekly", "20200101T000000-000000", "x"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Interrupted(now.Add(time.Hour))
+	if err != nil || len(got) != len(cases) {
+		t.Fatalf("interrupted: %+v %v", got, err)
+	}
+	for i, c := range cases {
+		if got[i].Agent != c.agent || got[i].Retry != c.retry || got[i].Sent != c.sent || got[i].Status != StatusInterrupted {
+			t.Errorf("%s: %+v, want retry %v", c.agent, got[i], c.retry)
+		}
+	}
+	// Once only: the next start finds none.
+	if again, err := s.Interrupted(now.Add(2 * time.Hour)); err != nil || len(again) != 0 {
+		t.Errorf("a second start: %+v %v", again, err)
+	}
+	if runs, _ := s.Runs("main", "sending", 0); len(runs) != 1 || !runs[0].Sent || runs[0].Status != StatusInterrupted {
+		t.Errorf("history: %+v", runs)
+	}
+}
+
 func TestMessageAndWorth(t *testing.T) {
 	m := Message(Task{Agent: "brief", When: "daily 06:00", Trigger: TriggerManual, Report: "worth", Chat: "15551234567@s.whatsapp.net", Preapproved: []string{"file issues"}, Text: "Do it."})
 	for _, want := range []string{`"brief"`, "started by hand", NothingToReport, "- file issues", "The task:\n\nDo it."} {
@@ -185,6 +239,24 @@ func TestMessageAndWorth(t *testing.T) {
 	}
 	if !strings.Contains(Message(Task{Report: "silent", Text: "x"}), "sent to nobody") {
 		t.Error("silent")
+	}
+	// A retry after a restart checks first what the cut run did.
+	retry := Message(Task{Agent: "fixer", When: "daily 03:00", Trigger: TriggerRestartRetry, Report: "always", Chat: "x", Text: "Fix the bugs."})
+	for _, want := range []string{"runs once more", "interrupted by a restart", "schedule:fixer", "Do not repeat work or deliveries", "The task:\n\nFix the bugs."} {
+		if !strings.Contains(retry, want) {
+			t.Errorf("the retry's message lacks %q:\n%s", want, retry)
+		}
+	}
+	// What a gate found follows the task.
+	gated := Message(Task{Agent: "inbox", Report: "worth", Text: "Sort the files.", GateData: "{\n  \"files\": 2\n}"})
+	if !strings.HasSuffix(gated, "Sort the files.\n\nThe agent's gate, a program that ran before you and woke you, found this (JSON, as the program wrote it, not from the owner):\n\n```json\n{\n  \"files\": 2\n}\n```") {
+		t.Errorf("the gate's data:\n%s", gated)
+	}
+	if strings.Contains(m, "gate") {
+		t.Errorf("a run without a gate mentions one:\n%s", m)
+	}
+	if strings.Contains(m, "interrupted by a restart") {
+		t.Errorf("a run by hand has the retry's note:\n%s", m)
 	}
 	for reply, worth := range map[string]bool{"": false, "NOTHING_TO_REPORT": false, " **NOTHING_TO_REPORT** ": false, "Checked.\nNOTHING_TO_REPORT": false, "You have 2 appointments": true} {
 		if Worth(reply) != worth {

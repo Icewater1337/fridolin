@@ -19,6 +19,7 @@ import { outcomeBadge, riskBadge, threadEl } from '../components/policy.js';
 const KINDS = [
   ['', 'Every kind'],
   ['run_start', 'Run started'], ['run_end', 'Run ended'], ['run_refused', 'Run refused'],
+  ['run_files', 'Files a run changed'],
   ['tool_call', 'Tool call'], ['delegation', 'Delegation'],
   ['approval_requested', 'Approval asked'], ['approval_vote', 'Vote'], ['approval_decided', 'Approval decided'],
   ['question_asked', 'Question asked'], ['question_answered', 'Question answered'],
@@ -30,6 +31,7 @@ const KINDS = [
   ['scheduled_command', 'Scheduled program on a node'],
   ['fride_instance', 'FrIDE instance started or stopped'], ['node_exec', 'Command on a node (node_exec)'],
   ['errand', 'Errand (writing to someone)'], ['voice_call', 'Call to Fridolin'],
+  ['calendar_write', 'Calendar event created or deleted'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 

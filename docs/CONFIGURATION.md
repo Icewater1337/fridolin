@@ -1321,7 +1321,11 @@ cut short is not run again, since it may have done part of what it was
 asked: its chat gets "🔄 I restarted while I was working on your message.
 Send it again if you still need an answer." Files sent through `/ingest`
 and messages from the dev page are not kept; a [Plaud](PLAUD.md)
-recording is handed over again after the restart.
+recording is handed over again after the restart. A [scheduled
+agent's](BRAINS.md#scheduled-agents) brain run is the exception: one the
+stop cut short before it sent anything runs once more after the start,
+told to check first what the cut run already did, unless its
+`retry_interrupted` is `false`.
 
 Shutdown waits for a finished run's answer to reach the outbox before
 closing the database, including when its brain was removed or moved.
@@ -1546,6 +1550,29 @@ once, all chats together; a file whose message declares it over the limit
 is refused at once, without waiting for them. A chat's messages after a
 file wait for it, so they reach the brain in the order they were sent.
 
+### `whatsapp.presence`
+
+```json
+"whatsapp": { "presence": true }
+```
+
+On by default. The bridge shows itself online once it connects, which
+WhatsApp wants before a chat shows anyone typing. While a brain works on a
+message, its chat shows "typing…", said again every 20 seconds until the
+run ends. Once a brain took a message (after [`debounce`](#debounce), all
+the messages of the batch), the bridge marks it read, so its sender sees
+blue ticks; a voice note is marked played once the run that got it
+answered. Untagged group chatter the brain only reads, files handed in
+through `/ingest` or [Plaud](PLAUD.md), scheduled runs and delegated tasks
+show none of it. Messages that came in before a restart and were answered
+after it get no receipt.
+
+`false` turns all of it off, if WhatsApp behaves oddly with it. A brain
+turns it off for its own chats with `"presence": false` in its brain.json
+([BRAINS.md](BRAINS.md#brainjson)). If the bridge is linked to your own
+number rather than one of its own, your phone may hold back notifications
+while a linked device is online: turn it off then.
+
 ### `viewer`
 
 Opens a tmux session per brain, tailing its activity log, in a Terminal window
@@ -1753,6 +1780,30 @@ housekeeping job applies the limits every time it runs (also in a dry
 run, as they only remove the bridge's own records), and the bridge after
 each run of the agent. The vault's nightly snapshot of the data dir takes
 them with it, like the audit log.
+
+### `run_files`
+
+The record each brain run keeps of the files it created, changed and
+deleted in its folder, with their earlier contents
+([BRAINS.md](BRAINS.md#what-a-run-changed)).
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | keep the records; off, no run walks its folder |
+| `max_files` | `20000` | the most files a run's folder may hold, less what is left out, for its files to be recorded |
+| `max_mb` | `1024` | the most megabytes it may hold |
+| `keep_days` | `14` | records of runs older than this go |
+| `max_store_mb` | `4096` | the oldest records go once the stored copies take more than this |
+
+A run whose folder holds more than `max_files` or `max_mb` keeps a record
+that says so, without its files; leave big folders out with the brain's
+`backup.exclude` or a `.gitignore`. The records and the copies are in
+`run-files/` in the data dir, where brains never reach. The copies of
+what the folders hold now stay whatever `max_store_mb` says, as the next
+run would store them again. No snapshot, Drive backup or core export
+takes `run-files/`: it holds copies of brain folders whose backup may be
+off. The housekeeping job applies the limits every time it runs, and the
+bridge after a run every six hours.
 
 ### `fride.news`
 

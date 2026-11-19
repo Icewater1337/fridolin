@@ -212,6 +212,10 @@ func (br *Brain) Dir() string { return br.workDir }
 // Callers must not mutate its slices or optional nested settings.
 func (br *Brain) Manifest() manifest.Manifest { return br.settings.Load().Manifest }
 
+// OwnPATH are the folders that go first on the PATH of the brain's runs
+// (Settings.OwnPATH), for a program the bridge runs as the brain.
+func (br *Brain) OwnPATH() []string { return slices.Clone(br.settings.Load().OwnPATH) }
+
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
 // alone, and with the time it was sent, not the time the debouncer let it
@@ -473,7 +477,9 @@ func (br *Brain) worker(q *lane) {
 		if m.Silent {
 			log.Printf("brain %s: running silently for untagged message from %s", br.id, m.Sender)
 		}
+		ended := br.sink.Running(br, m)
 		res := br.invokeGuarded(run, ctx, s, m)
+		ended()
 		res.Duration = time.Since(run.started)
 		// The answer goes into the history once it was delivered (see
 		// Outbox), not here: the next run must not read as said what
@@ -926,6 +932,44 @@ type Runtime struct {
 	Last            *RunInfo          `json:"last"`
 	Backup          manifest.Backup   `json:"backup"`
 	Manifest        manifest.Manifest `json:"manifest"`
+	// Live is the brain's live session, for a brain whose brain.json
+	// asks for one; the bridge's side fills it in (Snapshot leaves it nil).
+	Live *LiveView `json:"live,omitempty"`
+}
+
+// The states of a brain's live session (LiveView.State).
+const (
+	// LiveUnavailable: the brain asks for a session but the bridge's
+	// settings rule one out; LiveView.Reason says which.
+	LiveUnavailable = "unavailable"
+	// LiveDown: none runs; the owner's next direct message starts one.
+	LiveDown = "down"
+	// LiveStarting: the CLI is starting, or has not answered its check yet.
+	LiveStarting = "starting"
+	// LiveReady: it takes the owner's next direct message.
+	LiveReady = "ready"
+	// LiveBusy: a turn is under way.
+	LiveBusy = "busy"
+	// LiveFailed: the last one did not come up; none starts before
+	// LiveView.RetryAt, and LiveView.Error says why.
+	LiveFailed = "failed"
+)
+
+// LiveView is a brain's live session as the dashboard shows it
+// (docs/BRAINS.md, "Live session"). Meanwhile every message the session
+// does not take runs `claude -p`.
+type LiveView struct {
+	State string `json:"state"`
+	// Reason is why a session is unavailable.
+	Reason string `json:"reason,omitempty"`
+	// Started and Turns are the running session's start and the turns it
+	// took, for starting, ready and busy.
+	Started *time.Time `json:"started,omitempty"`
+	Turns   int        `json:"turns,omitempty"`
+	// Error is why the last session did not come up, and RetryAt when the
+	// next may start, for failed.
+	Error   string     `json:"error,omitempty"`
+	RetryAt *time.Time `json:"retry_at,omitempty"`
 }
 
 // RunView describes the run in flight.

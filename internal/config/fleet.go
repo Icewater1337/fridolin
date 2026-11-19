@@ -413,6 +413,7 @@ func fillFleetDefaults(c *File) {
 	def(&c.Policy.ApprovalTimeoutHours, DefaultApprovalTimeoutHours)
 	fillHousekeepingDefaults(&c.Housekeeping)
 	fillSchedulesDefaults(&c.Schedules)
+	fillRunFilesDefaults(&c.RunFiles)
 }
 
 var (
@@ -525,6 +526,9 @@ func (c *File) validateFleet() error {
 		return err
 	}
 	if err := c.Calls.validate(); err != nil {
+		return err
+	}
+	if err := c.RunFiles.validate(); err != nil {
 		return err
 	}
 	return c.Schedules.validate()

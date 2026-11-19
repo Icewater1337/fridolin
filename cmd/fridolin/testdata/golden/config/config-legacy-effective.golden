@@ -82,6 +82,13 @@
     "mode": "queue",
     "notify": true
   },
+  "run_files": {
+    "enabled": true,
+    "keep_days": 14,
+    "max_files": 20000,
+    "max_mb": 1024,
+    "max_store_mb": 4096
+  },
   "run_timeout_minutes": 30,
   "sandbox": {
     "allow_paths": [],
@@ -117,5 +124,8 @@
     "snapshots_bucket": "fridolin-snapshots"
   },
   "version": 3,
-  "viewer": false
+  "viewer": false,
+  "whatsapp": {
+    "presence": true
+  }
 }

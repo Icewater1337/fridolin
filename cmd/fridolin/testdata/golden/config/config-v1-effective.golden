@@ -183,6 +183,13 @@
     "mode": "interrupt",
     "notify": false
   },
+  "run_files": {
+    "enabled": true,
+    "keep_days": 7,
+    "max_files": 5000,
+    "max_mb": 256,
+    "max_store_mb": 1024
+  },
   "run_timeout_minutes": 45,
   "sandbox": {
     "allow_paths": [
@@ -262,5 +269,8 @@
     ]
   },
   "version": 3,
-  "viewer": false
+  "viewer": false,
+  "whatsapp": {
+    "presence": false
+  }
 }

@@ -130,6 +130,9 @@ func risksOf(s manifest.Schedule) []string {
 		out = append(out, fmt.Sprintf("runs a program on node %s: %s", c.Node, strings.Join(c.Argv, " ")))
 		return out
 	}
+	if g := s.Gate; g != nil && g.Node != "" {
+		out = append(out, fmt.Sprintf("runs a program on node %s before each run, as its gate: %s", g.Node, strings.Join(g.Argv, " ")))
+	}
 	if s.Risk == "irreversible" {
 		out = append(out, "may take irreversible steps (risk budget irreversible)")
 	}

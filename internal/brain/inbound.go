@@ -35,6 +35,19 @@ func (m Inbound) Merge(next Inbound) Inbound {
 	return m
 }
 
+// MessageIDs are the WhatsApp ids of the messages m is made of, oldest
+// first: one for a message, one per part for a batch the debouncer
+// merged. A message from elsewhere has none.
+func (m Inbound) MessageIDs() []string {
+	var ids []string
+	for _, p := range m.ownParts() {
+		if p.ID != "" {
+			ids = append(ids, p.ID)
+		}
+	}
+	return ids
+}
+
 // ownParts returns the messages m is made of: its parts, or m itself.
 func (m Inbound) ownParts() []Inbound {
 	if len(m.parts) > 0 {

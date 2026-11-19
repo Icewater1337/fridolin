@@ -29,7 +29,7 @@ import { errorMessage } from '../lib/errors.js';
 import { agentOfChat } from '../lib/schedules.js';
 
 /** @import { PageModule } from '../app/page.js' */
-/** @import { ActivityEntry, Brain, BrainIssue, BrainManifest, BrainRuntime, ConfigFile, ConfigResponse, Intent, IntentSchedule } from '../../types/api.js' */
+/** @import { ActivityEntry, Brain, BrainIssue, BrainManifest, BrainRuntime, ConfigFile, ConfigResponse, Intent, IntentSchedule, LiveState, LiveView } from '../../types/api.js' */
 
 /**
  * Another brain as the settings form needs it: its routing, for the
@@ -314,7 +314,8 @@ export default /** @satisfies {PageModule} */ ({
             h('div.run-meta', h('span', 'Scheduled agent ', h('strong', agentOfChat(bg.chat) || bg.chat)), h('span.muted', 'beside the chats')),
             h('div.muted.small', timeAgo(bg.started, 'Started '), bg.pid ? ` · pid ${bg.pid}` : ''),
             stopsOf('background')) : null,
-          !run && !bg && waiting ? h('div.card-body', h('div.actions', stop(true, ''))) : null),
+          !run && !bg && waiting ? h('div.card-body', h('div.actions', stop(true, ''))) : null,
+          rt.live ? liveSessionEl(rt.live) : null),
         h('div.card',
           h('div.card-head', h('div.card-title', h('h3', 'Queue')), waiting ? badge(`${waiting} waiting`, 'warn') : badge('empty', 'neutral')),
           queue.length || bgQueue.length ? h('ol.queue-list',
@@ -330,6 +331,41 @@ export default /** @satisfies {PageModule} */ ({
               h('div.run-meta', outcomePill(last), chatEl(last.chat), h('span.muted.small', timeAgo(last.finished)), h('span.muted.small', `took ${fmtDuration(last.seconds)}`)),
               last.error ? h('p.error-text.small', last.error) : null)
               : h('p.muted', 'No runs since the bridge started.'))));
+    }
+
+    /**
+     * The brain's live session (docs/BRAINS.md, "Live session"): whether it
+     * runs, and why not. Every message it does not take runs as a one-off.
+     * @param {LiveView} live
+     */
+    function liveSessionEl(live) {
+      /** @type {Record<LiveState, [string, string]>} */
+      const states = {
+        ready: ['Ready', 'ok'], busy: ['In a turn', 'info'], starting: ['Starting', 'info'],
+        down: ['Not running', 'neutral'], failed: ['Did not come up', 'bad'], unavailable: ['Unavailable', 'warn'],
+      };
+      const [label, kind] = states[live.state] || [live.state, 'neutral'];
+      let detail = null;
+      switch (live.state) {
+        case 'ready': case 'busy': case 'starting':
+          detail = h('div.muted.small', timeAgo(live.started || '', 'Started '), ` · ${plural(live.turns || 0, 'turn')}`);
+          break;
+        case 'down':
+          detail = h('div.muted.small', 'Your next direct message starts it; that message runs as a one-off.');
+          break;
+        case 'failed':
+          detail = [
+            live.error ? h('p.error-text.small', live.error) : null,
+            h('div.muted.small', 'Messages run as one-offs; ', timeAgo(live.retry_at || '', 'next try ')),
+          ];
+          break;
+        case 'unavailable':
+          detail = h('div.muted.small', `Every message runs as a one-off: ${live.reason || ''}`);
+          break;
+      }
+      return h('div.card-body',
+        h('div.run-meta', h('span', 'Live session'), pill(label, kind)),
+        detail);
     }
 
     // ── settings form ──

@@ -136,6 +136,30 @@ test('with nothing running, Stop & clear empties both queues', async (t) => {
   assert.deepEqual(stops, [{ clear_queue: true }]);
 });
 
+test('the live session shows how it is, and why it is not', async (t) => {
+  const { root, poll } = await openPage(t);
+  assert.doesNotMatch(root.textContent, /Live session/, 'a brain without one says nothing of it');
+
+  const rt = (live) => ({ running: null, queue: [], live });
+  await poll([view('Work', rt({ state: 'ready', started: '2026-10-18T10:00:00Z', turns: 3 }))]);
+  assert.match(root.textContent, /Live session/);
+  assert.match(root.textContent, /Ready/);
+  assert.match(root.textContent, /3 turns/);
+
+  await poll([view('Work', rt({ state: 'failed', error: 'claude did not answer the check', retry_at: '2026-10-18T11:00:00Z' }))]);
+  assert.match(root.textContent, /Did not come up/);
+  assert.match(root.textContent, /claude did not answer the check/);
+  assert.match(root.textContent, /next try/);
+
+  await poll([view('Work', rt({ state: 'unavailable', reason: 'it needs dangerously_skip_permissions' }))]);
+  assert.match(root.textContent, /Unavailable/);
+  assert.match(root.textContent, /it needs dangerously_skip_permissions/);
+
+  await poll([view('Work', rt({ state: 'down' }))]);
+  assert.match(root.textContent, /Not running/);
+  assert.match(root.textContent, /Your next direct message starts it/);
+});
+
 test('a setting typed back to what it was is no unsaved change', async (t) => {
   const { ctx, nameIn, bar } = await openPage(t);
   type(nameIn(), 'Home');

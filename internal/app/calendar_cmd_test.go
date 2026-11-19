@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,8 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/skill"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/toolcli"
 )
 
@@ -99,6 +103,19 @@ func newFakeCalendarAPI(t *testing.T) *fakeCalendarAPI {
 			f.touched = append(f.touched, r.Method+" "+cal)
 			f.queries = append(f.queries, r.URL.RawQuery)
 			switch {
+			case r.Method == "GET" && eventPath == "/gone":
+				w.WriteHeader(404)
+				fmt.Fprint(w, `{"error":{"message":"Not Found"}}`)
+			case r.Method == "GET" && eventPath != "":
+				// One event: as f.events has it, else one without attendees.
+				id, _ := url.PathUnescape(strings.TrimPrefix(eventPath, "/"))
+				ev := map[string]any{"id": id, "summary": "x"}
+				for _, e := range f.events[cal] {
+					if e["id"] == id {
+						ev = e
+					}
+				}
+				_ = json.NewEncoder(w).Encode(ev)
 			case r.Method == "GET":
 				evs := f.events[cal]
 				i := page(len(evs))
@@ -322,7 +339,7 @@ func TestCalendarDefaultIsOneOfTheBrainsCalendars(t *testing.T) {
 			if code, doc := brainTool(t, toolcli.Calendar, url, token, "delete", "--event-id", "e1"); code != 0 {
 				t.Errorf("delete: exit %d, %v", code, doc)
 			}
-			if got := f.touchedCalendars(); strings.Join(got, ",") != "POST you@example.com,DELETE you@example.com" {
+			if got := f.touchedCalendars(); strings.Join(got, ",") != "POST you@example.com,GET you@example.com,DELETE you@example.com" {
 				t.Errorf("touched %v, want the ticked calendar only", got)
 			}
 			code, doc := brainTool(t, toolcli.Calendar, url, token, "calendars")
@@ -358,6 +375,7 @@ func TestCalendarCreate(t *testing.T) {
 	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	tb, url, token := calendarBrain(t, f, []string{"you@example.com", "team@example.com"}, "team@example.com", false)
+	approved(t, tb, "a", "a1", "a2")
 	cases := []struct {
 		name     string
 		args     []string
@@ -365,7 +383,7 @@ func TestCalendarCreate(t *testing.T) {
 		want     string // the event body sent to Google, as JSON
 		query    string
 	}{
-		{"a meeting, into the default calendar", []string{"create", "--title", "Design review", "--start", "2026-01-06T14:00:00", "--end", "2026-01-06T15:00", "--attendees", "alex@example.com, sam@example.com,", "--description", "notes", "--location", "Room 1"},
+		{"a meeting, into the default calendar", []string{"create", "--title", "Design review", "--start", "2026-01-06T14:00:00", "--end", "2026-01-06T15:00", "--attendees", "alex@example.com, sam@example.com,", "--description", "notes", "--location", "Room 1", "--approval-id", "a1"},
 			"team@example.com",
 			`{"attendees":[{"email":"alex@example.com"},{"email":"sam@example.com"}],"description":"notes","end":{"dateTime":"2026-01-06T15:00:00+01:00","timeZone":"Europe/Zurich"},"location":"Room 1","reminders":{"overrides":[{"method":"popup","minutes":10}],"useDefault":false},"start":{"dateTime":"2026-01-06T14:00:00+01:00","timeZone":"Europe/Zurich"},"summary":"Design review"}`,
 			"sendUpdates=all"},
@@ -400,10 +418,18 @@ func TestCalendarCreate(t *testing.T) {
 	// --send-updates defaults to.
 	t.Run("a call without send_updates", func(t *testing.T) {
 		ev := map[string]any{"title": "Call", "start": "2026-01-06T14:00:00+01:00", "end": "2026-01-06T15:00:00+01:00", "attendees": []string{"alex@example.com"}}
-		w := tb.do("POST", "/brain/calendar/events", ev, func(r *http.Request) {
-			r.Header.Del("X-Bridge-Token")
-			r.Header.Set("Authorization", "Bearer "+token)
-		})
+		post := func() *httptest.ResponseRecorder {
+			return tb.do("POST", "/brain/calendar/events", ev, func(r *http.Request) {
+				r.Header.Del("X-Bridge-Token")
+				r.Header.Set("Authorization", "Bearer "+token)
+			})
+		}
+		before := len(f.touchedCalendars())
+		if w := post(); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "send_updates all") || len(f.touchedCalendars()) != before {
+			t.Errorf("without an approval: %d %s", w.Code, w.Body.String())
+		}
+		ev["approval_id"] = "a2"
+		w := post()
 		f.mu.Lock()
 		touched, query := f.touched[len(f.touched)-1], f.queries[len(f.queries)-1]
 		f.mu.Unlock()
@@ -411,6 +437,163 @@ func TestCalendarCreate(t *testing.T) {
 			t.Errorf("%d %s; Google got %s ?%s, want POST team@example.com ?sendUpdates=all", w.Code, w.Body.String(), touched, query)
 		}
 	})
+}
+
+// approved stores approvals ids of brain's runs, as the owner's yes
+// would have them.
+func approved(t *testing.T, tb *testBridge, brain string, ids ...string) {
+	t.Helper()
+	ctx, now := context.Background(), time.Now()
+	for _, id := range ids {
+		a := store.Approval{ID: id, Kind: approvalKind, Brain: brain, Notify: brain, Action: "Invite them", Risk: "irreversible", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+		if err := tb.store.AddApproval(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tb.store.DecideApproval(ctx, id, store.ApprovalApproved, "", "15551234567", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestCalendarWritesFollowThePolicy: create and delete are writes, held to
+// the run's risk level and the lockdown as the bridge's tools are; one
+// that reaches other people needs the owner's approval, once; each one is
+// an audit line without the event's title or attendees. Reading goes on.
+func TestCalendarWritesFollowThePolicy(t *testing.T) {
+	t.Parallel()
+	f := newFakeCalendarAPI(t)
+	f.events["you@example.com"] = []map[string]any{
+		{"id": "meet", "summary": "Design review", "attendees": []map[string]any{{"email": "you@example.com", "self": true}, {"email": "alex@example.com"}}},
+		{"id": "mine", "summary": "Dentist", "attendees": []map[string]any{{"email": "you@example.com", "self": true}}},
+	}
+	tb, url, token := calendarBrain(t, f, []string{"you@example.com"}, "you@example.com", false)
+	approved(t, tb, "a", "a1", "a2")
+	readTok, revoke := tb.runTokens.mintRun(runInfo{Brain: "a", ID: "r-read", Policy: &runPolicy{ID: "r-read", Brain: "a", Risk: skill.RiskRead}})
+	t.Cleanup(revoke)
+	create := []string{"create", "--title", "Design review", "--start", "2026-01-06T14:00", "--end", "2026-01-06T15:00"}
+	invite := append(slices.Clone(create), "--attendees", "alex@example.com")
+	errorOf := func(token string, args ...string) string {
+		t.Helper()
+		code, doc := brainTool(t, toolcli.Calendar, url, token, args...)
+		msg, _ := doc["error"].(string)
+		if (code == 0) != (msg == "") {
+			t.Fatalf("exit %d, %v", code, doc)
+		}
+		return msg
+	}
+	touched := func() string { return strings.Join(f.touchedCalendars(), ",") }
+
+	// A run whose risk level is read reads, and writes nothing.
+	for _, args := range [][]string{create, {"delete", "--event-id", "mine"}} {
+		if msg := errorOf(readTok, args...); msg != "this run's risk level is read, which does not allow writing to the calendar" {
+			t.Errorf("%s on a read budget: %q", args[0], msg)
+		}
+	}
+	if msg := errorOf(readTok, "list", "--from", "2026-01-05"); msg != "" {
+		t.Errorf("list on a read budget: %q", msg)
+	}
+	// In a lockdown, nobody writes.
+	if w := tb.do("POST", "/api/policy/lockdown", map[string]bool{"on": true}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if msg := errorOf(token, create...); !strings.HasPrefix(msg, "the bridge is in lockdown") {
+		t.Errorf("create in a lockdown: %q", msg)
+	}
+	if w := tb.do("POST", "/api/policy/lockdown", map[string]bool{"on": false}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if got := touched(); got != "GET you@example.com" {
+		t.Fatalf("Google got %s; want only the list", got)
+	}
+
+	// An invitation Google sends needs the owner's yes; one it does not send,
+	// or an event without attendees, does not.
+	if msg := errorOf(token, invite...); !strings.Contains(msg, "Google emails this event's attendees an invitation (send_updates all)") ||
+		!strings.Contains(msg, "request_approval") || !strings.Contains(msg, "--approval-id") || !strings.Contains(msg, "--send-updates none") {
+		t.Errorf("an invitation without an approval: %q", msg)
+	}
+	if msg := errorOf(token, append(slices.Clone(invite), "--approval-id", "anone")...); msg != `there is no approval "anone" of yours. Do not take the step.` {
+		t.Errorf("an approval that is not there: %q", msg)
+	}
+	if got := touched(); got != "GET you@example.com" {
+		t.Fatalf("Google got %s before the approval", got)
+	}
+	for _, args := range [][]string{append(slices.Clone(invite), "--approval-id", "a1"), append(slices.Clone(invite), "--send-updates", "none"), create} {
+		if msg := errorOf(token, args...); msg != "" {
+			t.Errorf("%v: %q", args, msg)
+		}
+	}
+	if msg := errorOf(token, append(slices.Clone(invite), "--approval-id", "a1")...); msg != "approval a1 was used already: ask again for another action. Do not take the step." {
+		t.Errorf("an approval used twice: %q", msg)
+	}
+	// Not emailed, the attendees still see the event: a secret-like value
+	// in it waits for the owner's yes too (audit.SecretIn).
+	leak := append(slices.Clone(invite), "--send-updates", "none", "--description", "the wifi password: hunter2")
+	if msg := errorOf(token, leak...); !strings.HasPrefix(msg, "this event's text looks like a secret (a password, token, secret, API key or PIN with its value)") ||
+		!strings.Contains(msg, "--approval-id") || strings.Contains(msg, "hunter2") {
+		t.Errorf("a secret-like value for the attendees: %q", msg)
+	}
+	if msg := errorOf(token, append(slices.Clone(create), "--description", "the wifi password: hunter2")...); msg != "" {
+		t.Errorf("a secret-like value in an event of the owner's alone: %q", msg)
+	}
+
+	// Deleting an event with other attendees needs the owner's yes; one only
+	// in this calendar does not.
+	if msg := errorOf(token, "delete", "--event-id", "meet"); !strings.HasPrefix(msg, "this event has other attendees") || !strings.Contains(msg, "--approval-id") {
+		t.Errorf("deleting a meeting without an approval: %q", msg)
+	}
+	for _, args := range [][]string{{"delete", "--event-id", "meet", "--approval-id", "a2"}, {"delete", "--event-id", "mine"}} {
+		if msg := errorOf(token, args...); msg != "" {
+			t.Errorf("%v: %q", args, msg)
+		}
+	}
+	if msg := errorOf(token, "delete", "--event-id", "gone"); !strings.Contains(msg, "404") {
+		t.Errorf("deleting an event that is not there: %q", msg)
+	}
+	want := "GET you@example.com," + // list
+		"POST you@example.com,POST you@example.com,POST you@example.com," + // approved, not emailed, no attendees
+		"POST you@example.com," + // a secret-like value in the owner's own event
+		"GET you@example.com,GET you@example.com,DELETE you@example.com,GET you@example.com,DELETE you@example.com,GET you@example.com"
+	if got := touched(); got != want {
+		t.Errorf("Google got\n%s\nwant\n%s", got, want)
+	}
+
+	lines, err := audit.Read(tb.audit.Dir, audit.Filter{Kind: audit.CalendarWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := lines[i]
+		if l.Brain != "a" || strings.Contains(l.Detail+l.Outcome, "Design review") || strings.Contains(l.Detail+l.Outcome, "alex@") || strings.Contains(l.Detail+l.Outcome, "hunter2") {
+			t.Errorf("audit line %+v", l)
+		}
+		outcome, _, _ := strings.Cut(l.Outcome, ":")
+		if strings.HasPrefix(l.Outcome, "ok") {
+			outcome = l.Outcome
+		}
+		got = append(got, l.Run+" "+l.Risk+" "+l.ID+" | "+l.Detail+" | "+outcome)
+	}
+	wantLines := []string{
+		"r-read read  | create in you@example.com | refused",
+		"r-read read mine | delete in you@example.com | refused",
+		"   | create in you@example.com | refused",
+		"   | create in you@example.com, 1 attendee, send_updates all | refused",
+		"   | create in you@example.com, 1 attendee, send_updates all | refused",
+		"  new1 | create in you@example.com, 1 attendee, send_updates all | ok (approval a1)",
+		"  new1 | create in you@example.com, 1 attendee, send_updates none | ok",
+		"  new1 | create in you@example.com | ok",
+		"   | create in you@example.com, 1 attendee, send_updates all | refused",
+		"   | create in you@example.com, 1 attendee, send_updates none | refused",
+		"  new1 | create in you@example.com | ok",
+		"  meet | delete in you@example.com, 1 attendee | refused",
+		"  meet | delete in you@example.com, 1 attendee | ok (approval a2)",
+		"  mine | delete in you@example.com | ok",
+		"  gone | delete in you@example.com | failed",
+	}
+	if strings.Join(got, "\n") != strings.Join(wantLines, "\n") {
+		t.Errorf("audit lines:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(wantLines, "\n"))
+	}
 }
 
 // TestCalendarRefusesBadCalls: a mistake is an error the assistant can act
@@ -466,7 +649,7 @@ func TestCalendarDelete(t *testing.T) {
 	if code, doc := brainTool(t, toolcli.Calendar, url, token, "delete", "--event-id", "e1"); code != 0 || doc["deleted"] != "e1" {
 		t.Errorf("exit %d, %v", code, doc)
 	}
-	if got := f.touchedCalendars(); len(got) != 1 || got[0] != "DELETE team@example.com" {
+	if got := f.touchedCalendars(); strings.Join(got, ",") != "GET team@example.com,DELETE team@example.com" {
 		t.Errorf("touched %v, want the default calendar", got)
 	}
 	code, doc := brainTool(t, toolcli.Calendar, url, token, "delete", "--event-id", "gone")

@@ -2,7 +2,7 @@
 // (.brain/schedules/<name>.json) and the wizard's fields, how its times
 // and its permissions read, and how the list is filtered and grouped.
 
-/** @import { Schedule, ScheduleAgent, SchedulesResponse } from '../../types/api.js' */
+/** @import { Schedule, ScheduleAgent, ScheduleGate, SchedulesResponse } from '../../types/api.js' */
 
 /**
  * The edit form's fields as scheduleOf reads them: texts as typed (lists
@@ -32,6 +32,8 @@
  * @property {string} timeout
  * @property {string} missed
  * @property {string} jitter
+ * @property {boolean} [retryInterrupted] a run a restart cut short runs once more; unset is true
+ * @property {ScheduleGate} [gate] its gate, kept as it is: the wizard does not edit it
  */
 
 /**
@@ -118,12 +120,14 @@ export function fieldsOf(s = {}) {
     ownTools: Array.isArray(s.disallowed_tools), tools: (s.disallowed_tools || []).join('\n'),
     report: s.report || '', chat: s.chat || '', timeout: s.timeout_minutes ? String(s.timeout_minutes) : '',
     missed: s.missed || '', jitter: s.jitter_minutes === undefined || s.jitter_minutes === null ? '' : String(s.jitter_minutes),
+    retryInterrupted: s.retry_interrupted !== false,
+    ...(s.gate ? { gate: s.gate } : {}),
   };
 }
 
 // The order of the fields in the file the bridge writes (the Go type's).
 /** @type {(keyof Schedule)[]} */
-const FILE_ORDER = ['name', 'when', 'enabled', 'description', 'prompt', 'prompt_file', 'template', 'command', 'vars', 'report', 'chat', 'risk', 'disallowed_tools', 'effort', 'timeout_minutes', 'missed', 'jitter_minutes', 'preapproved', 'github'];
+const FILE_ORDER = ['name', 'when', 'enabled', 'description', 'prompt', 'prompt_file', 'template', 'command', 'gate', 'vars', 'report', 'chat', 'risk', 'disallowed_tools', 'effort', 'timeout_minutes', 'missed', 'jitter_minutes', 'retry_interrupted', 'preapproved', 'github'];
 /** @param {Record<string, string>} o */
 const sortedObj = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
 
@@ -138,6 +142,7 @@ export function fileJSON(s) {
     const v = s[k];
     if (v === undefined) continue;
     if (k === 'command' && s.command) out[k] = { node: s.command.node, argv: s.command.argv, ...(s.command.dir ? { dir: s.command.dir } : {}) };
+    else if (k === 'gate' && s.gate) out[k] = { argv: s.gate.argv, ...(s.gate.dir ? { dir: s.gate.dir } : {}), ...(s.gate.timeout_seconds ? { timeout_seconds: s.gate.timeout_seconds } : {}), ...(s.gate.node ? { node: s.gate.node } : {}) };
     else if (k === 'vars' && s.vars) out[k] = sortedObj(s.vars);
     else if (k === 'github' && s.github) out[k] = { repos: s.github.repos, permissions: sortedObj(s.github.permissions || {}) };
     else out[k] = v;
@@ -179,6 +184,8 @@ export function scheduleOf(f) {
     if (pre.length) s.preapproved = pre;
     const repos = String(f.githubRepos || '').split(/[\s,]+/).filter(Boolean);
     if (repos.length) s.github = { repos: [...new Set(repos)], permissions: parseVars(f.githubPermissions) };
+    if (f.retryInterrupted === false) s.retry_interrupted = false;
+    if (f.gate) s.gate = f.gate;
   }
   if (f.report) s.report = f.report;
   if (f.chat.trim()) s.chat = f.chat.trim();
@@ -187,6 +194,19 @@ export function scheduleOf(f) {
   if (f.missed) s.missed = f.missed;
   if (f.jitter !== '') s.jitter_minutes = Number(f.jitter);
   return s;
+}
+
+/**
+ * What started a run, in words: "by hand (dashboard)", "retried after
+ * restart", or the trigger as it is.
+ * @param {{trigger: string, by?: string}} r
+ */
+export function triggerText(r) {
+  switch (r.trigger) {
+    case 'manual': return `by hand (${r.by || 'dashboard'})`;
+    case 'restart-retry': return 'retried after restart';
+    default: return r.trigger;
+  }
 }
 
 /**
@@ -320,6 +340,15 @@ export function riskText(risk) {
 }
 
 /**
+ * What gate g does, in a sentence.
+ * @param {ScheduleGate} g
+ */
+export function gateText(g) {
+  const where = g.node ? `on node ${g.node}${g.dir ? ` in ${g.dir}` : ''}, as that node’s allowlist lets it` : `in the brain’s sandbox${g.dir ? `, in ${g.dir}` : ''}, with no token`;
+  return `Before each run, its gate runs ${(g.argv || []).join(' ')} ${where} (at most ${g.timeout_seconds || 30} s): the brain runs only when it says so.`;
+}
+
+/**
  * What agent s may do, as plain sentences: its risk budget, the steps
  * approved with it, its GitHub access, the node it runs on and where its
  * results go (chat: the chat they go to, '' for the brain's own).
@@ -331,6 +360,7 @@ export function permissionsOf(s, chat = '') {
   if (s.command) {
     out.push(`Runs ${(s.command.argv || []).join(' ')} on node ${s.command.node}${s.command.dir ? ` in ${s.command.dir}` : ''}, no shell; only what that node’s allowlist and your approval of its commands let it.`);
   } else {
+    if (s.gate) out.push(gateText(s.gate));
     out.push(`Risk ${s.risk || 'write'}: ${riskText(s.risk)}`);
     for (const p of s.preapproved || []) out.push(`Approved with it, taken without asking: ${p}.`);
     if (s.github) {

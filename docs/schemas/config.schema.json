@@ -314,6 +314,26 @@
         "notice": {"type": "string", "maxLength": 300, "description": "What Fridolin says after its introduction when it calls someone for an errand. Default: I'm an AI assistant, and I keep notes of this call."}
       }
     },
+    "run_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The record each brain run keeps of the files it created, changed or deleted in its folder, with their earlier contents (docs/BRAINS.md, What a run changed). On by default.",
+      "properties": {
+        "enabled": {"type": "boolean", "description": "Keep the records. Default true."},
+        "max_files": {"type": "integer", "minimum": 0, "maximum": 10000000, "description": "The most files a run's folder may hold, less what is left out, for its files to be recorded; a run over it keeps a record that says so. Default 20000."},
+        "max_mb": {"type": "integer", "minimum": 0, "maximum": 16777216, "description": "The most megabytes a run's folder may hold, less what is left out, for its files to be recorded. Default 1024."},
+        "keep_days": {"type": "integer", "minimum": 0, "maximum": 3650, "description": "Drop the records of runs older than this. Default 14."},
+        "max_store_mb": {"type": "integer", "minimum": 0, "maximum": 16777216, "description": "Drop the oldest records once the stored copies take more than this; the copies of what the folders hold now stay. Default 4096."}
+      }
+    },
+    "whatsapp": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the bridge shows of itself in its WhatsApp chats.",
+      "properties": {
+        "presence": {"type": "boolean", "description": "Show the bridge online, show typing while a brain works on a message, and mark the messages a brain took as read (voice notes as played once answered). A brain turns it off for its chats with presence: false in its brain.json. Default true."}
+      }
+    },
     "connections": {
       "type": "object",
       "additionalProperties": false,
