@@ -16,6 +16,13 @@ import (
 // ProtocolVersions are the MCP versions this server speaks, newest first.
 // initialize answers with the client's version when it is one of them,
 // else with the newest, which the client then accepts or disconnects.
+//
+// A live session's channel needs one of these older versions. Claude Code
+// (2.1.328) first probes with server/discover at 2026-07-28, which this
+// server answers "method not found", and then calls initialize. On a
+// connection of 2026-07-28 or later it drops channel notifications ("no
+// unsolicited notification path"). TestServerStaysOnAProtocolWithChannels
+// holds the list to that.
 var ProtocolVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
 // MaxLine is the longest line Serve reads. A longer one is answered with
