@@ -64,7 +64,7 @@ var imports = map[string][]string{
 	"internal/logx":         nil,
 	"internal/manifest":     {"internal/chat", "internal/fsx", "internal/jsonx", "internal/trigger"},
 	"internal/mcp":          nil,
-	"internal/mcp/tools":    {"internal/manifest", "internal/mcp", "internal/skill"},
+	"internal/mcp/tools":    {"internal/audit", "internal/manifest", "internal/mcp", "internal/skill"},
 	"internal/intent":       {"internal/apperr", "internal/fsx", "internal/trigger"},
 	"internal/media":        {"internal/fsx", "internal/textx"},
 	"internal/memindex":     {"internal/chat", "internal/fsx", "internal/history", "internal/store", "internal/textx"},

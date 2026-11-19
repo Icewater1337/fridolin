@@ -132,6 +132,9 @@ func resolveFile(file *File, paths Paths, goos string) (*File, error) {
 	if cfg.ScriptAPI.TokenlessSend == nil {
 		cfg.ScriptAPI.TokenlessSend = &t
 	}
+	if cfg.WhatsApp.Presence == nil {
+		cfg.WhatsApp.Presence = &t
+	}
 	if cfg.Backup.IncludeBridgeConfig == nil {
 		inc := defaultIncludeBridgeConfig
 		cfg.Backup.IncludeBridgeConfig = &inc

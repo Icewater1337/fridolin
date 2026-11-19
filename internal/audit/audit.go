@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -170,17 +171,90 @@ const DirName = "audit"
 // maxDetail bounds a line's detail.
 const maxDetail = 300
 
+// The patterns of credentials by their shape. Each has one group: the
+// secret value itself.
+const (
+	// keyPattern is a credential by its known prefix, shorter than
+	// tokenRe's run (OpenAI's sk-…, ElevenLabs' sk_…, GitHub's ghp_…,
+	// Slack's xoxb-…, AWS's AKIA…, GitLab's glpat-…).
+	keyPattern = `\b(sk[-_][a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abprs]-[a-z0-9-]{8,}|AKIA[0-9A-Z]{12,}|glpat-[a-z0-9_-]{8,})`
+	// flagPattern is a secret flag on a command line with its value.
+	flagPattern = `--?(?:password|passwd|token|secret|api-key|apikey|auth)[= ](\S+)`
+	// authPattern is an Authorization header's credentials.
+	authPattern = `(?:bearer|basic)\s+(\S+)`
+)
+
 // tokenRe matches what looks like a credential: a long run of letters,
 // digits and -_/+= without spaces, or a key=value of a secret-sounding
 // key.
 var (
 	tokenRe  = regexp.MustCompile(`[A-Za-z0-9_\-+/=]{32,}`)
-	secretRe = regexp.MustCompile(`(?i)\b(password|passwd|secret|token|api[_-]?key|pin)\s*[:=]\s*\S+`)
-	// prefixRe matches credentials by their known prefixes, shorter than
-	// tokenRe's run (OpenAI's sk-…, ElevenLabs' sk_…), and secret flags
-	// and headers on a command line.
-	prefixRe = regexp.MustCompile(`(?i)\b(sk[-_][a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abprs]-[a-z0-9-]{8,}|AKIA[0-9A-Z]{12,}|glpat-[a-z0-9_-]{8,})|(--?(password|passwd|token|secret|api-key|apikey|auth)[= ]\S+)|((bearer|basic)\s+\S+)`)
+	secretRe = regexp.MustCompile(`(?i)\b(password|passwd|secret|token|api[_-]?key|pin)\s*[:=]\s*(\S+)`)
+	// prefixRe matches credentials by their known prefixes, and secret
+	// flags and headers on a command line.
+	prefixRe = regexp.MustCompile(`(?i)` + keyPattern + `|` + flagPattern + `|` + authPattern)
+	keyRe    = regexp.MustCompile(`(?i)` + keyPattern)
+	flagRe   = regexp.MustCompile(`(?i)` + flagPattern)
+	authRe   = regexp.MustCompile(`(?i)` + authPattern)
 )
+
+// The kinds of secret SecretIn tells apart.
+const (
+	SecretKey      = "an API key or access token"
+	SecretFlag     = "a password or token flag with its value"
+	SecretAuth     = "a bearer or basic credential"
+	SecretKeyValue = "a password, token, secret, API key or PIN with its value"
+)
+
+// SecretIn names the kind of the first value in s that looks like a
+// secret, "" for none: a credential by its known prefix (sk-…, ghp_…,
+// AKIA…), a bearer or basic credential, a secret flag with its value, or
+// a password, token, secret, API key or PIN given with its value. These
+// are Scrub's precise patterns, without its run of 32 characters, which
+// also takes commit hashes, ids and base64 data; and the value must look
+// like a secret, not like a word or a placeholder (secretValue). It is
+// for what leaves the machine, where a false alarm stops a call; Scrub
+// masks more, since a log loses nothing by it.
+func SecretIn(s string) string {
+	for _, p := range []struct {
+		re   *regexp.Regexp
+		kind string
+	}{{keyRe, SecretKey}, {authRe, SecretAuth}, {flagRe, SecretFlag}, {secretRe, SecretKeyValue}} {
+		for _, m := range p.re.FindAllStringSubmatch(s, -1) {
+			if secretValue(m[len(m)-1]) {
+				return p.kind
+			}
+		}
+	}
+	return ""
+}
+
+// secretValue reports whether v, a match's value, looks like a secret
+// once the quotes, brackets and punctuation around it are gone: at least
+// 4 characters with a digit (hunter2, a PIN, a key) or 8 with upper and
+// lower case letters (base64), and not a placeholder ($TOKEN, <token>,
+// {{token}}, ****, [redacted]) nor a plain word ("token: string", "basic
+// setup").
+func secretValue(v string) bool {
+	v = strings.Trim(v, "\"'`()[]{}<>,;:.!?")
+	if v == "" || strings.ContainsAny(v[:1], "$%") || strings.Count(v, v[:1]) == len(v) ||
+		strings.Contains(strings.ToLower(v), "redacted") {
+		return false
+	}
+	var digit, upper, lower bool
+	for _, r := range v {
+		switch {
+		case unicode.IsDigit(r):
+			digit = true
+		case unicode.IsUpper(r):
+			upper = true
+		case unicode.IsLower(r):
+			lower = true
+		}
+	}
+	n := utf8.RuneCountInString(v)
+	return digit && n >= 4 || upper && lower && n >= 8
+}
 
 // Scrub shortens s for a line and masks what looks like a secret in it.
 func Scrub(s string) string {

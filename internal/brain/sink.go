@@ -10,6 +10,10 @@ import (
 // History runs after the history lock is released. Undelivered is queried
 // under that lock, ordering the outbox-to-history transition.
 type Sink interface {
+	// Running hears that a run for m starts, and returns what the worker
+	// calls once the run ended, before Finished: the chat shows typing
+	// meanwhile.
+	Running(br *Brain, m Inbound) (ended func())
 	Working(jid string)
 	Question(br *Brain, jid, text string) bool
 	Finished(br *Brain, m Inbound, res claudecli.Result)
@@ -23,6 +27,14 @@ type Sink interface {
 // done before messages arrive; no lock is held across delivery callbacks.
 type brainSinkRef struct{ target Sink }
 
+func (s *brainSinkRef) Running(br *Brain, m Inbound) func() {
+	if s != nil && s.target != nil {
+		if ended := s.target.Running(br, m); ended != nil {
+			return ended
+		}
+	}
+	return func() {}
+}
 func (s *brainSinkRef) Working(jid string) {
 	if s != nil && s.target != nil {
 		s.target.Working(jid)
