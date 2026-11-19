@@ -485,6 +485,7 @@ func New(opts Options) (_ *App, err error) {
 		pace = 0
 	}
 	b.outbox = outboundmsg.NewPausedOutbox(store, func() outboundmsg.Link { return b.wa }, pace, b.delivered)
+	b.outbox.KeepFiles(outboundmsg.Shelf{Dir: cfgs.Boot().Layout().OutboxFiles()})
 	cfgs.Subscribe(b.configChanged)
 	return b, nil
 }

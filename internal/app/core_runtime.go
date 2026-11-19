@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/audit"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -373,6 +374,13 @@ func (g leaseGate) SendPoll(ctx context.Context, jid, q string, opts []string, m
 		return "", errLeaseLost
 	}
 	return g.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
+}
+
+func (g leaseGate) SendFile(ctx context.Context, jid string, f chat.File) error {
+	if g.lost() {
+		return errLeaseLost
+	}
+	return g.Messenger.SendFile(ctx, jid, f)
 }
 
 // Typing is outbound.Presence's, where the messenger has it; without,

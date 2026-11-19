@@ -118,6 +118,13 @@ func (f *flakyMessenger) SendPoll(ctx context.Context, jid, q string, opts []str
 	return f.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
 }
 
+func (f *flakyMessenger) SendFile(ctx context.Context, jid string, file chat.File) error {
+	if err := f.try(); err != nil {
+		return err
+	}
+	return f.Messenger.SendFile(ctx, jid, file)
+}
+
 func (f *flakyMessenger) sent(jid string) []string {
 	var out []string
 	box := f.Outbox()

@@ -296,8 +296,43 @@ the key, which the run never sees, and counts it against the brain's
 | --- | --- |
 | `openai_transcribe(path, language, prompt, model)` | a recording's text, from OpenAI; a write action, since the audio leaves the machine |
 | `elevenlabs_transcribe(path, language, model)` | a recording's text and language, from ElevenLabs; a write action |
-| `elevenlabs_speak(text, voice, model, format)` | reads a text aloud into `speech/` in the run's temp folder and answers the file's path; a write action. The bridge cannot send it to WhatsApp yet |
+| `elevenlabs_speak(text, voice, model, format)` | reads a text aloud into `speech/` in the run's temp folder and answers the file's path; a write action. `reply_file(path, as: "voice")` sends it as a voice note |
 | `elevenlabs_voices()` | the ElevenLabs account's voices |
+
+### Sending files
+
+Any brain's run that answers someone in a WhatsApp chat, a DM or a
+group, also gets `reply_file(path, caption, as)`: it sends a file into
+that chat, and only that chat, ahead of the run's reply. Observe-only
+runs, scheduled agents, delegated tasks and calls have none.
+
+- `path` is an absolute path in the brain's folder, its media inbox or
+  its temp folder, read through `os.Root` as the connections' tools read
+  a recording, so a link cannot lead out of them. The file may be at most
+  [`max_media_mb`](CONFIGURATION.md#max_media_mb).
+- `as` is `image` (a JPEG or PNG shown in the chat, with a small
+  preview), `document` (any file, shown by its name) or `voice` (audio as
+  a voice note). Left out, a JPEG or PNG is an image and anything else a
+  document. The bridge tells what a file is from its first bytes, and
+  from its name only where they say just "zip" or "text".
+- A voice note is Ogg Opus. Other audio, such as the MP3 that
+  `elevenlabs_speak` makes, is converted with ffmpeg from the helper
+  folders ([CONFIGURATION.md](CONFIGURATION.md#helper-programs)); ffmpeg
+  reads it from a pipe and only as an audio format, so the file cannot
+  make it read others. Without ffmpeg it goes as a document, and the
+  tool's answer says so. A voice note has no caption.
+- `caption`, up to 1024 characters, goes with an image or a document.
+  Like the other outbound tools' texts, one that looks like a secret is
+  refused without your approval ([Skills, risk and approvals](#skills-risk-and-approvals)).
+
+It is a write action: refused in a lockdown and for a run whose risk
+level is `read`. The bridge keeps a copy of the file in
+`<data_dir>/outbox-files/`, which no snapshot and no core export takes,
+so it goes through the outbox in `bridge.db` like any reply
+([README](../README.md#how-it-works)): tried again while WhatsApp is
+away, and given up on after an hour; the copy goes with it.
+Once it went out, the brain's history records a line such as
+`[sent image: chart.png]` and the caption.
 
 A tool a run is not granted is absent, not refused: it is not in the
 run's list, and a call of it is a call of a tool there is none of.
@@ -689,7 +724,8 @@ off the machine. So the bridge's outbound tools, `contact_person`,
 `errand_answer` and `errand_contact`'s brief (to the person),
 `elevenlabs_speak` and `openai_transcribe`'s prompt (to the vendor),
 `fride_task` and `fride_reply` (into work that may become a pull request
-or an issue), refuse a call when one of its texts looks like a secret:
+or an issue), and `reply_file`'s caption (into the chat), refuse a call
+when one of its texts looks like a secret:
 a key by its prefix (`sk-…`, `sk_…`, `ghp_…`, `github_pat_…`, `xoxb-…`,
 `AKIA…`, `glpat-…`), a bearer or basic credential, a `--password` or
 `--token` flag with its value, or a password, token, secret, API key or

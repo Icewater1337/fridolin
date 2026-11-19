@@ -1,6 +1,10 @@
 package outbound
 
-import "context"
+import (
+	"context"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+)
 
 // Transport is the send capability consumed by reply delivery.
 // It has no pairing, lifecycle, configuration or persistence dependency.
@@ -11,6 +15,9 @@ type Transport interface {
 	// before the poll goes out, so that whoever keeps it for its votes
 	// has it before a vote can arrive; sending may be nil.
 	SendPoll(ctx context.Context, jid, question string, options []string, maxSelectable int, sending func(id string)) (string, error)
+	// SendFile sends the file f into the chat jid: an image, a document
+	// or a voice note, as f.Kind says.
+	SendFile(ctx context.Context, jid string, f chat.File) error
 }
 
 // IDTransport is a Transport that also sends text with an id it chooses,
