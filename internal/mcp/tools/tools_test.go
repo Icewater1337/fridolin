@@ -142,6 +142,109 @@ func TestGuarded(t *testing.T) {
 	}
 }
 
+// key is a made-up OpenAI key, put together so that no line holds one.
+const key = "sk-" + "proj-A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6S7t8"
+
+func TestGuardedOutbound(t *testing.T) {
+	ctx := context.Background()
+	refusal := func(arg string) string {
+		return "the argument " + arg + " looks like a secret (an API key or access token), and this tool sends it off this machine: do not send it. " +
+			"If the owner wants exactly this sent, ask them with request_approval, saying what goes to whom without the value itself, " +
+			"and call again with the approval_id it answers approved with; otherwise leave the value out."
+	}
+	for _, tc := range []struct {
+		name   string
+		guard  fakeGuard
+		risk   skill.Risk
+		args   string
+		want   string
+		isErr  bool
+		usedID string
+	}{
+		{name: "ordinary text", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskWrite,
+			args: `{"message":"See you at 8, commit 3f2a9c1e5b7d4f6a8c0e2b4d6f8a0c2e4b6d8f0a, run 123e4567-e89b-12d3-a456-426614174000"}`,
+			want: `done for a with {"message":"See you at 8, commit 3f2a9c1e5b7d4f6a8c0e2b4d6f8a0c2e4b6d8f0a, run 123e4567-e89b-12d3-a456-426614174000"}`},
+		{name: "a key in the message", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskWrite,
+			args: `{"message":"here it is: ` + key + `"}`, want: refusal("message"), isErr: true},
+		{name: "a password in a nested list", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskWrite,
+			args: `{"message":"hi","repos":["web",{"note":"password: hunter2"}]}`, isErr: true,
+			want: "the argument repos[1].note looks like a secret (a password, token, secret, API key or PIN with its value), and this tool sends it off this machine: do not send it. " +
+				"If the owner wants exactly this sent, ask them with request_approval, saying what goes to whom without the value itself, " +
+				"and call again with the approval_id it answers approved with; otherwise leave the value out."},
+		{name: "the first argument by name", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskWrite,
+			args: `{"text":"` + key + `","brief":"` + key + `"}`, want: refusal("brief"), isErr: true},
+		{name: "a key with an approval", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskWrite,
+			args: `{"message":"` + key + `","approval_id":"a1"}`, want: `done for a with {"message":"` + key + `","approval_id":"a1"}`, usedID: "a/a1"},
+		{name: "a key with a refused approval", guard: fakeGuard{budget: skill.RiskWrite, refuse: errors.New("approval a1 was used already: ask again for another action")}, risk: skill.RiskWrite,
+			args: `{"message":"` + key + `","approval_id":"a1"}`, isErr: true, usedID: "a/a1",
+			want: "the argument message looks like a secret (an API key or access token), and approval a1 was used already: ask again for another action. Do not send it."},
+		{name: "an approval_id without a secret is not used", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskWrite,
+			args: `{"message":"hi","approval_id":"a1"}`, want: `done for a with {"message":"hi","approval_id":"a1"}`},
+		{name: "a read tool is scanned too", guard: fakeGuard{budget: skill.RiskRead, locked: true}, risk: skill.RiskRead,
+			args: `{"brief":"` + key + `"}`, want: refusal("brief"), isErr: true},
+		{name: "the lockdown comes first", guard: fakeGuard{budget: skill.RiskWrite, locked: true}, risk: skill.RiskWrite,
+			args: `{"message":"` + key + `"}`, want: "the bridge is in lockdown: only reading goes ahead. Do not try another way; say so in your reply.", isErr: true},
+		{name: "an irreversible tool's approval covers it", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskIrreversible,
+			args: `{"message":"` + key + `","approval_id":"a1"}`, want: `done for a with {"message":"` + key + `","approval_id":"a1"}`, usedID: "a/a1"},
+		{name: "arguments that are not an object", guard: fakeGuard{budget: skill.RiskWrite}, risk: skill.RiskWrite,
+			args: `["` + key + `"]`, want: `done for a with ["` + key + `"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := tc.guard
+			res, err := GuardedOutbound[string](&g, tc.risk, done)(ctx, "a", json.RawMessage(tc.args))
+			if got := text(t)(res, err); got != tc.want || res.IsError != tc.isErr {
+				t.Errorf("got %q (error %v), want %q (error %v)", got, res.IsError, tc.want, tc.isErr)
+			}
+			if want := []string{tc.usedID}; tc.usedID == "" && g.used != nil || tc.usedID != "" && !slices.Equal(g.used, want) {
+				t.Errorf("approvals used: %v, want %q", g.used, tc.usedID)
+			}
+		})
+	}
+}
+
+func TestSetAuditsOutboundSecrets(t *testing.T) {
+	g := &fakeGuard{budget: skill.RiskWrite}
+	s, lines := newTestSet(g)
+	s.Register(mcp.Entry[string]{
+		Name:     "send",
+		Describe: func(string) mcp.Tool { return mcp.Tool{} },
+		Call:     s.GuardedOutbound(skill.RiskWrite, done),
+	})
+	s.Register(mcp.Entry[string]{
+		Name:     "write",
+		Describe: func(string) mcp.Tool { return mcp.Tool{} },
+		Call:     s.Guarded(skill.RiskWrite, done),
+	})
+	ctx := context.Background()
+	secret := json.RawMessage(`{"text":"` + key + `"}`)
+	if res, _ := s.Call(ctx, "a", "send", secret); res == nil || !res.IsError {
+		t.Errorf("a secret went out: %+v", res)
+	}
+	if got := text(t)(s.Call(ctx, "a", "send", json.RawMessage(`{"text":"hello"}`))); got != `done for a with {"text":"hello"}` {
+		t.Errorf("ordinary text: %q", got)
+	}
+	if got := text(t)(s.Call(ctx, "a", "send", json.RawMessage(`{"text":"`+key+`","approval_id":"a7"}`))); !strings.HasPrefix(got, "done for a") {
+		t.Errorf("an approved secret: %q", got)
+	}
+	g.refuse = errors.New("approval a7 was used already")
+	if res, _ := s.Call(ctx, "a", "send", json.RawMessage(`{"text":"`+key+`","approval_id":"a7"}`)); res == nil || !res.IsError {
+		t.Errorf("a used approval let a secret out: %+v", res)
+	}
+	if got := text(t)(s.Call(ctx, "a", "write", secret)); !strings.HasPrefix(got, "done for a") {
+		t.Errorf("a tool that is not outbound was scanned: %q", got)
+	}
+	want := []auditLine{
+		{"a", "send", "refused: secret-like value"},
+		{"a", "send", "ok"},
+		{"a", "send", "ok (a secret-like value, approval a7)"},
+		{"a", "send", "refused: secret-like value"},
+		{"a", "write", "ok"},
+	}
+	if !slices.Equal(*lines, want) {
+		t.Errorf("audit lines:\n%v\nwant\n%v", *lines, want)
+	}
+}
+
 // auditLine is one line Set.Call handed to its audit appender.
 type auditLine struct{ caller, tool, outcome string }
 
