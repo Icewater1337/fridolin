@@ -141,6 +141,7 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "connections.elevenlabs.voice"}},
 	{Field: Field{Name: "calls.greeting"}},
 	{Field: Field{Name: "calls.notice"}},
+	{Field: Field{Name: "whatsapp.presence"}},
 }
 
 // Fields returns an owned copy of the complete configuration field inventory.
