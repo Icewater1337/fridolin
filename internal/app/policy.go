@@ -16,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/runsnap"
 	"github.com/Icewater1337/fridolin/internal/skill"
 )
 
@@ -49,6 +50,9 @@ type runPolicy struct {
 	Effort          string
 	DisallowedTools *[]string
 	started         time.Time
+	// files is the walk of the run's folder as it started, whose record
+	// runEnded keeps (runfiles.go); nil when run_files is off.
+	files *runsnap.Run
 }
 
 // defaultRisk is the budget of a run no skill trigger matched: ordinary
@@ -215,10 +219,12 @@ func (b *App) admitRun(spec brainruntime.RunSpec) (*runPolicy, error) {
 		detail = "scheduled agent " + p.Scheduled
 	}
 	b.audit.Append(audit.Entry{Kind: audit.RunStart, Thread: p.Thread, Chat: p.Chat, Brain: p.Brain, Run: p.ID, Skill: p.Skill, Risk: string(p.Risk), Detail: detail})
+	p.files = b.runFiles.begin(p, spec)
 	return p, nil
 }
 
-// runEnded writes the audit line of a run that ended.
+// runEnded writes the audit lines of a run that ended: how it ended, and
+// what it changed in its folder.
 func (b *App) runEnded(p *runPolicy, res claudecli.Result) {
 	if p == nil {
 		return
@@ -232,6 +238,7 @@ func (b *App) runEnded(p *runPolicy, res claudecli.Result) {
 		outcome = "failed"
 	}
 	b.audit.Append(audit.Entry{Kind: audit.RunEnd, Thread: p.Thread, Chat: p.Chat, Brain: p.Brain, Run: p.ID, Skill: p.Skill, Risk: string(p.Risk), Outcome: outcome, DurationMS: time.Since(p.started).Milliseconds()})
+	b.runFiles.end(p, p.files)
 }
 
 // inferSkill is the skill a message is for, and the run's budget: of the

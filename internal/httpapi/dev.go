@@ -17,6 +17,10 @@ type DevMessage struct {
 	Poll []string  `json:"poll,omitempty"`
 	// ID is a poll's message id, which a vote names.
 	ID string `json:"id,omitempty"`
+	// File and Kind are a file's name and how the chat shows it (image,
+	// document, voice); Text is then its caption.
+	File string `json:"file,omitempty"`
+	Kind string `json:"kind,omitempty"`
 }
 type DevAPI struct {
 	HasBrain func(string) bool

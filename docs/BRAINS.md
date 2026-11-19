@@ -126,6 +126,14 @@ a Claude Code *channel*.
   (`channelsEnabled`) or an account can have them off. A session that does
   not come up is left alone for 5 minutes, then 10 and 20, and every message
   runs `claude -p` meanwhile; the bridge log says what the CLI showed.
+- **Where to see it.** The brain's page in the dashboard shows the session
+  under *Current run*: ready (since when, and how many turns it took), in a
+  turn, starting, not running (your next direct message starts it), did not
+  come up (why, and when the bridge tries again), or unavailable, when the
+  bridge's settings rule a session out (Codex, `dangerously_skip_permissions`
+  off, `inherit_claude_user_config` on). `/api/status` and `/api/brains/{id}`
+  carry it as the brain's `runtime.live`, and `fridolin check` says of each
+  brain that asks for a session whether those settings let one start.
 - **How it runs.** Claude Code runs in a terminal of its own, inside the
   brain's sandbox profile and with the brain's own Claude config, started with
   `--dangerously-load-development-channels server:fridolin`. That flag is how
@@ -296,8 +304,43 @@ the key, which the run never sees, and counts it against the brain's
 | --- | --- |
 | `openai_transcribe(path, language, prompt, model)` | a recording's text, from OpenAI; a write action, since the audio leaves the machine |
 | `elevenlabs_transcribe(path, language, model)` | a recording's text and language, from ElevenLabs; a write action |
-| `elevenlabs_speak(text, voice, model, format)` | reads a text aloud into `speech/` in the run's temp folder and answers the file's path; a write action. The bridge cannot send it to WhatsApp yet |
+| `elevenlabs_speak(text, voice, model, format)` | reads a text aloud into `speech/` in the run's temp folder and answers the file's path; a write action. `reply_file(path, as: "voice")` sends it as a voice note |
 | `elevenlabs_voices()` | the ElevenLabs account's voices |
+
+### Sending files
+
+Any brain's run that answers someone in a WhatsApp chat, a DM or a
+group, also gets `reply_file(path, caption, as)`: it sends a file into
+that chat, and only that chat, ahead of the run's reply. Observe-only
+runs, scheduled agents, delegated tasks and calls have none.
+
+- `path` is an absolute path in the brain's folder, its media inbox or
+  its temp folder, read through `os.Root` as the connections' tools read
+  a recording, so a link cannot lead out of them. The file may be at most
+  [`max_media_mb`](CONFIGURATION.md#max_media_mb).
+- `as` is `image` (a JPEG or PNG shown in the chat, with a small
+  preview), `document` (any file, shown by its name) or `voice` (audio as
+  a voice note). Left out, a JPEG or PNG is an image and anything else a
+  document. The bridge tells what a file is from its first bytes, and
+  from its name only where they say just "zip" or "text".
+- A voice note is Ogg Opus. Other audio, such as the MP3 that
+  `elevenlabs_speak` makes, is converted with ffmpeg from the helper
+  folders ([CONFIGURATION.md](CONFIGURATION.md#helper-programs)); ffmpeg
+  reads it from a pipe and only as an audio format, so the file cannot
+  make it read others. Without ffmpeg it goes as a document, and the
+  tool's answer says so. A voice note has no caption.
+- `caption`, up to 1024 characters, goes with an image or a document.
+  Like the other outbound tools' texts, one that looks like a secret is
+  refused without your approval ([Skills, risk and approvals](#skills-risk-and-approvals)).
+
+It is a write action: refused in a lockdown and for a run whose risk
+level is `read`. The bridge keeps a copy of the file in
+`<data_dir>/outbox-files/`, which no snapshot and no core export takes,
+so it goes through the outbox in `bridge.db` like any reply
+([README](../README.md#how-it-works)): tried again while WhatsApp is
+away, and given up on after an hour; the copy goes with it.
+Once it went out, the brain's history records a line such as
+`[sent image: chart.png]` and the caption.
 
 A tool a run is not granted is absent, not refused: it is not in the
 run's list, and a call of it is a call of a tool there is none of.
@@ -656,7 +699,11 @@ riskiest skill that matches, with that skill's risk as its level, and of
 none, `write`. A delegated task's run has its core run's level and is in
 its thread. The level shows in the audit log and the Threads page; the
 bridge's own tools that write need `write`, and those that take an
-irreversible step (none today; the vault's later) need an approval.
+irreversible step (none today; the vault's later) need an approval. So
+do the brain's calendar writes: `fridolin calendar create` and `delete`
+need `write`, and an invitation Google emails, or deleting an event with
+other attendees, needs an approval
+([CALENDAR.md](CALENDAR.md#what-a-brains-calendar-writes-need)).
 
 **Irreversible steps ask first.** Every run's prompt says: before any
 irreversible step, and before each step a skill lists under `approve`,
@@ -689,7 +736,8 @@ off the machine. So the bridge's outbound tools, `contact_person`,
 `errand_answer` and `errand_contact`'s brief (to the person),
 `elevenlabs_speak` and `openai_transcribe`'s prompt (to the vendor),
 `fride_task` and `fride_reply` (into work that may become a pull request
-or an issue), refuse a call when one of its texts looks like a secret:
+or an issue), and `reply_file`'s caption (into the chat), refuse a call
+when one of its texts looks like a secret:
 a key by its prefix (`sk-…`, `sk_…`, `ghp_…`, `github_pat_…`, `xoxb-…`,
 `AKIA…`, `glpat-…`), a bearer or basic credential, a `--password` or
 `--token` flag with its value, or a password, token, secret, API key or
@@ -737,9 +785,9 @@ next message you send in that chat.
 Approvals page) pauses everything but reading: a run of a skill that
 writes or submits is refused, every other run runs at `read`, no approval
 is asked and no write or irreversible tool goes ahead, until `!unlock` or
-*Unlock*. The bridge enforces this for its own tools; what a brain does
-with its shell is up to its sandbox and its instructions. It survives a
-restart.
+*Unlock*. The bridge enforces this for its own tools and the calendar
+writes it makes for a brain; what a brain does with its shell is up to its
+sandbox and its instructions. It survives a restart.
 
 **Rate limit.** One chat starts at most `policy.max_runs_per_hour` (20)
 runs in an hour; the next is refused with a notice. Files handed in,
@@ -761,11 +809,57 @@ name and how it ended, never its arguments), `approval_requested`,
 and `node_revoked` (`!deny`, `!revoke`), never with the code or link, and
 `owner_approval`: the owner's `!approve` and `!deny` of anything else, a
 vote in the poll that lists them (each tick it newly makes), and the confirmation an unexpected one
-asks for. Texts are shortened, and what looks like a password or
+asks for, `calendar_write`, an event a run created or deleted (the
+event's id, the calendar, how many attendees it reaches, the approval,
+never its title or attendees), and `run_files`: what a run created,
+changed and deleted in its folder ([below](#what-a-run-changed)). Texts are shortened, and what looks like a password or
 token is masked. The dashboard's Threads page groups the runs by thread,
 and its Audit page filters the lines. `fridolin doctor` warns about an
 approval that has waited more than an hour, and says when the bridge is
 in lockdown.
+
+### What a run changed
+
+Each run keeps a record of the files it created, changed and deleted in
+its brain's folder, with what they held before. As the run starts, the
+bridge walks the folder and notes each file's size, time, mode and
+SHA-256, and stores the bytes of each file it has not stored yet; as the
+run ends, it walks the folder again and keeps what differs in
+`run-files/runs/<brain>/<run>.json` in the data dir, with an audit line
+of kind `run_files` that counts the changes and names the first five
+paths. A run that changed nothing keeps no record and writes no line.
+
+The bytes are in one store, `run-files/objects/`, under their SHA-256,
+shared by every run of every brain: a file is stored once however many
+runs saw it. A walk reads again only the files whose size or time changed
+since the walk before (`run-files/index/`); a write that keeps both is
+not seen.
+
+Left out of the records: the bridge's own files (`brain.json`,
+`conversation-history.jsonl`, `claude-stream.log`,
+`claude-stream.1.log`), `.git/` folders, the Files page's trash
+(`.fridolin-trash/`), the vault's `.cold.json`, what the brain's
+`backup.exclude` leaves out with the secret files a backup never takes
+(`.env`, keys), `sandbox.deny_paths` inside the folder, what the
+folder's `.gitignore` files ignore (as the run started: one it writes
+hides nothing of its own), symlinks and empty folders. The brain's media
+inbox and its own state under the data dir are not in them either. A
+folder that holds more than `run_files.max_files` files or
+`run_files.max_mb` megabytes of the rest is not walked: the run keeps a
+record that says so, and its audit line's outcome is `skipped`.
+
+Runs of one brain can overlap (a chat's run and a background one): each
+record holds every change made in the folder while its run ran, whoever
+made it, and names the other runs of the brain that ran then
+(`alongside`). The same goes for an edit you made on the Files page
+while a run ran. A [live session](#live-session)'s turns are recorded as
+runs; what its process does between turns is in no record.
+
+`run_files` in `config.json` ([CONFIGURATION.md](CONFIGURATION.md#run_files))
+sets the bounds, how long records are kept (14 days) and how much the
+store may hold (4 GB); the housekeeping job and the bridge prune it. No
+snapshot, backup or core export takes `run-files/`, so the records stay
+on the machine they were made on.
 
 ## Approval
 
@@ -1021,6 +1115,7 @@ Personal/
 | `enabled` | `false` keeps it from running on its schedule; *Run now* still runs it |
 | `description` | one line on what it is for |
 | `prompt`, `prompt_file`, `template`, `command` | what it does, at most one: the task inline; a file in the brain's folder; a built-in template (below); or a program on a node. None is the file `schedules/<name>.md` in the brain's folder |
+| `gate` | `{"argv": [...], "dir": "...", "timeout_seconds": 30, "node": "..."}`: a cheap program that runs before each brain run and decides whether the brain is woken at all ([Gates](#gates)) |
 | `vars` | `{"name": "value"}`, filling `{{name}}` in the template or task file |
 | `report` | where the result goes: `worth` (the default) sends the answer only when the run found something worth reporting (it answers `NOTHING_TO_REPORT` otherwise), `always` sends every answer, `silent` sends nothing. A failure is sent unless the agent is silent |
 | `chat` | the chat results go to, a JID; default the brain's `reply_chat` |
@@ -1030,6 +1125,7 @@ Personal/
 | `timeout_minutes` | stops a run that takes longer, in place of `run_timeout_minutes`: shorter or longer, up to 1440 (24 hours); left out or 0, `run_timeout_minutes`. A long timeout with a high effort can cost a lot of usage when a run goes in circles (for a program, it is the node's exec timeout, which the node's own limit still caps) |
 | `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
 | `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |
+| `retry_interrupted` | `false` keeps a run that a stop or restart of the bridge cut short from running once more when the bridge is back (*Restarts*, below); left out, `true`. Set it for an agent whose side effects it cannot check afterwards. Not for a `command` |
 | `preapproved` | steps the owner approved together with the schedule (`"file GitHub issues on example/repo"`): the run is told it may take them without `request_approval`; every other irreversible step still asks |
 | `github` | `{"repos": ["owner/name"], "permissions": {"issues": "write", "contents": "read"}}`: the GitHub access its runs, and no other run, are granted: each run is logged in to `gh` with a token for exactly these repositories and permissions, which ends with the run ([below](#github-for-scheduled-agents)) |
 
@@ -1079,6 +1175,22 @@ history and log, and the chat is told of the failure only. An
 agent never runs twice at once: a time that comes while its run goes on
 is left out. A lockdown runs an agent at `read`, and refuses one whose
 `risk` says more; it refuses every program on a node.
+
+**Restarts.** A run the bridge was in the middle of
+when it stopped or restarted (an update at night, a crash) shows as
+*interrupted* in the agent's runs; so does one that waited in the
+brain's queue. It counts as no failure. A brain run that was cut short
+before its result, or its failure, went to a chat runs once more when the bridge
+is back, as *retried after restart*, with a note at the top of its
+message: the previous attempt was interrupted, so check what it already
+did (your notes, this chat's history, the state of what the task
+changes) before acting, and repeat no work or delivery that already
+happened. Its reply then goes out as usual. Only once, and only while the
+agent you approved is the same as when the cut run started, it runs on
+its schedule (not paused or switched off, `schedules.enabled` on) and
+its `retry_interrupted` is not `false`. A program on a node, a run that
+FrIDE's news started, and a retry cut short in turn wait for their next
+time.
 
 **Agents run beside the chats.** A brain has two queues, each with at
 most one run at a time: its chats' (every WhatsApp chat, the live
@@ -1169,6 +1281,45 @@ without it, an exploitable finding goes only into its answer to you), and since 
  "preapproved": ["file GitHub issues, labelled bug, on you/project"]}
 ```
 
+### Gates
+
+Every brain run of an agent costs a model run, even when the answer is
+`NOTHING_TO_REPORT`. A **gate** is a cheap program that runs first and
+decides whether the brain is woken at all: "anything new in `inbox/`?",
+"did a CI status change?". A check like that can run every 5 to 15
+minutes almost for free, and the brain runs only when there is work.
+
+```json
+{"when": "every 10m", "prompt": "Sort the new files in inbox/ and tell me what needs me.",
+ "gate": {"argv": ["./bin/new-files.sh"], "timeout_seconds": 20}}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `argv` | the program and its arguments, no shell. A program with a `/` in it is relative to `dir`; a bare name is looked up on the PATH of the brain's runs |
+| `dir` | where it runs: a folder in the brain's folder, relative to it (default the brain's folder); with `node`, an absolute path there |
+| `timeout_seconds` | at most this long, up to 300; left out, 30 |
+| `node` | run it on this node, by id or name, through its `exec` like a [program on a node](#scheduled-agents): its allowlist and your approval of its commands apply, and a node that accepts programs from the core gets it added when you approve the agent. Left out, it runs as the brain, in its sandbox, with the PATH, `TMPDIR` and caches of its runs, `FRIDOLIN_BRAIN_ID`, `FRIDOLIN_SCHEDULE` (the agent's name) and `TZ`, and no token of a run: it cannot reach the bridge |
+
+The last line the gate writes to stdout is JSON:
+
+- `{"wake": false}`: the run ends there, as *gated*, with no model run
+  and nothing sent;
+- `{"wake": true, "data": {...}}`: the brain run starts as usual, with
+  `data` (at most 64 KiB) added to its task. `data` may be left out.
+
+A gate that runs longer than its timeout, or writes more than 1 MiB,
+is stopped, its whole process group; that, a non-zero exit, or a last
+line that is no such JSON fails the run, which the chat hears of as of
+any failure (unless the agent is `silent`): a broken gate never quietly
+skips the runs. What it writes goes into the run's log, its exit code
+into the run. The gate is part of the agent's file, so you approve it
+with the agent, and a change to it waits for your approval like any
+other. It runs before every run, *Run now* and the retry after a restart
+included, but not before a run that FrIDE's news starts. A lockdown
+refuses a gated agent's runs, as it refuses a program on a node. Not for
+a `command` agent.
+
 ### GitHub for scheduled agents
 
 A run is logged in to GitHub only when its agent has a `github` grant:
@@ -1253,10 +1404,12 @@ GitHub's installed repositories, the prompt or the program), what it may
 do in plain words (risk level, preapproved steps, GitHub access, node,
 where results go, and more settings), and the exact file it writes.
 Saving writes the file and approves it. An agent's page shows every
-field, its runs (start, how long, result, cost or tokens, and the
+field, its [gate](#gates) among them, its runs (start, how long, result,
+*gated* for one its gate kept the brain from, cost or tokens, and the
 message sent) and each run's log: the CLI's output as the activity log
-has it, its tool calls, and errors; *Edit* and *Duplicate* go through the
-same wizard, *Delete* asks first. Pausing is the dashboard's, not the
+has it, its tool calls, its gate's output, and errors; *Edit* and
+*Duplicate* go through the same wizard, which keeps a gate as it is,
+*Delete* asks first. Pausing is the dashboard's, not the
 file's: a paused agent does not make up the times it missed when it is
 resumed.
 

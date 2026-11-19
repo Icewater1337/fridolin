@@ -74,6 +74,7 @@ type Live struct {
 	Fride                      FrideConfig
 	Connections                ConnectionsConfig
 	Calls                      CallsConfig
+	RunFiles                   RunFilesSettings
 	WhatsApp                   WhatsAppSettings
 }
 
@@ -175,6 +176,7 @@ func liveOf(c *File) Live {
 		Fride:                      c.Fride,
 		Connections:                c.Connections,
 		Calls:                      c.Calls,
+		RunFiles:                   runFilesSettingsOf(c.RunFiles),
 		WhatsApp:                   WhatsAppSettings{Presence: *c.WhatsApp.Presence},
 	}
 }
@@ -293,6 +295,7 @@ func fileOf(c Live) File {
 		Fride:                      c.Fride,
 		Connections:                c.Connections,
 		Calls:                      c.Calls,
+		RunFiles:                   runFilesConfigOf(c.RunFiles),
 		WhatsApp:                   WhatsAppConfig{Presence: new(c.WhatsApp.Presence)},
 	}
 }

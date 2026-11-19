@@ -58,6 +58,7 @@ const (
 	callOneMoment   = "One moment."
 	callGoodbye     = "Goodbye."
 	callFailed      = "Sorry, that did not work. Please say it again."
+	callCantHear    = "I can't hear you, so I'll write instead. Goodbye."
 	errandCallLater = "I'll get back to you on WhatsApp. Goodbye."
 )
 
@@ -67,7 +68,44 @@ const callPrompt = "(On a WhatsApp voice call: this is what the owner just said,
 var (
 	errCallEnded = errors.New("the call ended")
 	errCallIdle  = errors.New("nobody spoke")
+	// errNoAudio: no sound came from the other side since the call's
+	// audio began to flow (waits.callNoAudio), a known failure of the
+	// call stack (one-way audio).
+	errNoAudio = errors.New("no inbound audio")
 )
+
+// callEnd is how a call ended (docs/CALLS.md), for its audit line and
+// the owner's notice.
+type callEnd string
+
+const (
+	endedDeclined callEnd = "declined"  // they declined it, or a device of theirs did
+	endedNoAnswer callEnd = "no_answer" // nobody picked up
+	endedHungUp   callEnd = "hung_up"   // it was picked up, and one side hung up
+	endedFailed   callEnd = "failed"    // the call stack or WhatsApp's server ended it
+)
+
+// callEndOf is how a call ended, and why in words, from the reason
+// meowcaller's OnEnd gave (whatsapp.Call) and whether the other side had
+// picked up.
+func callEndOf(reason string, pickedUp bool) (callEnd, string) {
+	switch {
+	case strings.HasPrefix(reason, "server:"), reason == "offer_failed":
+		return endedFailed, "WhatsApp's server ended it (" + reason + ")"
+	case reason == "rejected", reason == "rejected_elsewhere":
+		return endedDeclined, "they declined it"
+	case !pickedUp && (reason == "" || reason == "hangup"):
+		return endedNoAnswer, "nobody picked up"
+	case !pickedUp:
+		return endedNoAnswer, "nobody picked up (" + reason + ")"
+	case reason == "hangup":
+		return endedHungUp, "Fridolin hung up"
+	case reason == "":
+		return endedHungUp, "they ended it"
+	default:
+		return endedHungUp, "they ended it (" + reason + ")"
+	}
+}
 
 // callsOn says why no call can be taken or made now: calls are off, or
 // a connection they need has no key.
@@ -112,31 +150,114 @@ type voiceSession struct {
 	call       whatsapp.Call
 	brain, run string
 
-	ended, ready       chan struct{}
-	endOnce, readyOnce sync.Once
-	heard              chan []float32
+	ended, ready, deaf                     chan struct{}
+	endOnce, readyOnce, deafOnce, hangOnce sync.Once
+	heard                                  chan []float32
 
 	mu       sync.Mutex
 	seg      voice.Segmenter
 	speaking bool
+	// frames counts what came from the other side, and noAudio checks
+	// that some did once the audio flows. pickedUp: they answered, or
+	// Fridolin did.
+	frames   int
+	noAudio  *time.Timer
+	pickedUp bool
+	// how and why the call ended: the first of meowcaller's end and
+	// Fridolin's own decision to hang up (endAs).
+	how callEnd
+	why string
 }
 
-func (b *App) newVoiceSession(call whatsapp.Call, brain, run string) *voiceSession {
-	v := &voiceSession{b: b, call: call, brain: brain, run: run, ended: make(chan struct{}), ready: make(chan struct{}), heard: make(chan []float32, 4)}
+// newVoiceSession follows call; answered: Fridolin answered it.
+func (b *App) newVoiceSession(call whatsapp.Call, brain, run string, answered bool) *voiceSession {
+	v := &voiceSession{b: b, call: call, brain: brain, run: run, pickedUp: answered,
+		ended: make(chan struct{}), ready: make(chan struct{}), deaf: make(chan struct{}), heard: make(chan []float32, 4)}
+	noAudio := b.waits.callNoAudio
 	call.OnEnd(func(reason string) {
 		v.endOnce.Do(func() {
 			log.Printf("call %s: ended (%s)", run, reason)
+			v.mu.Lock()
+			how, why := callEndOf(reason, v.pickedUp)
+			v.endAsLocked(how, why)
+			if v.noAudio != nil {
+				v.noAudio.Stop()
+			}
+			v.mu.Unlock()
 			close(v.ended)
 		})
 	})
-	call.OnReady(func() { v.readyOnce.Do(func() { close(v.ready) }) })
+	call.OnPeerAccept(func() {
+		v.mu.Lock()
+		v.pickedUp = true
+		v.mu.Unlock()
+	})
+	call.OnReady(func() {
+		v.readyOnce.Do(func() {
+			v.mu.Lock()
+			v.pickedUp = true
+			if noAudio > 0 {
+				v.noAudio = time.AfterFunc(noAudio, v.checkHeard)
+			}
+			v.mu.Unlock()
+			close(v.ready)
+		})
+	})
 	call.Listen(v.frame)
 	return v
+}
+
+// heardNothing reports whether no sound came from the other side yet.
+func (v *voiceSession) heardNothing() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.frames == 0
+}
+
+// checkHeard gives up on a call that brought no sound since its audio
+// began to flow: listen then says so.
+func (v *voiceSession) checkHeard() {
+	if v.heardNothing() {
+		v.deafOnce.Do(func() { close(v.deaf) })
+	}
+}
+
+// endAs keeps how the call ended and why, unless that is known already.
+func (v *voiceSession) endAs(how callEnd, why string) {
+	v.mu.Lock()
+	v.endAsLocked(how, why)
+	v.mu.Unlock()
+}
+
+func (v *voiceSession) endAsLocked(how callEnd, why string) {
+	if v.how == "" {
+		v.how, v.why = how, why
+	}
+}
+
+// outcome is how the call ended and why; for a call still on that
+// nothing was kept for, that Fridolin hangs up.
+func (v *voiceSession) outcome() (callEnd, string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.how == "" {
+		return endedHungUp, "Fridolin hung up"
+	}
+	return v.how, v.why
+}
+
+// hangup ends the call, once.
+func (v *voiceSession) hangup() {
+	v.hangOnce.Do(func() {
+		v.endAs(endedHungUp, "Fridolin hung up")
+		_ = v.call.Hangup()
+	})
 }
 
 // frame takes 60 ms of what the other side says.
 func (v *voiceSession) frame(f []float32) {
 	v.mu.Lock()
+	v.frames++
 	if v.speaking {
 		v.mu.Unlock()
 		return
@@ -163,6 +284,20 @@ func (v *voiceSession) waitReady(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 	}
 	return false
+}
+
+// notReady keeps why the call's audio did not come to flow and returns
+// it: the call ended (they declined, say), nobody picked up, or it was
+// picked up and the audio did not start.
+func (v *voiceSession) notReady() (callEnd, string) {
+	v.mu.Lock()
+	if v.pickedUp {
+		v.endAsLocked(endedFailed, "the audio did not start")
+	} else {
+		v.endAsLocked(endedNoAnswer, "nobody picked up")
+	}
+	v.mu.Unlock()
+	return v.outcome()
 }
 
 // say reads text aloud and returns once it played.
@@ -210,12 +345,19 @@ func (v *voiceSession) say(ctx context.Context, text string) error {
 }
 
 // listen returns what the other side says next, transcribed: errCallIdle
-// after idle without a word, errCallEnded once the call is over.
+// after idle without a word, errCallEnded once the call is over,
+// errNoAudio when no sound came from them at all.
 func (v *voiceSession) listen(ctx context.Context, idle time.Duration) (string, error) {
 	t := time.NewTimer(idle)
 	defer t.Stop()
+	deaf := v.deaf
 	for {
 		select {
+		case <-deaf:
+			if v.heardNothing() {
+				return "", errNoAudio
+			}
+			deaf = nil // sound came just after the check
 		case u := <-v.heard:
 			text, err := v.b.transcribe(ctx, v.brain, v.run, voice.WAV(u))
 			if err != nil {
@@ -266,23 +408,48 @@ func (b *App) takeCall(call whatsapp.Call) {
 		return
 	}
 	b.auditCall(br.ID(), id, peer.User, "answered", "the owner called")
-	defer func() { _ = call.Hangup() }()
-	v := b.newVoiceSession(call, br.ID(), "call:"+id)
+	v := b.newVoiceSession(call, br.ID(), "call:"+id, true)
+	turns := 0
+	defer func() {
+		v.hangup()
+		how, why := v.outcome()
+		b.auditCall(br.ID(), id, peer.User, "ended", fmt.Sprintf("%s (%s), %d turn(s)", how, why, turns))
+		if how != endedFailed {
+			return
+		}
+		// The call did not work: the owner goes on in the chat.
+		notice := outboundmsg.OwnerCallFailedNotice(why)
+		if why == errNoAudio.Error() {
+			notice = outboundmsg.OwnerCallNoAudioNotice
+		}
+		if err := b.outbox.Text(context.Background(), jid, notice, b.cfgs.Get().MaxChunkSize); err != nil {
+			log.Printf("call %s: telling the owner: %v", id, err)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), ownerCallMax)
 	defer cancel()
-	turns := 0
-	defer func() { b.auditCall(br.ID(), id, peer.User, "ended", fmt.Sprintf("%d turn(s)", turns)) }()
 	if !v.waitReady(ctx, callReadyWait) {
+		v.notReady()
 		return
 	}
 	if err := v.say(ctx, cfg.Calls.GreetingOrDefault()); err != nil {
 		log.Printf("call %s: greeting: %v", id, err)
+		v.endAs(endedFailed, "the greeting could not be read aloud: "+err.Error())
 		return
 	}
 	for {
 		text, err := v.listen(ctx, ownerCallIdle)
 		switch {
-		case errors.Is(err, errCallIdle), errors.Is(err, context.DeadlineExceeded):
+		case errors.Is(err, errNoAudio):
+			v.endAs(endedFailed, errNoAudio.Error())
+			_ = v.say(context.Background(), callCantHear)
+			return
+		case errors.Is(err, errCallIdle):
+			v.endAs(endedHungUp, "nobody spoke")
+			_ = v.say(context.Background(), callGoodbye)
+			return
+		case errors.Is(err, context.DeadlineExceeded):
+			v.endAs(endedHungUp, "the call's time ran out")
 			_ = v.say(context.Background(), callGoodbye)
 			return
 		case errors.Is(err, errCallEnded), errors.Is(err, context.Canceled):
@@ -312,6 +479,7 @@ func (b *App) takeCall(call whatsapp.Call) {
 		case <-v.ended:
 			return
 		case <-ctx.Done():
+			v.endAs(endedHungUp, "the call's time ran out")
 			_ = v.say(context.Background(), callGoodbye)
 			return
 		}
@@ -403,16 +571,25 @@ func (b *App) errandAfterCall(id string, quiet int) {
 // errand's first message, and each thing they say goes to the errand's
 // run, whose answer is read aloud. A question for the owner, the end, an
 // abort, a silence or the call's time ends the call; an errand that has
-// not ended goes on by message.
+// not ended goes on by message. A call they decline, or on which no sound
+// comes from them, goes on by message too; one that fails before they
+// pick up ends the errand.
 func (b *App) callErrand(e store.Errand, s manifest.Errands) {
-	b.errands.setCalling(e.ID, true)
+	first := e
+	b.errands.setCalling(first.ID, true)
 	// followUp: the call got past its opener. quiet: the owner holds a
 	// question or a failure notice, so no turn follows unless more arrives.
 	followUp, quiet := false, -1
+	var v *voiceSession
 	defer func() {
-		b.errands.setCalling(e.ID, false)
+		if v != nil {
+			v.hangup()
+			how, why := v.outcome()
+			b.auditErrand(first, "call ended", fmt.Sprintf("%s (%s)", how, why))
+		}
+		b.errands.setCalling(first.ID, false)
 		if followUp {
-			b.errandAfterCall(e.ID, quiet)
+			b.errandAfterCall(first.ID, quiet)
 		}
 	}()
 	cfg := b.cfgs.Get()
@@ -431,12 +608,25 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		}
 		return
 	}
-	defer func() { _ = call.Hangup() }()
-	v := b.newVoiceSession(call, e.Brain, "errand:"+e.ID)
+	v = b.newVoiceSession(call, e.Brain, "errand:"+e.ID, false)
 	if !v.waitReady(ctx, ring) {
-		if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandExpired, "they did not pick up", time.Now()); ended {
-			b.auditErrand(e, "ended", store.ErrandExpired+": they did not pick up")
-			b.tellErrandOwner(ctx, e, outboundmsg.ErrandNoAnswerNotice(e.Name, e.ID))
+		switch how, why := v.notReady(); how {
+		case endedDeclined, endedHungUp:
+			// They, or a device of theirs, turned the call down: they
+			// get the errand's message to read instead.
+			v.hangup()
+			followUp = true
+			b.errandByMessage(ctx, e, outboundmsg.ErrandCallDeclinedNotice(e.Name, e.ID))
+		case endedFailed:
+			if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandExpired, "the call failed: "+why, time.Now()); ended {
+				b.auditErrand(e, "ended", store.ErrandExpired+": the call failed")
+				b.tellErrandOwner(ctx, e, outboundmsg.ErrandCallFailedNotice(e.Name, e.ID, why))
+			}
+		case endedNoAnswer:
+			if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandExpired, "they did not pick up", time.Now()); ended {
+				b.auditErrand(e, "ended", store.ErrandExpired+": they did not pick up")
+				b.tellErrandOwner(ctx, e, outboundmsg.ErrandNoAnswerNotice(e.Name, e.ID))
+			}
 		}
 		return
 	}
@@ -488,12 +678,21 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 	}
 	followUp = true
 	until := time.Now().Add(errandCallMax)
-	goesOn := true
+	goesOn, deaf := true, false
 	for goesOn {
 		text, err := v.listen(ctx, b.waits.errandCallIdle)
 		if err != nil {
-			if errors.Is(err, errCallIdle) && b.errandOpen(ctx, e.ID) {
-				_ = v.say(ctx, errandCallLater)
+			switch {
+			case errors.Is(err, errNoAudio):
+				v.endAs(endedFailed, errNoAudio.Error())
+				if deaf = b.errandOpen(ctx, e.ID); deaf {
+					_ = v.say(ctx, callCantHear)
+				}
+			case errors.Is(err, errCallIdle):
+				v.endAs(endedHungUp, "nobody spoke for a while")
+				if b.errandOpen(ctx, e.ID) {
+					_ = v.say(ctx, errandCallLater)
+				}
 			}
 			break
 		}
@@ -506,6 +705,7 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 			break
 		}
 		if e.Sent >= errand.MaxMessages || time.Now().After(until) {
+			v.endAs(endedHungUp, "it reached the errand's limits")
 			_ = v.say(ctx, errandCallLater)
 			break
 		}
@@ -516,6 +716,7 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		ans, err := b.errandRespond(ctx, e, s, lines, true)
 		if err != nil {
 			log.Printf("errand %s: %v", e.ID, err)
+			v.endAs(endedHungUp, "the errand's run gave no answer")
 			if b.errandOpen(ctx, e.ID) {
 				_ = v.say(ctx, errandCallLater)
 			}
@@ -526,6 +727,7 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 		goesOn = b.errandAct(ctx, e, ans, lines, ch)
 		if !goesOn && ans.Action == errand.AskOwner {
 			// The owner has the question; the call has done what it can.
+			v.endAs(endedHungUp, "a question for the owner")
 			if l, err := b.store.ErrandLines(ctx, e.ID); err == nil {
 				quiet = len(l)
 			} else {
@@ -537,7 +739,39 @@ func (b *App) callErrand(e store.Errand, s manifest.Errands) {
 			return
 		}
 	}
-	if cur, err := b.store.GetErrand(ctx, e.ID); err == nil && cur.State == store.ErrandOpen {
-		b.tellErrandOwner(ctx, cur, outboundmsg.ErrandCallEndedNotice(e.Name, e.ID))
+	if deaf {
+		v.hangup()
+		b.errandByMessage(ctx, first, outboundmsg.ErrandCallNoAudioNotice(first.Name, first.ID))
+		return
 	}
+	if cur, err := b.store.GetErrand(ctx, first.ID); err == nil && cur.State == store.ErrandOpen {
+		_, why := v.outcome()
+		b.tellErrandOwner(ctx, cur, outboundmsg.ErrandCallEndedNotice(first.Name, first.ID, why))
+	}
+}
+
+// errandByMessage carries errand e on by message after a call that could
+// not: its first message goes to them as one, unless a line of theirs
+// waits for an answer (errandAfterCall gives it a turn), and the owner is
+// told notice.
+func (b *App) errandByMessage(ctx context.Context, e store.Errand, notice string) {
+	lines, err := b.store.ErrandLines(ctx, e.ID)
+	if err != nil {
+		log.Printf("errand %s: going on by message: %v", e.ID, err)
+		return
+	}
+	if len(lines) == 0 || lines[len(lines)-1].Sender == errand.FromYou {
+		if err := b.sayInErrand(ctx, e, e.Message); err != nil {
+			if errors.Is(err, errandEnded) {
+				return
+			}
+			why := "its message after the call could not be sent: " + err.Error()
+			if ended, _ := b.store.EndErrand(ctx, e.ID, store.ErrandExpired, why, time.Now()); ended {
+				b.auditErrand(e, "ended", store.ErrandExpired+": its message after the call could not be sent")
+				b.tellErrandOwner(ctx, e, outboundmsg.ErrandExpiredNotice(e.Name, e.ID, why))
+			}
+			return
+		}
+	}
+	b.tellErrandOwner(ctx, e, notice)
 }

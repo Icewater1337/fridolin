@@ -131,6 +131,11 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "schedules.keep_runs"}},
 	{Field: Field{Name: "schedules.max_total_mb"}},
 	{Field: Field{Name: "schedules.max_log_kb"}},
+	{Field: Field{Name: "run_files.enabled"}},
+	{Field: Field{Name: "run_files.max_files"}},
+	{Field: Field{Name: "run_files.max_mb"}},
+	{Field: Field{Name: "run_files.keep_days"}},
+	{Field: Field{Name: "run_files.max_store_mb"}},
 	{Field: Field{Name: "fride.news"}},
 	// Read at each start of an instance and by the idle stop.
 	{Field: Field{Name: "fride.instances"}},

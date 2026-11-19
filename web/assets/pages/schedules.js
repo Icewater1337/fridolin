@@ -12,7 +12,7 @@ import { brainsResource, nodesResource, resource, schedulesResource } from '../a
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fieldDiff, lineDiff, sortKeys } from '../lib/diff.js';
 import { fmtDuration, prettyJSON } from '../lib/format.js';
-import { STATES, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, runTime, stateOf, varsText, zoneNote } from '../lib/schedules.js';
+import { STATES, fileJSON, filterAgents, gateText, groupByBrain, inTime, permissionsOf, runTime, stateOf, triggerText, varsText, zoneNote } from '../lib/schedules.js';
 import { agentWizard } from '../components/agent-wizard.js';
 import { btn } from '../components/buttons.js';
 import { badge, callout, empty, kv, mono, pageHeader, spinner, timeAgo } from '../components/common.js';
@@ -413,7 +413,7 @@ function runRow(brain, name, selected) {
     else if (r.input_tokens || r.output_tokens) cost = `${r.input_tokens || 0} + ${r.output_tokens || 0} tokens`;
     else if (r.exit_code !== undefined && r.exit_code !== null) cost = `exit ${r.exit_code}`;
     return h(`tr${r.id === selected ? '.selected' : ''}`,
-      h('td', h('a', { href: link(brain, name, r.id) }, timeAgo(r.started)), h('div.muted.small', r.trigger === 'manual' ? `by hand (${r.by || 'dashboard'})` : r.trigger)),
+      h('td', h('a', { href: link(brain, name, r.id) }, timeAgo(r.started)), h('div.muted.small', triggerText(r))),
       h('td.right', r.duration_ms ? fmtDuration(r.duration_ms / 1000) : ''),
       h('td', outcomeBadge(r.status), r.error ? h('div.muted.small', r.error) : null),
       h('td', cost),
@@ -437,6 +437,7 @@ function details(a) {
       ['File', a.file ? mono(a.file, { copy: true }) : h('span.muted', 'memory.consolidate in brain.json')],
       ['Description', s.description || null],
       ['Does', what],
+      ['Gate', s.gate ? h('span', mono((s.gate.argv || []).join(' ')), h('div.muted.small', gateText(s.gate))) : null],
       ['Template vars', s.vars && Object.keys(s.vars).length ? h('pre.code', varsText(s.vars)) : null],
       ['When', mono(s.when)],
       ['Next run', a.next ? `${runTime(a.next)} (${inTime(a.next)})` : (a.state === 'pending' ? 'after approval' : '—')],
@@ -447,6 +448,7 @@ function details(a) {
       ['Timeout', s.timeout_minutes ? `${s.timeout_minutes} min` : 'run_timeout_minutes'],
       ['Missed while the bridge was down', s.missed === 'skip' ? 'skipped' : 'run once when it is back'],
       ['Jitter', s.jitter_minutes !== undefined ? `${s.jitter_minutes} min` : 'schedules.jitter_minutes'],
+      ['Cut short by a restart', s.command ? null : (s.retry_interrupted === false ? 'waits for its next time' : 'runs once more, checking first what it did')],
       ['Problem', a.problem ? h('span.warn-text', a.problem) : null],
     ]),
     a.file ? h('details.details', h('summary', 'The file'), h('pre.code.agent-json', fileJSON(s))) : null);

@@ -240,6 +240,11 @@ func (h *housekeepingService) Run(ctx context.Context, trigger string, forceDry 
 	} else if n > 0 {
 		log.Printf("housekeeping: dropped %d runs of scheduled agents beyond schedules.keep_days, keep_runs or max_total_mb", n)
 	}
+	// The runs' records of their files within run_files.keep_days and
+	// max_store_mb, the same way.
+	if _, err := h.b.runFiles.prune(); err != nil {
+		rep.Errors = append(rep.Errors, "the runs' records of their files: "+err.Error())
+	}
 	rep.Findings = findings
 	if rep.Findings == nil {
 		rep.Findings = []housekeeping.Finding{}
