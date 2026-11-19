@@ -1,0 +1,20 @@
+fridolin runs — what brain runs changed in their folders, and undoing it
+
+Usage:
+  fridolin runs list [--brain ID] [--limit N] [--json]
+                              the runs that changed files, newest first
+  fridolin runs show RUN [--json]
+                              what RUN created, changed and deleted, and what
+                              undoing it would do now
+  fridolin runs undo RUN [--yes] [--json]
+                              put RUN back: write back what it changed or
+                              deleted, move what it created to the folder's
+                              trash; a file that changed since is left as it
+                              is. Without --yes it only says what it would do
+
+They talk to the running bridge's dashboard API (docs/BRAINS.md, "What a run
+changed").
+
+Flags:
+  --config PATH     config file (default: $FRIDOLIN_CONFIG, else
+                    ~/.fridolin/config.json)

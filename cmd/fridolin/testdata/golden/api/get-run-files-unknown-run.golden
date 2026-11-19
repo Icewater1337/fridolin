@@ -1,0 +1,7 @@
+GET /api/runs/nope/files
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no record of that run's files: it changed none, ended longer ago than run_files.keep_days, or is no run"
+}

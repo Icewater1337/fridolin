@@ -251,6 +251,28 @@ func catalogue() []struct{ name, text string } {
 		{"unblockedReply", outboundmsg.UnblockedReply("15551234567")},
 		{"notBlockedReply", outboundmsg.NotBlockedReply("15551234567")},
 		{"unblockUsage", outboundmsg.UnblockUsage},
+		{"undoUsage", outboundmsg.UndoUsage},
+		{"undoListReply(none)", outboundmsg.UndoListReply(nil, 14, fleetNow)},
+		{"undoListReply", outboundmsg.UndoListReply([]outboundmsg.UndoRun{
+			{Run: "rAb12Cd34Ef5", Brain: "taxes", Summary: "1 created, 2 changed: drafts/2025.md, notes.md and 1 more", Ended: fleetNow.Add(-12 * time.Minute)},
+			{Run: "rXy98Zw76Vu5", Brain: "home", Summary: "1 deleted: shopping.md", Ended: fleetNow.Add(-26 * time.Hour), Undone: true},
+		}, 14, fleetNow)},
+		{"undoPlanReply", outboundmsg.UndoPlanReply("rAb12Cd34Ef5", "taxes", fleetNow.Add(-12*time.Minute), fleetNow, time.Time{}, "", catalogueUndoSteps)},
+		{"undoPlanReply(nothing)", outboundmsg.UndoPlanReply("rAb12Cd34Ef5", "taxes", fleetNow.Add(-3*time.Hour), fleetNow, fleetNow.Add(-time.Hour), "15551234567", []outboundmsg.UndoStep{
+			{Path: "notes.md", Op: "changed", Action: "none", Why: "it is as it was before the run"},
+			{Path: "drafts/2025.md", Op: "created", Action: "none", Why: "it is gone already"},
+		})},
+		{"undoDoneReply", outboundmsg.UndoDoneReply("rAb12Cd34Ef5", []outboundmsg.UndoStep{
+			{Path: "notes.md", Op: "changed", Action: "restore", Done: true},
+			{Path: "drafts/2025.md", Op: "created", Action: "trash", Done: true},
+			{Path: "summary.md", Op: "changed", Action: "conflict", Why: "it changed since the run"},
+		})},
+		{"undoDoneReply(failed)", outboundmsg.UndoDoneReply("rAb12Cd34Ef5", []outboundmsg.UndoStep{
+			{Path: "notes.md", Op: "changed", Action: "restore", Error: "permission denied"},
+		})},
+		{"undoNoRecordReply", outboundmsg.UndoNoRecordReply("rAb12Cd34Ef5", 14)},
+		{"undoRunningReply", outboundmsg.UndoRunningReply("rAb12Cd34Ef5")},
+		{"undoNotRecordedReply", outboundmsg.UndoNotRecordedReply("rAb12Cd34Ef5", "its folders hold more than 20000 files")},
 		{"errandCallDraft", outboundmsg.ErrandCallDraft("Alex", "15551234567", "Hi, this is Fridolin, Sam's assistant. I'm an AI assistant, and I keep notes of this call. Could we move dinner to 8pm?", "Move dinner", "8pm or later.")},
 		{"errandCallingNotice", outboundmsg.ErrandCallingNotice("Alex", "e1a2b3c4")},
 		{"errandNoAnswerNotice", outboundmsg.ErrandNoAnswerNotice("Alex", "e1a2b3c4")},
@@ -265,6 +287,16 @@ var catalogueNodeApproval = outboundmsg.OwnerApproval{
 	Facts:  []string{"From: laptop (you@example.com) on your tailnet, 100.64.0.7", "Started: with a join code you asked for with !join"},
 	Allows: nodeproto.Capabilities{Host: true, Fride: &nodeproto.FrideCap{URL: "http://127.0.0.1:17840"}}.Plain(),
 	Ref:    "8233270f8a24", Option: "laptop (Windows) joins as a node",
+}
+
+// catalogueUndoSteps are what !undo <run> plans for a run that created a
+// draft, changed notes, deleted a list, and changed a summary that was
+// edited again since.
+var catalogueUndoSteps = []outboundmsg.UndoStep{
+	{Path: "drafts/2025.md", Op: "created", Action: "trash"},
+	{Path: "notes.md", Op: "changed", Action: "restore"},
+	{Path: "shopping.md", Op: "deleted", Action: "restore"},
+	{Path: "summary.md", Op: "changed", Action: "conflict", Why: "it changed since the run"},
 }
 
 // fleetNow and fleetNodes are the fleet !fleet lists in the catalogue:

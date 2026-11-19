@@ -61,7 +61,8 @@ func HelpReply(groupTrigger string) string {
 		"• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard\n" +
 		"• `!approve`, `!deny` — owner only, direct chat: approve, or turn down, what waits for you (a poll asks which when several wait)\n" +
 		"• `!revoke <ref>` — owner only, direct chat: shut a node out\n" +
-		"• `!unblock <number>` — owner only, direct chat: let me hear someone again whom I stopped listening to in an errand"
+		"• `!unblock <number>` — owner only, direct chat: let me hear someone again whom I stopped listening to in an errand\n" +
+		"• `!undo <run>` — owner only, direct chat: put back the files a run changed in its brain's folder (`!undo` lists the runs)"
 	if groupTrigger != "" {
 		help += "\n\nIn this group, start your message with `" + groupTrigger + "` or reply to one of mine to address me, commands included."
 	}
@@ -249,11 +250,11 @@ const NodesOffNotice = "🖥️ Nodes are off. Turn on nodes.enabled in the conf
 
 // OwnerCommandGroupNotice answers !join, !dashboard, !approve or !revoke
 // in a group: what they hand out or change is the owner's alone.
-const OwnerCommandGroupNotice = "🔒 !join, !dashboard, !approve, !deny, !revoke and !movecore answer only in the owner's direct chat."
+const OwnerCommandGroupNotice = "🔒 !join, !dashboard, !approve, !deny, !revoke, !movecore, !unblock and !undo answer only in the owner's direct chat."
 
 // OwnerCommandOwnerOnly answers !join, !dashboard, !approve or !revoke
 // from someone who is not the owner (a number in allowed_numbers).
-const OwnerCommandOwnerOnly = "🔒 Only the owner can ask for join codes and sign-in links, approve and turn things down, or move the core."
+const OwnerCommandOwnerOnly = "🔒 Only the owner can ask for join codes and sign-in links, approve and turn things down, move the core, or undo a run."
 
 // OwnerCommandRateLimited answers !join or !dashboard asked for more than
 // max times in the last hour.
@@ -1334,3 +1335,96 @@ func NotBlockedReply(number string) string {
 
 // UnblockUsage answers !unblock without a number.
 const UnblockUsage = "🔓 `!unblock <number>`, with the country code, lets Fridolin hear someone it stopped listening to in an errand."
+
+// UndoUsage answers !undo with words it does not take.
+const UndoUsage = "⏪ `!undo` lists the runs that changed files in their brain's folder; `!undo <run>` shows what putting one back would do, and `!undo <run> yes` does it."
+
+// UndoListReply answers !undo: the runs whose records hold changed
+// files, newest first. keepDays is how long records are kept.
+func UndoListReply(runs []UndoRun, keepDays int, now time.Time) string {
+	if len(runs) == 0 {
+		return fmt.Sprintf("⏪ No run changed files in its brain's folder in the last %d days.", keepDays)
+	}
+	var b strings.Builder
+	b.WriteString("⏪ *Runs that changed files*, newest first:\n")
+	for _, r := range runs {
+		fmt.Fprintf(&b, "\n• `%s` — %s, %s", r.Run, r.Brain, ago(now.Sub(r.Ended)))
+		if r.Undone {
+			b.WriteString(", undone")
+		}
+		b.WriteString("\n  " + r.Summary)
+	}
+	b.WriteString("\n\nSend `!undo <run>` to see what putting one back would do.")
+	return b.String()
+}
+
+// UndoPlanReply answers !undo <run>: what putting run of brain back would
+// do to each file. undoneAt and undoneBy say when and by whom it was
+// undone before, if it was.
+func UndoPlanReply(run, brain string, ended, now, undoneAt time.Time, undoneBy string, steps []UndoStep) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "⏪ Run `%s` of %s ended %s and changed %s.", run, brain, ago(now.Sub(ended)), files(len(steps)))
+	if !undoneAt.IsZero() {
+		fmt.Fprintf(&b, " It was undone %s by %s.", ago(now.Sub(undoneAt)), undoneBy)
+	}
+	n := undoCounts(steps)
+	if n["restore"]+n["trash"] == 0 {
+		b.WriteString(" There is nothing to put back:")
+		undoList(&b, steps, undoLine)
+		return b.String()
+	}
+	b.WriteString(" Undoing it would:")
+	undoList(&b, steps, undoLine)
+	fmt.Fprintf(&b, "\n\nSend `!undo %s yes` to do it.", run)
+	return b.String()
+}
+
+// UndoDoneReply answers !undo <run> yes: what putting run back did.
+func UndoDoneReply(run string, steps []UndoStep) string {
+	restored, trashed := 0, 0
+	var left, failed []UndoStep
+	for _, s := range steps {
+		switch {
+		case s.Error != "":
+			failed = append(failed, s)
+		case s.Done && s.Action == "restore":
+			restored++
+		case s.Done && s.Action == "trash":
+			trashed++
+		case s.Action == "conflict":
+			left = append(left, s)
+		}
+	}
+	var b strings.Builder
+	if len(failed) > 0 {
+		fmt.Fprintf(&b, "⚠️ Run `%s` is partly undone:", run)
+	} else {
+		fmt.Fprintf(&b, "✅ Run `%s` is undone:", run)
+	}
+	fmt.Fprintf(&b, " %s written back, %s moved to the folder's trash (.fridolin-trash, where they stay until you empty it).", files(restored), files(trashed))
+	if len(left) > 0 {
+		b.WriteString("\n\nLeft as they are, as they changed since the run:")
+		undoList(&b, left, func(s UndoStep) string { return s.Path + ": " + s.Why })
+	}
+	if len(failed) > 0 {
+		b.WriteString("\n\nCould not be put back:")
+		undoList(&b, failed, func(s UndoStep) string { return s.Path + ": " + s.Error })
+	}
+	return b.String()
+}
+
+// UndoNoRecordReply answers !undo of a run without a record of its files.
+func UndoNoRecordReply(run string, keepDays int) string {
+	return fmt.Sprintf("❓ There is no record of files run `%s` changed: it changed none, ended more than %d days ago, or is no run. `!undo` lists the runs that did.", run, keepDays)
+}
+
+// UndoRunningReply answers !undo of a run that has not ended.
+func UndoRunningReply(run string) string {
+	return fmt.Sprintf("⏳ Run `%s` has not ended yet. Undo it once it has.", run)
+}
+
+// UndoNotRecordedReply answers !undo of a run whose files were not
+// recorded, and why.
+func UndoNotRecordedReply(run, why string) string {
+	return fmt.Sprintf("❓ The files of run `%s` were not recorded (%s), so there is nothing to put back.", run, why)
+}

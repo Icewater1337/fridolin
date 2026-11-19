@@ -44,6 +44,8 @@ GET /api/nodes/moves/{id}
 GET /api/plaud/app.apk
 GET /api/plaud/status
 GET /api/policy
+GET /api/run-files
+GET /api/runs/{run}/files
 GET /api/site
 GET /api/site/build/{id}
 GET /api/site/builders
@@ -115,6 +117,7 @@ POST /api/plaud/resend
 POST /api/plaud/sync
 POST /api/policy/lockdown
 POST /api/restart
+POST /api/runs/{run}/undo
 POST /api/site/build/{id}
 POST /api/site/build/{id}/new
 POST /api/site/build/{id}/stop

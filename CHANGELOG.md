@@ -23,6 +23,15 @@ for compatibility.
   housekeeping job prunes the records. No snapshot, Drive backup or
   core export takes `run-files/`.
   [docs/BRAINS.md](docs/BRAINS.md#what-a-run-changed)
+- **`!undo <run>` puts back what a run changed in its brain's folder.**
+  From your direct chat, `!undo` lists the runs that changed files,
+  `!undo <run>` shows what undoing one would do, and `!undo <run> yes`
+  writes back what it changed or deleted and moves what it created to the
+  folder's trash (`.fridolin-trash`). A file that changed since the run is
+  left as it is and listed. The same from a run's Audit page on the
+  dashboard (*Undo this run…*), from `fridolin runs list|show|undo`, and
+  through `GET /api/run-files`, `GET /api/runs/{run}/files` and `POST
+  /api/runs/{run}/undo`. [docs/BRAINS.md](docs/BRAINS.md#undoing-a-run)
 - **FrIDE and scheduled agents can rerun a failed check.** A GitHub App
   made with *Let FrIDE open pull requests* now also gets `actions:
   write`, so a check that failed for a reason of GitHub's own (a release

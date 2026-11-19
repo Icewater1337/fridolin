@@ -93,6 +93,55 @@ test('the Audit page filters by kind and run', async (t) => {
   assert.match(calls.filter((c) => c.path.startsWith('/api/audit')).at(-1).path, /kind=approval_vote/);
 });
 
+// A run's audit lines come with the files it changed and what undoing it
+// would do; Undo asks first, then shows what it did.
+test('the Audit page of a run undoes its files', async (t) => {
+  const steps = [
+    { root: 'brain', path: 'notes.md', op: 'changed', action: 'restore' },
+    { root: 'brain', path: 'draft.md', op: 'created', action: 'trash' },
+    { root: 'brain', path: 'summary.md', op: 'changed', action: 'conflict', why: 'it changed since the run' },
+  ];
+  const record = { v: 1, run: 'r1', brain: 'taxes', started: '2026-10-20T10:00:00Z', ended: '2026-10-20T10:01:00Z', roots: [], alongside: ['r2'], changes: [] };
+  let undone = false;
+  const { root, calls } = await open(t, auditPage, (path, init) => {
+    if (path === '/api/runs/r1/undo' && init.method === 'POST') {
+      undone = true;
+      return { run: 'r1', brain: 'taxes', dry_run: false, steps: [{ ...steps[0], done: true }, { ...steps[1], done: true, to: '.fridolin-trash/20261020-100500/draft.md' }, steps[2]] };
+    }
+    if (path === '/api/runs/r1/files') {
+      return undone
+        ? { running: false, record: { ...record, undone: { at: '2026-10-20T10:05:00Z', by: 'dashboard' } }, plan: { run: 'r1', brain: 'taxes', dry_run: true, steps: steps.map((s) => ({ ...s, action: s.action === 'conflict' ? 'conflict' : 'none', why: s.why || 'it is as it was before the run' })) } }
+        : { running: false, record, plan: { run: 'r1', brain: 'taxes', dry_run: true, steps } };
+    }
+    if (path.startsWith('/api/audit')) return [{ ts: '2026-10-20T10:01:00Z', kind: 'run_files', brain: 'taxes', run: 'r1', detail: '1 created, 2 changed: draft.md, notes.md, summary.md', outcome: 'ok' }];
+    return {};
+  }, { run: 'r1' });
+  assert.match(root.textContent, /Files a run changed/);
+  assert.match(root.textContent, /Undoing it would/);
+  assert.match(root.textContent, /it changed since the run/);
+  assert.match(root.textContent, /Ran alongside r2/);
+  button(root, 'Undo this run').click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.match(dialog.textContent, /2 files are written back/);
+  dialog.querySelectorAll('button').find((b) => b.textContent === 'Undo').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/runs/r1/undo'));
+  assert.match(root.textContent, /done: \.fridolin-trash\/20261020-100500\/draft\.md/);
+  assert.match(root.textContent, /Undone/);
+  assert.equal(button(root, 'Undo this run'), undefined, 'nothing is left to undo');
+});
+
+// A run without a record says so.
+test('the Audit page of a run that changed no files', async (t) => {
+  const { root } = await open(t, auditPage, (path) => {
+    if (path === '/api/runs/r9/files') return { status: 404, body: { error: 'no record' } };
+    if (path.startsWith('/api/audit')) return [];
+    return {};
+  }, { run: 'r9' });
+  assert.match(root.textContent, /changed no files in its brain's folder/);
+});
+
 test('the Dev page votes in a poll', async (t) => {
   const { root, calls } = await open(t, devPage, (path) => {
     if (path.startsWith('/api/dev/outbox')) return [{ ts: '2026-10-20T10:00:00Z', jid: DM, text: '🔐 Approve? Submit', poll: ['✅ Yes', '❌ No'], id: 'dev-poll-1' }];

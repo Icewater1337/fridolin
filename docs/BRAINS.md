@@ -621,7 +621,7 @@ metadata:
 | `requires.env`, `requires.bins` | the variables and programs it needs |
 | `os` | `darwin`, `linux`, `windows` (`win32` reads as `windows`) |
 | `install` | the steps that install what it needs: commands, or mappings such as `{kind: brew, formula: python}` |
-| `metadata.fridolin.risk` | the highest risk of any of its steps: `read` (search, summarise), `write` (files, a calendar event; undone by a revert) or `irreversible` (submit, send to someone else, pay, delete, publish); `read` when left out |
+| `metadata.fridolin.risk` | the highest risk of any of its steps: `read` (search, summarise), `write` (files, a calendar event; what a run changed in its folder is put back with [`!undo <run>`](#undoing-a-run), a calendar event you delete) or `irreversible` (submit, send to someone else, pay, delete, publish); `read` when left out |
 | `metadata.fridolin.approve` | the steps that stop for your yes |
 | `metadata.fridolin.vault` | the vault paths it uses, relative, globs allowed |
 | `metadata.fridolin.triggers` | words or phrases that make a message a run of this skill, each matched as a whole word, in any case: `pay` is in "Pay the bill", not in "repay" or "payload", and `steuer` not in "Steuererklärung", so list the forms a message may use |
@@ -789,6 +789,37 @@ sets the bounds, how long records are kept (14 days) and how much the
 store may hold (4 GB); the housekeeping job and the bridge prune it. No
 snapshot, backup or core export takes `run-files/`, so the records stay
 on the machine they were made on.
+
+### Undoing a run
+
+A run's record puts it back: each file it changed or deleted is written
+back as it was before the run, through a new file beside it that then
+takes its place, so a file is never half written; each file it created
+goes to the folder's trash, `.fridolin-trash/<time>/<path>`, the Files
+page's, where it stays until you empty it. A file is touched only while
+it is as the run left it (the same SHA-256): one that changed since,
+because you edited it or a later run did, is left as it is and listed
+as a conflict, and so is a file whose earlier contents are no longer
+stored. That is also what keeps the undo of one of two runs that ran
+alongside from taking back the other's later change. A file that is as
+it was before the run already is left alone. Every undo first shows
+what it would do, and writes an audit line of kind `run_files` (`by` who
+asked) once done; the record notes it was undone. The bridge does not
+follow a symlink a brain put in a file's place or on its way.
+
+- **WhatsApp**, from your number in your direct chat: `!undo` lists the
+  last runs that changed files, `!undo <run>` says what undoing that run
+  would do to each file, and `!undo <run> yes` does it.
+- **Dashboard**: a run's page under Audit (from the Threads page's
+  *Audit* link, `#/audit/<run>`) lists its files with what undoing it
+  would do, and *Undo this run…* does it after you confirm.
+- **CLI**: `fridolin runs list`, `fridolin runs show <run>` and
+  `fridolin runs undo <run>`, which only says what it would do until you
+  add `--yes`.
+
+A run still going cannot be undone; nor can one whose files were not
+recorded. An undo is not undone itself: what it wrote back is the next
+run's starting point, and the files it trashed are in the trash.
 
 ## Approval
 

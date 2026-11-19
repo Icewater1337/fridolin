@@ -85,6 +85,10 @@ Usage:
   fridolin schedules list|run|pause|resume|logs
                                            the brains' scheduled agents;
                                            fridolin schedules --help
+  fridolin runs list|show RUN|undo RUN [--yes]
+                                           what brain runs changed in their
+                                           folders, and putting a run back;
+                                           fridolin runs --help
   fridolin version
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):
@@ -162,6 +166,8 @@ func Main() {
 		os.Exit(housekeepingCmd(args, os.Stdout, os.Stderr))
 	case "schedules":
 		os.Exit(schedulesCmd(args, os.Stdout, os.Stderr))
+	case "runs":
+		os.Exit(runsCmd(args, os.Stdout, os.Stderr))
 	case "history":
 		os.Exit(toolcli.History(args, processToolIO()))
 	case "polls":

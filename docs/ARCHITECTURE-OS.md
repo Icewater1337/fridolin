@@ -169,7 +169,7 @@ Every run carries a risk level, and anything irreversible stops until you say ye
 | Risk | Examples | Policy |
 | --- | --- | --- |
 | read | search history, summarise a PDF, show status | runs immediately |
-| write | files inside the vault, create a FrIDE task, a calendar event | runs, then reports; undo is a file revert or closing the task |
+| write | files inside the vault, create a FrIDE task, a calendar event | runs, then reports; undo is `!undo <run>` for what a run changed in its brain's folder (each run keeps a record of it, BRAINS.md "Undoing a run"), or closing the task |
 | irreversible | submit a form, email a third party, pay, delete outside the vault, publish | stops and sends a poll ("Submit the 2025 return? yes / no / show me the draft"); no vote within 24 h counts as no |
 
 Mechanics:

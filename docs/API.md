@@ -316,6 +316,9 @@ listed here because they decide what runs may do
 | `POST /api/approvals/{id}` | `{"decision": "approve" \| "deny"}`, which counts as the owner's vote; `409` once it is decided |
 | `GET /api/threads?limit=` | the runs of the audit log grouped by thread, newest first |
 | `GET /api/audit?kind=&brain=&thread=&run=&id=&q=&limit=&months=` | the audit log's lines, newest first, of the last `months` (2) monthly files |
+| `GET /api/run-files?brain=&limit=` | the runs whose records hold files they changed ([BRAINS.md](BRAINS.md#what-a-run-changed)), newest first: `run`, `brain`, `started`, `ended`, `summary`, the counts `created`, `changed` and `deleted`, `skipped` when the files were not recorded, `alongside` and `undone` |
+| `GET /api/runs/{run}/files` | the run's `record` (its changes, each with `before` and `after`: size, mtime, mode, SHA-256) and the `plan`: what undoing it would do now to each file (`restore`, `trash`, `none` or `conflict`, with `why`); `running` while it runs; `404` for a run without a record |
+| `POST /api/runs/{run}/undo` | puts the run back ([BRAINS.md](BRAINS.md#undoing-a-run)) and answers with each file's step, `done`, `to` (where a trashed file went) or `error`; `{"dry_run": true}` only says what it would do; `409` while the run runs, `412` for a run whose files were not recorded |
 | `GET /api/brains/{id}/skills` | the brain's skills, each with its frontmatter, `status`, the `hash` of its declared policy and the policy that applies (`effective`) |
 | `POST /api/brains/{id}/skills/approve` | `{"path", "hash"}` approves the declared policy if it is still the one with that hash (`409` otherwise) |
 | `PUT /api/brains/{id}/skills/policy` | `{"path", "risk", "approve", "vault", "triggers"}` writes them into the file and approves them |

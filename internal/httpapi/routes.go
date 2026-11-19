@@ -311,6 +311,11 @@ func (a *PolicyAPI) Register(mux *http.ServeMux) {
 		return a.Threads(r.Context(), min(max(limit, 0), 500))
 	}))
 	mux.HandleFunc("GET /api/audit", a.get(a.Audit))
+	mux.HandleFunc("GET /api/run-files", a.get(func(r *http.Request) (any, error) {
+		return a.RunFilesList(r.Context(), r.URL.Query().Get("brain"), queryInt(r, "limit"))
+	}))
+	mux.HandleFunc("GET /api/runs/{run}/files", a.get(func(r *http.Request) (any, error) { return a.RunFiles(r.Context(), r.PathValue("run")) }))
+	mux.HandleFunc("POST /api/runs/{run}/undo", a.UndoRunHandler)
 	mux.HandleFunc("GET /api/fride", a.get(func(r *http.Request) (any, error) { return a.Fride(r.Context()) }))
 	mux.HandleFunc("POST /api/fride/instances/{name}/stop", a.StopFrideInstanceHandler)
 	mux.HandleFunc("POST /api/fride/instances/{name}/start", a.StartFrideInstanceHandler)

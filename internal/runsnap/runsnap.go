@@ -19,7 +19,9 @@
 //
 // Runs of one brain may overlap (its chat and background lanes): each
 // record holds what changed in the folders while its run ran, whoever
-// changed it, and names the runs that ran alongside.
+// changed it, and names the runs that ran alongside. Putting a run back
+// (undo.go) touches a file only while it is as the run left it, so one
+// run's undo never takes back a later change of another.
 package runsnap
 
 import (
@@ -28,6 +30,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -176,8 +179,12 @@ func (s *Store) walk(brain string, root Root, ig ignoreRules, learn bool, c *cou
 	if err := hashAll(dir, cur, idx[root.Dir], s.obj); err != nil {
 		return nil, err
 	}
-	idx[root.Dir] = cur
-	s.saveIndex(brain, idx)
+	// Most walks find what the one before did: the index is written
+	// only when it changed.
+	if prev, ok := idx[root.Dir]; !ok || !maps.Equal(prev, cur) {
+		idx[root.Dir] = cur
+		s.saveIndex(brain, idx)
+	}
 	return cur, nil
 }
 
