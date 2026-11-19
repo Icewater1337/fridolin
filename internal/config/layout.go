@@ -130,6 +130,12 @@ func (l Layout) Intents(id string) string { return l.join("intents", id+".json")
 // (internal/sched), which only the bridge writes.
 func (l Layout) Schedules() string { return l.join("schedules") }
 
+// RunFiles holds the record of the files each brain run changed, and the
+// copies of their earlier contents (internal/runsnap). It holds copies of
+// the brain folders, also of those whose backup is off, so no snapshot or
+// export takes it.
+func (l Layout) RunFiles() string { return l.join("run-files") }
+
 // BrainFolders holds the brains' folders in the core's container, so that
 // they move with the volume and its exports (docs/CORE.md). There it is
 // where new brain folders go, as the home folder is elsewhere.

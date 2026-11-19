@@ -150,7 +150,10 @@ type App struct {
 	// intents are the brains' standing intents and scheduled jobs, which
 	// sched fires.
 	intents *intent.Store
-	sched   *scheduler
+	// runFiles keeps the record of the files each run changed
+	// (runfiles.go).
+	runFiles *runFilesService
+	sched    *scheduler
 	// agents are the brains' scheduled agents (schedule_runtime.go),
 	// which sched starts when they fall due.
 	agents *agents
@@ -406,6 +409,7 @@ func New(opts Options) (_ *App, err error) {
 	}
 
 	b.intents = intent.NewStore(cfgs.Boot().Layout().Intents)
+	b.runFiles = newRunFiles(b, cfgs.Boot().Layout())
 	b.sched = &scheduler{b: b, every: schedulerEvery}
 	b.agents = newAgents(b, cfgs.Boot().Layout())
 	// Runs the last stop cut short end now, before anyone lists them.

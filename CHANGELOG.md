@@ -10,6 +10,19 @@ for compatibility.
 
 ### Added
 
+- **Each run keeps a record of the files it changed.** As a brain run
+  starts and ends, the bridge walks the brain's folder and keeps what
+  the run created, changed and deleted, with the earlier contents, in
+  `run-files/` of the data dir (one store under SHA-256 shared by all
+  runs, so an unchanged file is stored once), and writes an audit line
+  of kind `run_files`. The bridge's own files, `.git/`, what
+  `backup.exclude` and `.gitignore` leave out and secret files stay out;
+  a folder over `run_files.max_files` (20000) or `max_mb` (1024) is not
+  walked, and the record says so. New `run_files` settings (`enabled`,
+  `max_files`, `max_mb`, `keep_days` 14, `max_store_mb` 4096); the
+  housekeeping job prunes the records. No snapshot, Drive backup or
+  core export takes `run-files/`.
+  [docs/BRAINS.md](docs/BRAINS.md#what-a-run-changed)
 - **Calls say how they ended, and fall back to messages.** A call's
   audit line now says whether it was `declined`, had `no_answer`, was
   `hung_up` or `failed`, and why. An errand call they decline no longer

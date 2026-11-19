@@ -213,6 +213,9 @@ type File struct {
 	Connections ConnectionsConfig `json:"connections"`
 	// Calls are WhatsApp voice calls (calls.go).
 	Calls CallsConfig `json:"calls"`
+	// RunFiles is the record each run keeps of the files it changed
+	// (runfiles.go).
+	RunFiles RunFilesConfig `json:"run_files"`
 	// WhatsApp is what the bridge shows of itself in its chats.
 	WhatsApp WhatsAppConfig `json:"whatsapp"`
 }

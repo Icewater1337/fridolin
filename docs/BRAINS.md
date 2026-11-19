@@ -809,13 +809,57 @@ name and how it ended, never its arguments), `approval_requested`,
 and `node_revoked` (`!deny`, `!revoke`), never with the code or link, and
 `owner_approval`: the owner's `!approve` and `!deny` of anything else, a
 vote in the poll that lists them (each tick it newly makes), and the confirmation an unexpected one
-asks for, and `calendar_write`, an event a run created or deleted (the
+asks for, `calendar_write`, an event a run created or deleted (the
 event's id, the calendar, how many attendees it reaches, the approval,
-never its title or attendees). Texts are shortened, and what looks like a password or
+never its title or attendees), and `run_files`: what a run created,
+changed and deleted in its folder ([below](#what-a-run-changed)). Texts are shortened, and what looks like a password or
 token is masked. The dashboard's Threads page groups the runs by thread,
 and its Audit page filters the lines. `fridolin doctor` warns about an
 approval that has waited more than an hour, and says when the bridge is
 in lockdown.
+
+### What a run changed
+
+Each run keeps a record of the files it created, changed and deleted in
+its brain's folder, with what they held before. As the run starts, the
+bridge walks the folder and notes each file's size, time, mode and
+SHA-256, and stores the bytes of each file it has not stored yet; as the
+run ends, it walks the folder again and keeps what differs in
+`run-files/runs/<brain>/<run>.json` in the data dir, with an audit line
+of kind `run_files` that counts the changes and names the first five
+paths. A run that changed nothing keeps no record and writes no line.
+
+The bytes are in one store, `run-files/objects/`, under their SHA-256,
+shared by every run of every brain: a file is stored once however many
+runs saw it. A walk reads again only the files whose size or time changed
+since the walk before (`run-files/index/`); a write that keeps both is
+not seen.
+
+Left out of the records: the bridge's own files (`brain.json`,
+`conversation-history.jsonl`, `claude-stream.log`,
+`claude-stream.1.log`), `.git/` folders, the Files page's trash
+(`.fridolin-trash/`), the vault's `.cold.json`, what the brain's
+`backup.exclude` leaves out with the secret files a backup never takes
+(`.env`, keys), `sandbox.deny_paths` inside the folder, what the
+folder's `.gitignore` files ignore (as the run started: one it writes
+hides nothing of its own), symlinks and empty folders. The brain's media
+inbox and its own state under the data dir are not in them either. A
+folder that holds more than `run_files.max_files` files or
+`run_files.max_mb` megabytes of the rest is not walked: the run keeps a
+record that says so, and its audit line's outcome is `skipped`.
+
+Runs of one brain can overlap (a chat's run and a background one): each
+record holds every change made in the folder while its run ran, whoever
+made it, and names the other runs of the brain that ran then
+(`alongside`). The same goes for an edit you made on the Files page
+while a run ran. A [live session](#live-session)'s turns are recorded as
+runs; what its process does between turns is in no record.
+
+`run_files` in `config.json` ([CONFIGURATION.md](CONFIGURATION.md#run_files))
+sets the bounds, how long records are kept (14 days) and how much the
+store may hold (4 GB); the housekeeping job and the bridge prune it. No
+snapshot, backup or core export takes `run-files/`, so the records stay
+on the machine they were made on.
 
 ## Approval
 

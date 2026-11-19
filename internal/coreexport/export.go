@@ -9,7 +9,9 @@
 // dir's files under data/. SQLite databases are copied with VACUUM INTO,
 // never as files, so a live bridge's bridge.db is exported consistently.
 // What any machine rebuilds or the cold tier holds completely is left out:
-// runs/, run-tokens/, media/ (unless asked for), vault/, core/ (the lease's
+// runs/, run-tokens/, run-files/ (the runs' records of their files, which
+// hold copies of brain folders whose backup may be off), media/ (unless
+// asked for), vault/, core/ (the lease's
 // device id and the export's own staging), migration/ (a native install's
 // own snapshots from earlier moves), lock files, SQLite's sidecars, the brains' tmp/ and
 // cache/ folders, node_modules/ and *.tmp files.
@@ -169,7 +171,7 @@ func excluded(rel string, dir bool) bool {
 		// outbox-files holds the copies of files brains send, for an
 		// hour at most: like media, of a brain whose folder may never go
 		// to the cloud.
-		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "live-tokens", "media", "vault", "migration", "outbox-files"}, base) {
+		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "live-tokens", "run-files", "media", "vault", "migration", "outbox-files"}, base) {
 			return true
 		}
 		// A brain's TMPDIR and caches (brains/<id>/tmp, brains/<id>/cache).
