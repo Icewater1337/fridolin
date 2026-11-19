@@ -123,3 +123,30 @@ func TestDevMessageJSON(t *testing.T) {
 		t.Fatalf("poll JSON = %s, want %s", got, want)
 	}
 }
+
+// The dev messenger records chat states and receipts in order, the last
+// 200 of them, apart from the messages.
+func TestDevMessengerSignals(t *testing.T) {
+	d := New(nil)
+	ctx := context.Background()
+	ids := []string{"A", "B"}
+	for _, err := range []error{d.Typing(ctx, "chat", true), d.MarkRead(ctx, "chat", ids), d.Typing(ctx, "chat", false), d.MarkPlayed(ctx, "chat", ids[:1])} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids[0] = "changed"
+	want := []Signal{{JID: "chat", Kind: SignalTyping}, {JID: "chat", Kind: SignalRead, IDs: []string{"A", "B"}}, {JID: "chat", Kind: SignalPaused}, {JID: "chat", Kind: SignalPlayed, IDs: []string{"A"}}}
+	if got := d.Signals(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("signals = %+v, want %+v", got, want)
+	}
+	if len(d.Outbox()) != 0 {
+		t.Error("signals went into the outbox")
+	}
+	for range 201 {
+		_ = d.Typing(ctx, "chat", true)
+	}
+	if n := len(d.Signals()); n != 200 {
+		t.Errorf("kept %d signals, want 200", n)
+	}
+}

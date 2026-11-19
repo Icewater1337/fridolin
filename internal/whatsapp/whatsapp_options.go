@@ -19,6 +19,9 @@ type Settings struct {
 	MediaDir      string
 	MaxMediaBytes int64
 	MaxChunkSize  int
+	// Presence shows the bridge online once it connects
+	// (whatsapp.presence, presence.go).
+	Presence bool
 }
 
 type DeviceContainer interface {
@@ -86,6 +89,7 @@ type Options struct {
 	// Optional I/O consumers use the current WhatsApp client when nil.
 	Downloader Downloader
 	Groups     GroupLister
+	Presence   Presencer
 	Notify     func(jid, text string)
 }
 

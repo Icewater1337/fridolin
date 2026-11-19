@@ -308,6 +308,9 @@ func (wa *Client) connectionEvent(rawEvt any) {
 			wa.retry.Stop()
 		}
 		wa.mu.Unlock()
+		// Not on whatsmeow's event goroutine, which must not wait.
+		wa.shownOnline.Store(false)
+		go wa.showOnline(wa.ctx)
 	case *events.PairSuccess:
 		wa.log.Infof("Paired with WhatsApp as %s", evt.ID.User)
 		wa.setOwn(evt.ID, evt.LID)

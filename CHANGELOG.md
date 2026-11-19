@@ -20,7 +20,28 @@ for compatibility.
   cannot hear them, hangs up and writes instead: an errand goes on by
   message, and your own call ends with a note in the chat.
   [docs/CALLS.md](docs/CALLS.md)
-
+- **Fridolin types while it works and reads what it took.** While a
+  brain works on a message, its chat shows "typing…", and once a brain
+  took a message it is marked read (blue ticks), a voice note played
+  once its run answered. The bridge shows itself online when it
+  connects, which WhatsApp wants before it shows typing. Untagged
+  chatter, files handed in, scheduled runs and delegated tasks show
+  none of it. New setting `whatsapp.presence` (default on) turns it all
+  off, and `"presence": false` in a brain's brain.json for that brain's
+  chats; turn it off if the bridge is linked to your own number, whose
+  phone may hold back notifications while a linked device is online.
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md#whatsapppresence)
+- **A secret does not leave in a tool call without your yes.** The
+  bridge's tools that send text off the machine (`contact_person`,
+  `errand_answer`, `errand_contact`'s brief, `elevenlabs_speak`,
+  `openai_transcribe`'s prompt, `fride_task`, `fride_reply`) refuse a
+  call whose text looks like a secret: a key by its prefix (`sk-…`,
+  `ghp_…`, `AKIA…`, `glpat-…`), a bearer or basic credential, or a
+  password, token or PIN given with its value. The brain is told to ask
+  you with `request_approval` and call again with the `approval_id`; the
+  audit log says `refused: secret-like value`, or which approval let it
+  through. Commit hashes, ids and base64 data pass.
+  [docs/BRAINS.md](docs/BRAINS.md#skills-risk-and-approvals)
 - **FrIDE and scheduled agents can rerun a failed check.** A GitHub App
   made with *Let FrIDE open pull requests* now also gets `actions:
   write`, so a check that failed for a reason of GitHub's own (a release
