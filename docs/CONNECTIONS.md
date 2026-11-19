@@ -99,7 +99,9 @@ folder. The bridge cannot send audio into WhatsApp yet; that comes later.
 The tools that send something to the provider act outside the bridge.
 In a lockdown they are refused, and so they are for a run whose risk
 level is `read` ([BRAINS.md](BRAINS.md#skills-risk-and-approvals)).
-Listing the voices only reads.
+Listing the voices only reads. `elevenlabs_speak`'s text and
+`openai_transcribe`'s prompt must not look like a secret unless you
+approved that call (an `approval_id`; BRAINS.md, "Secrets stay home").
 
 A brain whose data must not leave the machine keeps transcribing with the
 local model of `tools/transcribe.py`: leave it out of `brains`.

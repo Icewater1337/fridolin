@@ -682,6 +682,26 @@ restart keeps them. At most `policy.max_pending_irreversible` (3)
 irreversible ones wait at once. A tool the bridge marks irreversible takes
 the id of an approved request as `approval_id`, once.
 
+**Secrets stay home.** A brain that a message, a mail or a web page
+talked into it could put a token it read into a tool that sends text
+off the machine. So the bridge's outbound tools, `contact_person`,
+`errand_answer` and `errand_contact`'s brief (to the person),
+`elevenlabs_speak` and `openai_transcribe`'s prompt (to the vendor),
+`fride_task` and `fride_reply` (into work that may become a pull request
+or an issue), refuse a call when one of its texts looks like a secret:
+a key by its prefix (`sk-…`, `sk_…`, `ghp_…`, `github_pat_…`, `xoxb-…`,
+`AKIA…`, `glpat-…`), a bearer or basic credential, a `--password` or
+`--token` flag with its value, or a password, token, secret, API key or
+PIN given with its value (`password: …`, `PIN: 4821`). A value has to
+look like one: a word (`token: string`), a placeholder (`$TOKEN`,
+`<token>`) and a masked value pass, and so do commit hashes, ids and
+base64 data, which the audit log's masking would take. The brain is
+told to ask you with `request_approval`, saying what goes to whom
+without the value, and to call again with the `approval_id`, which lets
+that one call through (on a brain with `"approvals": "auto"`, as any
+other approval). The audit log's line of a refused call says `refused:
+secret-like value`; of one let through, which approval did.
+
 ### Acting without asking
 
 A brain whose `brain.json` says `"approvals": "auto"` (the brain page's
