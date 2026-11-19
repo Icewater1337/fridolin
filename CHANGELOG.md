@@ -10,6 +10,16 @@ for compatibility.
 
 ### Added
 
+- **A brain's page shows its live session.** For a brain with
+  `"live_session": "owner_dm"`, *Current run* now says whether the session
+  is ready (since when, and its turns), in a turn, starting, not running,
+  or did not come up, with why and when the bridge tries again; and when
+  the bridge's settings rule a session out (Codex,
+  `dangerously_skip_permissions` off, `inherit_claude_user_config` on), it
+  says so instead of every message quietly running `claude -p`. The same
+  is in `/api/status` and `/api/brains/{id}` (`runtime.live`), and
+  `fridolin check` says of each such brain whether a session can start.
+  [docs/BRAINS.md](docs/BRAINS.md#live-session)
 - **A scheduled agent's run that a restart cut short runs once more.**
   An update or crash in the middle of a scheduled agent's brain run no
   longer loses it until its next time, often a day or a week later. A

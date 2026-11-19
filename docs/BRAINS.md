@@ -126,6 +126,14 @@ a Claude Code *channel*.
   (`channelsEnabled`) or an account can have them off. A session that does
   not come up is left alone for 5 minutes, then 10 and 20, and every message
   runs `claude -p` meanwhile; the bridge log says what the CLI showed.
+- **Where to see it.** The brain's page in the dashboard shows the session
+  under *Current run*: ready (since when, and how many turns it took), in a
+  turn, starting, not running (your next direct message starts it), did not
+  come up (why, and when the bridge tries again), or unavailable, when the
+  bridge's settings rule a session out (Codex, `dangerously_skip_permissions`
+  off, `inherit_claude_user_config` on). `/api/status` and `/api/brains/{id}`
+  carry it as the brain's `runtime.live`, and `fridolin check` says of each
+  brain that asks for a session whether those settings let one start.
 - **How it runs.** Claude Code runs in a terminal of its own, inside the
   brain's sandbox profile and with the brain's own Claude config, started with
   `--dangerously-load-development-channels server:fridolin`. That flag is how
