@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -155,9 +154,9 @@ func (a *agents) localGate(br *brainruntime.Brain, agent string, g manifest.Sche
 			bin, args, err = sp.Command(id, prog, args)
 		}
 		if err != nil {
-			// Not err itself in the run's record: it names the sandbox's
-			// files.
-			log.Printf("brain %s: scheduled agent %s: its gate's sandbox: %v", id, agent, err)
+			// Not err itself, here or in the run's record: it names the
+			// sandbox's files and the user's. The brain's own runs log
+			// why their sandbox cannot be set up.
 			return gateOutcome{err: errors.New("the brain's sandbox could not be set up")}
 		}
 		extra = append(extra, state...)
