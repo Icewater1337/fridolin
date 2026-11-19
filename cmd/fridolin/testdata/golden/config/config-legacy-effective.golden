@@ -124,5 +124,8 @@
     "snapshots_bucket": "fridolin-snapshots"
   },
   "version": 3,
-  "viewer": false
+  "viewer": false,
+  "whatsapp": {
+    "presence": true
+  }
 }

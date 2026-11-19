@@ -86,6 +86,7 @@ restart.
 | `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
 | `approvals` | Whether the brain asks you before an irreversible step. `ask`, the default: `request_approval` puts a poll in your chat and waits for your yes ([Skills, risk and approvals](#skills-risk-and-approvals)). `auto`: it answers approved at once, without a poll, and the brain's prompt says it may act without asking and must say in its reply what it did. **A security trade-off**: the brain then sends, posts, pays, submits and deletes on its own judgement, which a message, file or web page it reads can sway; set it only on a brain you trust that far, such as your own core brain in your DM. See [Acting without asking](#acting-without-asking). Set in the dashboard under *Approvals*; like every field here, a change the brain makes itself waits for your approval. |
 | `live_session` | `off`, the default: every message runs `claude -p`. `owner_dm`: the brain keeps one Claude Code session running and wakes it with the messages you write to it in a direct chat; see [Live session](#live-session). Needs `dangerously_skip_permissions` and not `inherit_claude_user_config`; a change the brain makes itself waits for your approval, like every field here. |
+| `presence` | `false` keeps the bridge from showing "typing…" in this brain's chats while it works, and from marking the messages it takes as read there. Unset or `true` leaves it to [`whatsapp.presence`](CONFIGURATION.md#whatsapppresence), which is on by default. |
 | `backup` | Where this folder is backed up; see [BACKUP.md](BACKUP.md) and [below](#backups-cloud-and-node-targets). `backup.exclude` applies to the Google Drive backup and to the vault's snapshots (and its cold tier, for a folder in the data dir), and to the node targets; `backup.enabled: false` keeps the folder out of every backup ([VAULT.md](VAULT.md#brain-folders-and-their-backup-settings)). `backup.targets` and `backup.node_only` send it, or parts of it, to [node targets](VAULT.md#node-targets). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 | `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
@@ -681,6 +682,26 @@ which it answers there. Pending approvals live in `bridge.db`, so a
 restart keeps them. At most `policy.max_pending_irreversible` (3)
 irreversible ones wait at once. A tool the bridge marks irreversible takes
 the id of an approved request as `approval_id`, once.
+
+**Secrets stay home.** A brain that a message, a mail or a web page
+talked into it could put a token it read into a tool that sends text
+off the machine. So the bridge's outbound tools, `contact_person`,
+`errand_answer` and `errand_contact`'s brief (to the person),
+`elevenlabs_speak` and `openai_transcribe`'s prompt (to the vendor),
+`fride_task` and `fride_reply` (into work that may become a pull request
+or an issue), refuse a call when one of its texts looks like a secret:
+a key by its prefix (`sk-…`, `sk_…`, `ghp_…`, `github_pat_…`, `xoxb-…`,
+`AKIA…`, `glpat-…`), a bearer or basic credential, a `--password` or
+`--token` flag with its value, or a password, token, secret, API key or
+PIN given with its value (`password: …`, `PIN: 4821`). A value has to
+look like one: a word (`token: string`), a placeholder (`$TOKEN`,
+`<token>`) and a masked value pass, and so do commit hashes, ids and
+base64 data, which the audit log's masking would take. The brain is
+told to ask you with `request_approval`, saying what goes to whom
+without the value, and to call again with the `approval_id`, which lets
+that one call through (on a brain with `"approvals": "auto"`, as any
+other approval). The audit log's line of a refused call says `refused:
+secret-like value`; of one let through, which approval did.
 
 ### Acting without asking
 

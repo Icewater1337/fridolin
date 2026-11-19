@@ -326,6 +326,14 @@
         "max_store_mb": {"type": "integer", "minimum": 0, "maximum": 16777216, "description": "Drop the oldest records once the stored copies take more than this; the copies of what the folders hold now stay. Default 4096."}
       }
     },
+    "whatsapp": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the bridge shows of itself in its WhatsApp chats.",
+      "properties": {
+        "presence": {"type": "boolean", "description": "Show the bridge online, show typing while a brain works on a message, and mark the messages a brain took as read (voice notes as played once answered). A brain turns it off for its chats with presence: false in its brain.json. Default true."}
+      }
+    },
     "connections": {
       "type": "object",
       "additionalProperties": false,

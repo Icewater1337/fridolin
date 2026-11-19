@@ -269,5 +269,8 @@
     ]
   },
   "version": 3,
-  "viewer": false
+  "viewer": false,
+  "whatsapp": {
+    "presence": false
+  }
 }

@@ -65,9 +65,12 @@ type App struct {
 	brainMgr  *BrainManager
 	deb       *pipeline.Debouncer
 	pipeline  *pipeline.Workflow
-	logs      *logx.Ring
-	activity  *activity.Feed
-	token     *httpapi.Token
+	// typist keeps "typing…" up in the chats where runs work
+	// (chat_presence.go).
+	typist   *outboundmsg.Typist
+	logs     *logx.Ring
+	activity *activity.Feed
+	token    *httpapi.Token
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
 	sessions     *httpapi.DashboardSessions
@@ -411,8 +414,10 @@ func New(opts Options) (_ *App, err error) {
 	b.agents = newAgents(b, cfgs.Boot().Layout())
 	// Runs the last stop cut short end now, before anyone lists them.
 	b.agents.recover(time.Now())
+	b.typist = outboundmsg.NewTypist(b.presence, outboundmsg.TypingEvery)
 	b.brainMgr.SetHooks(BrainHooks{
 		Live:        b.live,
+		Typing:      b.typing,
 		Notice:      b.workingNotice,
 		Question:    b.askQuestion,
 		Deliver:     b.deliverRun,

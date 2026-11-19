@@ -38,7 +38,7 @@ brains/main.brain.json -rw------- d5f2c441f45b5dff
 	    "default": "you@example.com"
 	  }
 	}
-config.json -rw------- d53c48d4ad54930a
+config.json -rw------- cb798709e3b420ae
 	{
 	  "version": 3,
 	  "allowed_numbers": [
@@ -142,5 +142,6 @@ config.json -rw------- d53c48d4ad54930a
 	    }
 	  },
 	  "calls": {},
-	  "run_files": {}
+	  "run_files": {},
+	  "whatsapp": {}
 	}

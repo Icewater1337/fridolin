@@ -59,8 +59,17 @@ type testSink struct {
 	Deliver   func(*Brain, Inbound, claudecli.Result)
 	Ask       func(*Brain, string, string) bool
 	Keep      func(*Brain, []Inbound)
+	// Run hears Running; its result is what the worker calls once the
+	// run ended.
+	Run func(*Brain, Inbound) func()
 }
 
+func (s *testSink) Running(b *Brain, m Inbound) func() {
+	if s.Run != nil {
+		return s.Run(b, m)
+	}
+	return nil
+}
 func (s *testSink) Working(string)                      {}
 func (s *testSink) Question(b *Brain, j, t string) bool { return s.Ask != nil && s.Ask(b, j, t) }
 func (s *testSink) Finished(b *Brain, m Inbound, r claudecli.Result) {

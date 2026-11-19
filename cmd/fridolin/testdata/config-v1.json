@@ -249,5 +249,8 @@
     "max_mb": 256,
     "keep_days": 7,
     "max_store_mb": 1024
+  },
+  "whatsapp": {
+    "presence": false
   }
 }
