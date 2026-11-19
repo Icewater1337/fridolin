@@ -1318,7 +1318,11 @@ cut short is not run again, since it may have done part of what it was
 asked: its chat gets "🔄 I restarted while I was working on your message.
 Send it again if you still need an answer." Files sent through `/ingest`
 and messages from the dev page are not kept; a [Plaud](PLAUD.md)
-recording is handed over again after the restart.
+recording is handed over again after the restart. A [scheduled
+agent's](BRAINS.md#scheduled-agents) brain run is the exception: one the
+stop cut short before it sent anything runs once more after the start,
+told to check first what the cut run already did, unless its
+`retry_interrupted` is `false`.
 
 Shutdown waits for a finished run's answer to reach the outbox before
 closing the database, including when its brain was removed or moved.
