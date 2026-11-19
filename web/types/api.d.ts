@@ -103,6 +103,8 @@ export interface Schedule {
   /** run (the default) or skip. */
   missed?: string;
   jitter_minutes?: number;
+  /** false: a run a restart cut short waits for its next time; unset is true. */
+  retry_interrupted?: boolean;
   preapproved?: string[];
   github?: GitHubGrant;
 }
@@ -1719,6 +1721,10 @@ export interface ScheduleRun {
   exit_code?: number;
   node?: string;
   log_bytes?: number;
+  /** The revision of the approved schedule it started under. */
+  rev?: string;
+  /** For a restart-retry run, the run a restart cut short that it retries. */
+  retry_of?: string;
 }
 
 /** A scheduled agent as the Schedules page lists it. */

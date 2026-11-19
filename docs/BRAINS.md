@@ -1066,6 +1066,7 @@ Personal/
 | `timeout_minutes` | stops a run that takes longer, in place of `run_timeout_minutes`: shorter or longer, up to 1440 (24 hours); left out or 0, `run_timeout_minutes`. A long timeout with a high effort can cost a lot of usage when a run goes in circles (for a program, it is the node's exec timeout, which the node's own limit still caps) |
 | `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
 | `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |
+| `retry_interrupted` | `false` keeps a run that a stop or restart of the bridge cut short from running once more when the bridge is back (*Restarts*, below); left out, `true`. Set it for an agent whose side effects it cannot check afterwards. Not for a `command` |
 | `preapproved` | steps the owner approved together with the schedule (`"file GitHub issues on example/repo"`): the run is told it may take them without `request_approval`; every other irreversible step still asks |
 | `github` | `{"repos": ["owner/name"], "permissions": {"issues": "write", "contents": "read"}}`: the GitHub access its runs, and no other run, are granted: each run is logged in to `gh` with a token for exactly these repositories and permissions, which ends with the run ([below](#github-for-scheduled-agents)) |
 
@@ -1115,6 +1116,22 @@ history and log, and the chat is told of the failure only. An
 agent never runs twice at once: a time that comes while its run goes on
 is left out. A lockdown runs an agent at `read`, and refuses one whose
 `risk` says more; it refuses every program on a node.
+
+**Restarts.** A run the bridge was in the middle of
+when it stopped or restarted (an update at night, a crash) shows as
+*interrupted* in the agent's runs; so does one that waited in the
+brain's queue. It counts as no failure. A brain run that was cut short
+before its result, or its failure, went to a chat runs once more when the bridge
+is back, as *retried after restart*, with a note at the top of its
+message: the previous attempt was interrupted, so check what it already
+did (your notes, this chat's history, the state of what the task
+changes) before acting, and repeat no work or delivery that already
+happened. Its reply then goes out as usual. Only once, and only while the
+agent you approved is the same as when the cut run started, it runs on
+its schedule (not paused or switched off, `schedules.enabled` on) and
+its `retry_interrupted` is not `false`. A program on a node, a run that
+FrIDE's news started, and a retry cut short in turn wait for their next
+time.
 
 **Agents run beside the chats.** A brain has two queues, each with at
 most one run at a time: its chats' (every WhatsApp chat, the live

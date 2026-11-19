@@ -88,7 +88,8 @@ type opsAgent struct {
 	LastRun      *opsAgentRun `json:"last_run,omitempty"`
 	Next         *time.Time   `json:"next,omitempty"`
 	// ConsecutiveFailures counts its last runs that failed or were
-	// refused, newest first, up to opsFailureWindow.
+	// refused, newest first, up to opsFailureWindow; a run a restart cut
+	// short neither counts nor ends the count.
 	ConsecutiveFailures int `json:"consecutive_failures"`
 	// PendingApproval is its change on disk that waits for the owner:
 	// new, changed, removed or invalid.
@@ -362,6 +363,11 @@ func (a *agents) opsAgentOf(v scheduleView) opsAgent {
 	}
 	if runs, err := a.store.Runs(v.Brain, v.Name, opsFailureWindow); err == nil {
 		for _, r := range runs {
+			if r.Status == sched.StatusInterrupted {
+				// A restart cut it short: it says nothing of the agent,
+				// either way.
+				continue
+			}
 			if r.Status != sched.StatusFailed && r.Status != sched.StatusRefused {
 				break
 			}

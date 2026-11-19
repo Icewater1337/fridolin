@@ -30,19 +30,19 @@ const (
 	// StatusNothing is a run that found nothing worth reporting.
 	StatusNothing = "nothing"
 	StatusFailed  = "failed"
-	// StatusStopped is a run stopped by the owner or a restart; one that
-	// hit its timeout is StatusFailed, with the error saying so.
+	// StatusStopped is a run the owner stopped, or its brain's removal;
+	// one that hit its timeout is StatusFailed, with the error saying so.
 	StatusStopped = "stopped"
-	// StatusDropped is a run that never started: its brain was stopped or
-	// removed, or the queue refused it.
+	// StatusDropped is a run that never started: its brain was removed,
+	// or the queue refused it.
 	StatusDropped = "dropped"
 	// StatusRefused is a run the policy did not start (a lockdown).
 	StatusRefused = "refused"
 	// StatusSkipped is a slot missed while the bridge was down that the
 	// agent's missed setting left out.
 	StatusSkipped = "skipped"
-	// StatusInterrupted is a run the bridge was in the middle of when it
-	// went down, found as it started again.
+	// StatusInterrupted is a run the bridge was in the middle of, or had
+	// waiting, when it stopped or went down, found as it started again.
 	StatusInterrupted = "interrupted"
 )
 
@@ -54,6 +54,9 @@ const (
 	// TriggerFride is FrIDE's news about work the agent handed it: a
 	// question, or work done or failed (Task.Fride).
 	TriggerFride = "fride"
+	// TriggerRestartRetry is the one more go a run gets that a stop or
+	// restart of the bridge cut short (Run.Retryable); RetryOf names it.
+	TriggerRestartRetry = "restart-retry"
 )
 
 // The kinds of run (Run.Kind).
@@ -95,6 +98,28 @@ type Run struct {
 	Node string `json:"node,omitempty"`
 	// LogBytes is the size of the run's log.
 	LogBytes int64 `json:"log_bytes,omitempty"`
+	// Rev is the revision of the approved schedule the run started under
+	// (manifest.Schedule.Revision): a run a restart cut short is retried
+	// only while its agent is still that one.
+	Rev string `json:"rev,omitempty"`
+	// RetryOf is, for a TriggerRestartRetry run, the run it retries.
+	RetryOf string `json:"retry_of,omitempty"`
+}
+
+// Retryable reports whether r, which a stop or restart of the bridge cut
+// short, may run once more as the bridge is back: nothing of it was sent,
+// it is a brain run, and it is no retry itself. A run FrIDE's news
+// started is not, since the news it handled is not kept. Whether its
+// agent still wants one is the caller's to say.
+func (r Run) Retryable() bool {
+	return !r.Sent && r.Kind == KindBrain && r.Trigger != TriggerRestartRetry && r.Trigger != TriggerFride
+}
+
+// Interruption is a run Interrupted found cut short.
+type Interruption struct {
+	Run
+	// Retry says it may run once more (Run.Retryable).
+	Retry bool
 }
 
 // AgentState is what the store keeps of an agent between runs.
@@ -269,32 +294,48 @@ func (s *Store) Forget(keep func(key string) bool) error {
 
 // Interrupted ends the runs the state says are running, which no bridge
 // runs any more as one starts: each becomes StatusInterrupted, in the
-// state and in its history. It returns them.
-func (s *Store) Interrupted(now time.Time) ([]Run, error) {
+// state and in its history. It returns them, each with whether it may
+// run once more (Run.Retryable), oldest first.
+func (s *Store) Interrupted(now time.Time) ([]Interruption, error) {
 	s.mu.Lock()
 	st, err := s.readState()
 	if err != nil {
 		s.mu.Unlock()
 		return nil, err
 	}
-	var out []Run
+	var out []Interruption
 	for _, a := range st.Agents {
 		if a != nil && a.LastRun != nil && a.LastRun.Status == StatusRunning {
 			a.LastRun.Status, a.LastRun.Ended = StatusInterrupted, now
 			a.LastRun.Error = "the bridge stopped while it ran"
-			out = append(out, *a.LastRun)
+			out = append(out, Interruption{Run: *a.LastRun, Retry: a.LastRun.Retryable()})
 		}
 	}
 	if len(out) > 0 {
 		err = s.writeState(st)
 	}
 	s.mu.Unlock()
+	slices.SortFunc(out, func(a, b Interruption) int { return a.Started.Compare(b.Started) })
 	for _, r := range out {
-		if aerr := s.appendHistory(r); aerr != nil && err == nil {
+		if aerr := s.appendHistory(r.Run); aerr != nil && err == nil {
 			err = aerr
 		}
 	}
 	return out, err
+}
+
+// Sending records that run id of agent brain/agent sends its result, or
+// its failure, to chat to now: a stop from here on finds it sent, so that
+// it is not run again after the restart (Run.Retryable). The run's end
+// records what was sent in the end.
+func (s *Store) Sending(brain, agent, id, to string) error {
+	return s.Update(brain, agent, func(a *AgentState) bool {
+		if a.LastRun == nil || a.LastRun.ID != id || a.LastRun.Status != StatusRunning {
+			return false
+		}
+		a.LastRun.Sent, a.LastRun.SentTo = true, to
+		return true
+	})
 }
 
 func (s *Store) agentDir(brain, agent string) string { return filepath.Join(s.dir, brain, agent) }

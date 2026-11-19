@@ -554,7 +554,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.stopSiteBridge, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.targets.Stop, b.stopTailnet},
+		Background: []func(){b.agents.stop, b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.stopSiteBridge, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.targets.Stop, b.stopTailnet},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)

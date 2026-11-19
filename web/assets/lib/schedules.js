@@ -32,6 +32,7 @@
  * @property {string} timeout
  * @property {string} missed
  * @property {string} jitter
+ * @property {boolean} [retryInterrupted] a run a restart cut short runs once more; unset is true
  */
 
 /**
@@ -118,12 +119,13 @@ export function fieldsOf(s = {}) {
     ownTools: Array.isArray(s.disallowed_tools), tools: (s.disallowed_tools || []).join('\n'),
     report: s.report || '', chat: s.chat || '', timeout: s.timeout_minutes ? String(s.timeout_minutes) : '',
     missed: s.missed || '', jitter: s.jitter_minutes === undefined || s.jitter_minutes === null ? '' : String(s.jitter_minutes),
+    retryInterrupted: s.retry_interrupted !== false,
   };
 }
 
 // The order of the fields in the file the bridge writes (the Go type's).
 /** @type {(keyof Schedule)[]} */
-const FILE_ORDER = ['name', 'when', 'enabled', 'description', 'prompt', 'prompt_file', 'template', 'command', 'vars', 'report', 'chat', 'risk', 'disallowed_tools', 'effort', 'timeout_minutes', 'missed', 'jitter_minutes', 'preapproved', 'github'];
+const FILE_ORDER = ['name', 'when', 'enabled', 'description', 'prompt', 'prompt_file', 'template', 'command', 'vars', 'report', 'chat', 'risk', 'disallowed_tools', 'effort', 'timeout_minutes', 'missed', 'jitter_minutes', 'retry_interrupted', 'preapproved', 'github'];
 /** @param {Record<string, string>} o */
 const sortedObj = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
 
@@ -179,6 +181,7 @@ export function scheduleOf(f) {
     if (pre.length) s.preapproved = pre;
     const repos = String(f.githubRepos || '').split(/[\s,]+/).filter(Boolean);
     if (repos.length) s.github = { repos: [...new Set(repos)], permissions: parseVars(f.githubPermissions) };
+    if (f.retryInterrupted === false) s.retry_interrupted = false;
   }
   if (f.report) s.report = f.report;
   if (f.chat.trim()) s.chat = f.chat.trim();
@@ -187,6 +190,19 @@ export function scheduleOf(f) {
   if (f.missed) s.missed = f.missed;
   if (f.jitter !== '') s.jitter_minutes = Number(f.jitter);
   return s;
+}
+
+/**
+ * What started a run, in words: "by hand (dashboard)", "retried after
+ * restart", or the trigger as it is.
+ * @param {{trigger: string, by?: string}} r
+ */
+export function triggerText(r) {
+  switch (r.trigger) {
+    case 'manual': return `by hand (${r.by || 'dashboard'})`;
+    case 'restart-retry': return 'retried after restart';
+    default: return r.trigger;
+  }
 }
 
 /**
