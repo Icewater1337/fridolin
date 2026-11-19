@@ -65,9 +65,12 @@ type App struct {
 	brainMgr  *BrainManager
 	deb       *pipeline.Debouncer
 	pipeline  *pipeline.Workflow
-	logs      *logx.Ring
-	activity  *activity.Feed
-	token     *httpapi.Token
+	// typist keeps "typing…" up in the chats where runs work
+	// (chat_presence.go).
+	typist   *outboundmsg.Typist
+	logs     *logx.Ring
+	activity *activity.Feed
+	token    *httpapi.Token
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
 	sessions     *httpapi.DashboardSessions
@@ -407,8 +410,10 @@ func New(opts Options) (_ *App, err error) {
 	b.agents = newAgents(b, cfgs.Boot().Layout())
 	// Runs the last stop cut short end now, before anyone lists them.
 	b.agents.recover(time.Now())
+	b.typist = outboundmsg.NewTypist(b.presence, outboundmsg.TypingEvery)
 	b.brainMgr.SetHooks(BrainHooks{
 		Live:        b.live,
+		Typing:      b.typing,
 		Notice:      b.workingNotice,
 		Question:    b.askQuestion,
 		Deliver:     b.deliverRun,
@@ -548,7 +553,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.stopSiteBridge, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.targets.Stop, b.stopTailnet},
+		Background: []func(){b.agents.stop, b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.stopSiteBridge, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.targets.Stop, b.stopTailnet},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)

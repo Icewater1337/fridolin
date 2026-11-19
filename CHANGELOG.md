@@ -20,6 +20,30 @@ for compatibility.
   is in `/api/status` and `/api/brains/{id}` (`runtime.live`), and
   `fridolin check` says of each such brain whether a session can start.
   [docs/BRAINS.md](docs/BRAINS.md#live-session)
+- **A scheduled agent's run that a restart cut short runs once more.**
+  An update or crash in the middle of a scheduled agent's brain run no
+  longer loses it until its next time, often a day or a week later. A
+  run cut short before it sent anything runs once more when the bridge
+  is back ("retried after restart" on the Schedules page), told to check
+  first what the cut run already did and not to repeat it. Only once,
+  and only while the approved agent is unchanged and runs on its
+  schedule. `"retry_interrupted": false` in an agent's file (or *Cut
+  short by a restart* in the wizard) keeps the old behaviour, for an
+  agent whose side effects cannot be checked afterwards. A run cut short
+  counts as no failure in system_status's `consecutive_failures`. The
+  runs of a stopping bridge now end as *interrupted*, not *stopped*.
+  [docs/BRAINS.md](docs/BRAINS.md#scheduled-agents)
+- **Fridolin types while it works and reads what it took.** While a
+  brain works on a message, its chat shows "typing…", and once a brain
+  took a message it is marked read (blue ticks), a voice note played
+  once its run answered. The bridge shows itself online when it
+  connects, which WhatsApp wants before it shows typing. Untagged
+  chatter, files handed in, scheduled runs and delegated tasks show
+  none of it. New setting `whatsapp.presence` (default on) turns it all
+  off, and `"presence": false` in a brain's brain.json for that brain's
+  chats; turn it off if the bridge is linked to your own number, whose
+  phone may hold back notifications while a linked device is online.
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md#whatsapppresence)
 - **A secret does not leave in a tool call without your yes.** The
   bridge's tools that send text off the machine (`contact_person`,
   `errand_answer`, `errand_contact`'s brief, `elevenlabs_speak`,

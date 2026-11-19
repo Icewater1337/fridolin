@@ -415,6 +415,8 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       missed.addEventListener('change', () => setP('missed', missed.value));
       const jitter = textInput({ type: 'number', min: 0, value: f.jitter, placeholder: 'schedules.jitter_minutes' });
       jitter.addEventListener('input', () => setP('jitter', jitter.value));
+      const retry = select([['yes', 'Run it once more, checking first what it did'], ['no', 'Wait for its next time']], f.retryInterrupted === false ? 'no' : 'yes');
+      retry.addEventListener('change', () => setP('retryInterrupted', retry.value === 'yes'));
       const ownTools = toggle({ checked: f.ownTools, label: 'Its own list of blocked tools (off: the brain’s)', onChange: (on) => setP('ownTools', on) });
       const tools = h('textarea.mono', { rows: 2, id: nextId('tools'), placeholder: 'WebFetch' });
       tools.value = f.tools;
@@ -426,6 +428,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
           field({ label: 'Timeout (minutes)', help: 'In place of run_timeout_minutes, shorter or longer (at most 1440). A long timeout at a high effort can use a lot.', control: timeout }),
           field({ label: 'Missed while the bridge was down', control: missed }),
           field({ label: 'Jitter (minutes)', control: jitter }),
+          f.kind !== 'command' ? field({ label: 'Cut short by a restart', help: 'Before it sent anything. Wait for its next time when what it does cannot be checked afterwards.', control: retry }) : null,
           f.kind !== 'command' ? field({ label: 'Tools', control: h('div', ownTools, tools), wide: true }) : null)));
       parts.push(h('h3', 'In short'), plain);
       return parts;

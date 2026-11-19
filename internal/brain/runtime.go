@@ -452,7 +452,9 @@ func (br *Brain) worker(q *lane) {
 		if m.Silent {
 			log.Printf("brain %s: running silently for untagged message from %s", br.id, m.Sender)
 		}
+		ended := br.sink.Running(br, m)
 		res := br.invokeGuarded(run, ctx, s, m)
+		ended()
 		res.Duration = time.Since(run.started)
 		// The answer goes into the history once it was delivered (see
 		// Outbox), not here: the next run must not read as said what

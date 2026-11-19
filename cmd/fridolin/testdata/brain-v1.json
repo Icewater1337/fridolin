@@ -23,6 +23,7 @@
   "observe": "run",
   "approvals": "auto",
   "live_session": "owner_dm",
+  "presence": false,
   "backup": {
     "enabled": true,
     "exclude": [
@@ -84,6 +85,7 @@
       "timeout_minutes": 45,
       "missed": "skip",
       "jitter_minutes": 10,
+      "retry_interrupted": false,
       "preapproved": [
         "file GitHub issues on example/repo"
       ],

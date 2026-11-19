@@ -86,6 +86,7 @@ restart.
 | `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
 | `approvals` | Whether the brain asks you before an irreversible step. `ask`, the default: `request_approval` puts a poll in your chat and waits for your yes ([Skills, risk and approvals](#skills-risk-and-approvals)). `auto`: it answers approved at once, without a poll, and the brain's prompt says it may act without asking and must say in its reply what it did. **A security trade-off**: the brain then sends, posts, pays, submits and deletes on its own judgement, which a message, file or web page it reads can sway; set it only on a brain you trust that far, such as your own core brain in your DM. See [Acting without asking](#acting-without-asking). Set in the dashboard under *Approvals*; like every field here, a change the brain makes itself waits for your approval. |
 | `live_session` | `off`, the default: every message runs `claude -p`. `owner_dm`: the brain keeps one Claude Code session running and wakes it with the messages you write to it in a direct chat; see [Live session](#live-session). Needs `dangerously_skip_permissions` and not `inherit_claude_user_config`; a change the brain makes itself waits for your approval, like every field here. |
+| `presence` | `false` keeps the bridge from showing "typing…" in this brain's chats while it works, and from marking the messages it takes as read there. Unset or `true` leaves it to [`whatsapp.presence`](CONFIGURATION.md#whatsapppresence), which is on by default. |
 | `backup` | Where this folder is backed up; see [BACKUP.md](BACKUP.md) and [below](#backups-cloud-and-node-targets). `backup.exclude` applies to the Google Drive backup and to the vault's snapshots (and its cold tier, for a folder in the data dir), and to the node targets; `backup.enabled: false` keeps the folder out of every backup ([VAULT.md](VAULT.md#brain-folders-and-their-backup-settings)). `backup.targets` and `backup.node_only` send it, or parts of it, to [node targets](VAULT.md#node-targets). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 | `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
@@ -1037,6 +1038,7 @@ Personal/
 | `timeout_minutes` | stops a run that takes longer, in place of `run_timeout_minutes`: shorter or longer, up to 1440 (24 hours); left out or 0, `run_timeout_minutes`. A long timeout with a high effort can cost a lot of usage when a run goes in circles (for a program, it is the node's exec timeout, which the node's own limit still caps) |
 | `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
 | `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |
+| `retry_interrupted` | `false` keeps a run that a stop or restart of the bridge cut short from running once more when the bridge is back (*Restarts*, below); left out, `true`. Set it for an agent whose side effects it cannot check afterwards. Not for a `command` |
 | `preapproved` | steps the owner approved together with the schedule (`"file GitHub issues on example/repo"`): the run is told it may take them without `request_approval`; every other irreversible step still asks |
 | `github` | `{"repos": ["owner/name"], "permissions": {"issues": "write", "contents": "read"}}`: the GitHub access its runs, and no other run, are granted: each run is logged in to `gh` with a token for exactly these repositories and permissions, which ends with the run ([below](#github-for-scheduled-agents)) |
 
@@ -1086,6 +1088,22 @@ history and log, and the chat is told of the failure only. An
 agent never runs twice at once: a time that comes while its run goes on
 is left out. A lockdown runs an agent at `read`, and refuses one whose
 `risk` says more; it refuses every program on a node.
+
+**Restarts.** A run the bridge was in the middle of
+when it stopped or restarted (an update at night, a crash) shows as
+*interrupted* in the agent's runs; so does one that waited in the
+brain's queue. It counts as no failure. A brain run that was cut short
+before its result, or its failure, went to a chat runs once more when the bridge
+is back, as *retried after restart*, with a note at the top of its
+message: the previous attempt was interrupted, so check what it already
+did (your notes, this chat's history, the state of what the task
+changes) before acting, and repeat no work or delivery that already
+happened. Its reply then goes out as usual. Only once, and only while the
+agent you approved is the same as when the cut run started, it runs on
+its schedule (not paused or switched off, `schedules.enabled` on) and
+its `retry_interrupted` is not `false`. A program on a node, a run that
+FrIDE's news started, and a retry cut short in turn wait for their next
+time.
 
 **Agents run beside the chats.** A brain has two queues, each with at
 most one run at a time: its chats' (every WhatsApp chat, the live
