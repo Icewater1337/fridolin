@@ -284,12 +284,15 @@ func (b *App) errandBookingDecided(a store.Approval) {
 	clear := func() {
 		_, _ = b.store.SetErrandBooking(ctx, e.ID, store.BookingAsking+a.ID, "", time.Time{}, time.Time{})
 	}
-	if e.State != store.ErrandOpen {
+	ended := func() {
 		// Nobody would tell the person of it any more (#639): the owner
 		// hears instead, whatever they answered.
 		clear()
 		b.auditErrand(e, "not booked", "the errand had ended")
 		b.tellErrandOwner(ctx, e, outboundmsg.ErrandBookingEndedNotice(e.Name, e.ID, when))
+	}
+	if e.State != store.ErrandOpen {
+		ended()
 		return
 	}
 	if a.Status != store.ApprovalApproved {
@@ -323,6 +326,11 @@ func (b *App) errandBookingDecided(a store.Approval) {
 		return
 	}
 	if ok, _ := b.store.SetErrandBooking(ctx, e.ID, store.BookingAsking+a.ID, store.BookingMaking, span.Start, span.End); !ok {
+		// It may have ended while the calendar was read (#709).
+		if now, err := b.store.GetErrand(ctx, e.ID); err == nil && now.State != store.ErrandOpen && now.Booked == store.BookingAsking+a.ID {
+			e = now
+			ended()
+		}
 		return
 	}
 	ev, err := b.insertErrandEvent(ctx, e, span, loc)

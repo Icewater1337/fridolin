@@ -333,13 +333,14 @@ func (s *Store) AddErrand(ctx context.Context, e Errand) error {
 // SetErrandBooking moves errand id's booking from was to now (see
 // Errand.Booked), for the time from to to (zero for none), unless it is
 // not was any more. It reports whether it moved it: one errand makes one
-// booking, whoever asks at once.
+// booking, whoever asks at once. It starts making one (now BookingMaking)
+// only while the errand is open: one that ended books nothing (#709).
 func (s *Store) SetErrandBooking(ctx context.Context, id, was, now string, from, to time.Time) (bool, error) {
 	var f, t any
 	if !from.IsZero() {
 		f, t = from.UTC(), to.UTC()
 	}
-	res, err := s.db.ExecContext(ctx, `UPDATE errands SET booked = ?, booked_from = ?, booked_to = ? WHERE id = ? AND booked = ?`, now, f, t, id, was)
+	res, err := s.db.ExecContext(ctx, `UPDATE errands SET booked = ?, booked_from = ?, booked_to = ? WHERE id = ? AND booked = ? AND (? != ? OR state = ?)`, now, f, t, id, was, now, BookingMaking, ErrandOpen)
 	if err != nil {
 		return false, err
 	}
