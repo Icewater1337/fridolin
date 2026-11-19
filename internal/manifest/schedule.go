@@ -45,6 +45,9 @@ type Schedule struct {
 	Template string `json:"template,omitempty"`
 	// Command runs a program on a node instead of a brain run.
 	Command *ScheduleCommand `json:"command,omitempty"`
+	// Gate is a program that runs before each brain run and decides
+	// whether the brain is woken at all (docs/BRAINS.md, "Gates").
+	Gate *ScheduleGate `json:"gate,omitempty"`
 	// Vars fill {{name}} in the template or prompt file.
 	Vars map[string]string `json:"vars,omitempty"`
 
@@ -101,6 +104,43 @@ type ScheduleCommand struct {
 	// Dir is the working directory on the node, "" for the agent's.
 	Dir string `json:"dir,omitempty"`
 }
+
+// ScheduleGate is a cheap program that runs before a scheduled agent's
+// brain run: the last line it writes is JSON, {"wake": false} to end the
+// run there, {"wake": true, "data": …} to start the brain run with data
+// added to its task. It runs in the brain's sandbox, with no token of a
+// run, or with Node on that node through its exec capability, like a
+// command.
+type ScheduleGate struct {
+	// Argv is the program and its arguments; no shell. In the brain's
+	// sandbox, a program with a / in it is relative to Dir, and a bare
+	// name is looked up on the brain's PATH.
+	Argv []string `json:"argv"`
+	// Dir is the working directory: in the brain's folder, relative to
+	// it, "" for the folder itself; on a node, absolute, "" for the
+	// node's.
+	Dir string `json:"dir,omitempty"`
+	// TimeoutSeconds stops it, its whole process group, once it takes
+	// longer; 0 is DefaultGateTimeout.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// Node is the node it runs on, by id or name; "" for the brain's
+	// sandbox.
+	Node string `json:"node,omitempty"`
+}
+
+// Timeout is how long g may run.
+func (g ScheduleGate) Timeout() time.Duration {
+	if g.TimeoutSeconds > 0 {
+		return time.Duration(g.TimeoutSeconds) * time.Second
+	}
+	return DefaultGateTimeout
+}
+
+// Bounds of a gate.
+const (
+	DefaultGateTimeout = 30 * time.Second
+	MaxGateTimeout     = 300
+)
 
 // Where a scheduled agent's result goes (Schedule.Report).
 const (
@@ -294,6 +334,31 @@ func (s Schedule) Validate() error {
 	for _, p := range s.Preapproved {
 		if strings.TrimSpace(p) == "" || utf8.RuneCountInString(p) > 300 || strings.ContainsAny(p, "\r\n") {
 			return fmt.Errorf("%s: a preapproved step is one line of at most 300 characters", at)
+		}
+	}
+	if g := s.Gate; g != nil {
+		if s.Command != nil {
+			return fmt.Errorf("%s: a gate is for brain runs, not a command", at)
+		}
+		if len(g.Argv) == 0 || strings.TrimSpace(g.Argv[0]) == "" {
+			return fmt.Errorf("%s: gate needs its argv", at)
+		}
+		if len(g.Argv) > maxScheduleArgv {
+			return fmt.Errorf("%s: gate has more than %d arguments", at, maxScheduleArgv)
+		}
+		for _, a := range append(slices.Clone(g.Argv), g.Dir, g.Node) {
+			if strings.ContainsAny(a, "\x00\r\n") {
+				return fmt.Errorf("%s: gate arguments must be single lines", at)
+			}
+		}
+		if g.TimeoutSeconds < 0 || g.TimeoutSeconds > MaxGateTimeout {
+			return fmt.Errorf("%s: gate timeout_seconds must be between 1 and %d, or 0 for %d", at, MaxGateTimeout, int(DefaultGateTimeout.Seconds()))
+		}
+		switch {
+		case g.Node != "" && g.Dir != "" && !strings.HasPrefix(g.Dir, "/") && !filepath.IsAbs(g.Dir):
+			return fmt.Errorf("%s: a gate's dir on a node must be absolute", at)
+		case g.Node == "" && (filepath.IsAbs(g.Dir) || strings.HasPrefix(filepath.Clean(g.Dir), "..")):
+			return fmt.Errorf("%s: a gate's dir must be a folder inside the brain folder", at)
 		}
 	}
 	if s.Command != nil {

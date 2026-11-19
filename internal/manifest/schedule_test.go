@@ -6,6 +6,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestScheduleValidate(t *testing.T) {
@@ -16,6 +17,8 @@ func TestScheduleValidate(t *testing.T) {
 		{Name: "scrape", When: "daily 21:00", Command: &ScheduleCommand{Node: "mac-mini", Argv: []string{"/Users/you/run.sh"}}, Report: ReportSilent, Missed: MissedSkip},
 		{Name: "inline", When: "weekly mon 09:00", Prompt: "Check the inbox", JitterMinutes: new(0)},
 		{Name: "no-retry", When: "daily 03:00", Prompt: "Send the invoices", RetryInterrupted: new(false)},
+		{Name: "gated", When: "every 15m", Prompt: "Sort the new files", Gate: &ScheduleGate{Argv: []string{"scripts/new-files.sh"}, Dir: "inbox", TimeoutSeconds: 10}},
+		{Name: "gated-node", When: "every 15m", Prompt: "Look at CI", Gate: &ScheduleGate{Argv: []string{"/Users/you/bin/ci-changed"}, Dir: "/Users/you", Node: "mac-mini"}},
 	}
 	for _, s := range ok {
 		if err := s.Validate(); err != nil {
@@ -40,6 +43,13 @@ func TestScheduleValidate(t *testing.T) {
 		"effort":      {Name: "a", When: "every 6h", Effort: "huge"},
 		"cmd effort":  {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, Effort: "max"},
 		"cmd retry":   {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, RetryInterrupted: new(false)},
+		"cmd gate":    {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, Gate: &ScheduleGate{Argv: []string{"y"}}},
+		"gate argv":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{" "}}},
+		"gate line":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x", "two\nlines"}}},
+		"gate dir":    {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, Dir: "../other"}},
+		"gate abs":    {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, Dir: "/tmp"}},
+		"gate node":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, Dir: "rel", Node: "n"}},
+		"gate time":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, TimeoutSeconds: MaxGateTimeout + 1}},
 		"jitter":      {Name: "a", When: "every 6h", JitterMinutes: new(99999)},
 		"prompt file": {Name: "a", When: "every 6h", PromptFile: "../x.md"},
 		"command":     {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n"}},
@@ -139,5 +149,17 @@ func TestRetriesInterrupted(t *testing.T) {
 	}
 	if data, _ := EncodeSchedule(on); strings.Contains(string(data), "retry_interrupted") {
 		t.Errorf("the default is written: %s", data)
+	}
+}
+
+func TestGateTimeout(t *testing.T) {
+	if (ScheduleGate{}).Timeout() != DefaultGateTimeout || (ScheduleGate{TimeoutSeconds: 5}).Timeout() != 5*time.Second {
+		t.Error("Timeout")
+	}
+	a := Schedule{Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}}}
+	b := a
+	b.Gate = &ScheduleGate{Argv: []string{"y"}}
+	if a.Equal(b) || a.Revision() == b.Revision() {
+		t.Error("a gate's change goes unnoticed, by the approval too")
 	}
 }

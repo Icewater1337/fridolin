@@ -1021,6 +1021,7 @@ Personal/
 | `enabled` | `false` keeps it from running on its schedule; *Run now* still runs it |
 | `description` | one line on what it is for |
 | `prompt`, `prompt_file`, `template`, `command` | what it does, at most one: the task inline; a file in the brain's folder; a built-in template (below); or a program on a node. None is the file `schedules/<name>.md` in the brain's folder |
+| `gate` | `{"argv": [...], "dir": "...", "timeout_seconds": 30, "node": "..."}`: a cheap program that runs before each brain run and decides whether the brain is woken at all ([Gates](#gates)) |
 | `vars` | `{"name": "value"}`, filling `{{name}}` in the template or task file |
 | `report` | where the result goes: `worth` (the default) sends the answer only when the run found something worth reporting (it answers `NOTHING_TO_REPORT` otherwise), `always` sends every answer, `silent` sends nothing. A failure is sent unless the agent is silent |
 | `chat` | the chat results go to, a JID; default the brain's `reply_chat` |
@@ -1186,6 +1187,45 @@ without it, an exploitable finding goes only into its answer to you), and since 
  "preapproved": ["file GitHub issues, labelled bug, on you/project"]}
 ```
 
+### Gates
+
+Every brain run of an agent costs a model run, even when the answer is
+`NOTHING_TO_REPORT`. A **gate** is a cheap program that runs first and
+decides whether the brain is woken at all: "anything new in `inbox/`?",
+"did a CI status change?". A check like that can run every 5 to 15
+minutes almost for free, and the brain runs only when there is work.
+
+```json
+{"when": "every 10m", "prompt": "Sort the new files in inbox/ and tell me what needs me.",
+ "gate": {"argv": ["./bin/new-files.sh"], "timeout_seconds": 20}}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `argv` | the program and its arguments, no shell. A program with a `/` in it is relative to `dir`; a bare name is looked up on the PATH of the brain's runs |
+| `dir` | where it runs: a folder in the brain's folder, relative to it (default the brain's folder); with `node`, an absolute path there |
+| `timeout_seconds` | at most this long, up to 300; left out, 30 |
+| `node` | run it on this node, by id or name, through its `exec` like a [program on a node](#scheduled-agents): its allowlist and your approval of its commands apply, and a node that accepts programs from the core gets it added when you approve the agent. Left out, it runs as the brain, in its sandbox, with the PATH, `TMPDIR` and caches of its runs, `FRIDOLIN_BRAIN_ID`, `FRIDOLIN_SCHEDULE` (the agent's name) and `TZ`, and no token of a run: it cannot reach the bridge |
+
+The last line the gate writes to stdout is JSON:
+
+- `{"wake": false}`: the run ends there, as *gated*, with no model run
+  and nothing sent;
+- `{"wake": true, "data": {...}}`: the brain run starts as usual, with
+  `data` (at most 64 KiB) added to its task. `data` may be left out.
+
+A gate that runs longer than its timeout, or writes more than 1 MiB,
+is stopped, its whole process group; that, a non-zero exit, or a last
+line that is no such JSON fails the run, which the chat hears of as of
+any failure (unless the agent is `silent`): a broken gate never quietly
+skips the runs. What it writes goes into the run's log, its exit code
+into the run. The gate is part of the agent's file, so you approve it
+with the agent, and a change to it waits for your approval like any
+other. It runs before every run, *Run now* and the retry after a restart
+included, but not before a run that FrIDE's news starts. A lockdown
+refuses a gated agent's runs, as it refuses a program on a node. Not for
+a `command` agent.
+
 ### GitHub for scheduled agents
 
 A run is logged in to GitHub only when its agent has a `github` grant:
@@ -1270,10 +1310,12 @@ GitHub's installed repositories, the prompt or the program), what it may
 do in plain words (risk level, preapproved steps, GitHub access, node,
 where results go, and more settings), and the exact file it writes.
 Saving writes the file and approves it. An agent's page shows every
-field, its runs (start, how long, result, cost or tokens, and the
+field, its [gate](#gates) among them, its runs (start, how long, result,
+*gated* for one its gate kept the brain from, cost or tokens, and the
 message sent) and each run's log: the CLI's output as the activity log
-has it, its tool calls, and errors; *Edit* and *Duplicate* go through the
-same wizard, *Delete* asks first. Pausing is the dashboard's, not the
+has it, its tool calls, its gate's output, and errors; *Edit* and
+*Duplicate* go through the same wizard, which keeps a gate as it is,
+*Delete* asks first. Pausing is the dashboard's, not the
 file's: a paused agent does not make up the times it missed when it is
 resumed.
 

@@ -591,6 +591,13 @@ func (b *App) scheduleItem(brain, brainName string, r manifest.ScheduleReview, s
 		if c := s.Command; c != nil && len(c.Argv) > 0 {
 			m.Facts = append(m.Facts, b.programFact(c.Node, c.Argv))
 		}
+		if g := s.Gate; g != nil && len(g.Argv) > 0 {
+			if g.Node != "" {
+				m.Facts = append(m.Facts, "Gate: "+strings.Join(g.Argv, " ")+" on node "+g.Node+", before each run", b.programFact(g.Node, g.Argv))
+			} else {
+				m.Facts = append(m.Facts, "Gate: "+strings.Join(g.Argv, " ")+" in the brain's sandbox, before each run")
+			}
+		}
 		for _, r := range risksOf(s) {
 			m.Allows = append(m.Allows, canPhrase(r))
 		}

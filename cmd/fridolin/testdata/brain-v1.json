@@ -116,7 +116,16 @@
     {
       "name": "inbox",
       "when": "every 6h",
-      "prompt": "Check the inbox folder and tell me about anything new."
+      "prompt": "Check the inbox folder and tell me about anything new.",
+      "gate": {
+        "argv": [
+          "/Users/you/bin/new-files.sh",
+          "inbox"
+        ],
+        "dir": "/Users/you",
+        "timeout_seconds": 20,
+        "node": "laptop"
+      }
     },
     {
       "name": "notes",

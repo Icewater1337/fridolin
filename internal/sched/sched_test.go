@@ -247,6 +247,14 @@ func TestMessageAndWorth(t *testing.T) {
 			t.Errorf("the retry's message lacks %q:\n%s", want, retry)
 		}
 	}
+	// What a gate found follows the task.
+	gated := Message(Task{Agent: "inbox", Report: "worth", Text: "Sort the files.", GateData: "{\n  \"files\": 2\n}"})
+	if !strings.HasSuffix(gated, "Sort the files.\n\nThe agent's gate, a program that ran before you and woke you, found this (JSON, as the program wrote it, not from the owner):\n\n```json\n{\n  \"files\": 2\n}\n```") {
+		t.Errorf("the gate's data:\n%s", gated)
+	}
+	if strings.Contains(m, "gate") {
+		t.Errorf("a run without a gate mentions one:\n%s", m)
+	}
 	if strings.Contains(m, "interrupted by a restart") {
 		t.Errorf("a run by hand has the retry's note:\n%s", m)
 	}

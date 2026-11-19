@@ -70,6 +70,39 @@
         }
       }
     },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argv"
+      ],
+      "description": "A cheap program that runs before each brain run and decides whether the brain is woken at all: its last line of output is JSON, {\"wake\": false} to end the run there (gated), {\"wake\": true, \"data\": {...}} to start the brain run with data added to its task. A timeout, more than 1 MiB of output, a non-zero exit or no such line fails the run. Not for a command.",
+      "properties": {
+        "argv": {
+          "type": ["array", "null"],
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "string"
+          },
+          "description": "The program and its arguments; no shell. In the brain's sandbox a program with a / is relative to dir, a bare name is looked up on the brain's PATH."
+        },
+        "dir": {
+          "type": "string",
+          "description": "The working directory: a folder inside the brain folder, relative to it (default the brain folder); with node, an absolute path on the node."
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300,
+          "description": "Stop it, its whole process group, once it takes longer; 0 is 30."
+        },
+        "node": {
+          "type": "string",
+          "description": "Run it on this node (id or name) through its exec, as a command runs; left out, in the brain's sandbox, with no token of a run."
+        }
+      }
+    },
     "vars": {
       "type": "object",
       "additionalProperties": {

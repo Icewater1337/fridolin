@@ -71,8 +71,11 @@ type agents struct {
 	retries   []sched.Run
 	// stopping is set as the bridge stops: a brain run the stop cuts
 	// short, or finds waiting, is left running in the store, for the next
-	// start to find interrupted (cut).
+	// start to find interrupted (cut). ctx ends then too, which stops the
+	// gates that run.
 	stopping bool
+	ctx      context.Context
+	cancel   context.CancelFunc
 	// frideWaiting is FrIDE's news for an agent, by agent key, that waits
 	// for a run of it: one at a time, and what arrives meanwhile goes into
 	// the next.
@@ -96,12 +99,15 @@ type agentRun struct {
 	timeout time.Duration
 	// fride is FrIDE's news a TriggerFride run handles.
 	fride []string
+	// gateData is what the agent's gate handed the run, as JSON.
+	gateData string
 }
 
 func newAgents(b *App, layout config.Layout) *agents {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &agents{b: b, store: sched.NewStore(layout.Schedules()),
 		running: map[string]*agentRun{}, byID: map[string]*agentRun{}, frideWaiting: map[string][]string{},
-		frideLast: map[string]time.Time{}, frideLater: map[string]*time.Timer{}}
+		frideLast: map[string]time.Time{}, frideLater: map[string]*time.Timer{}, ctx: ctx, cancel: cancel}
 }
 
 // recover ends, once, the runs the state says are running: the bridge
@@ -177,20 +183,26 @@ func (a *agents) retryInterrupted(cfg config.SchedulesSettings, states map[strin
 }
 
 // stop tells the agents the bridge stops: from now on, a brain run that
-// ends cut short is one the next start may retry (cut).
+// ends cut short is one the next start may retry (cut). The gates that
+// run are stopped.
 func (a *agents) stop() {
 	a.mu.Lock()
 	a.stopping = true
 	a.mu.Unlock()
+	a.cancel()
+}
+
+// isStopping reports whether the bridge stops.
+func (a *agents) isStopping() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.stopping
 }
 
 // cutByStop reports whether the bridge is stopping, which cut short a run
 // that ended with err (or found it waiting).
 func (a *agents) cutByStop(err error) bool {
-	a.mu.Lock()
-	stopping := a.stopping
-	a.mu.Unlock()
-	return stopping && (errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, context.Canceled) ||
+	return a.isStopping() && (errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, context.Canceled) ||
 		errors.Is(err, brainruntime.ErrDropped) || errors.Is(err, brainruntime.ErrStopped))
 }
 
@@ -354,6 +366,11 @@ func (a *agents) startWith(br *brainruntime.Brain, s manifest.Schedule, o startO
 		go a.runCommand(ar)
 		return r, nil
 	}
+	if s.Gate != nil && trigger != sched.TriggerFride {
+		// FrIDE's news needs the run whatever the gate would say.
+		go a.gated(br, ar)
+		return r, nil
+	}
 	if err := a.startBrainRun(br, ar); err != nil {
 		a.finish(ar, sched.StatusFailed, "", err.Error(), claudecli.Usage{}, a.failureNotice(ar, err.Error()))
 	}
@@ -449,7 +466,7 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 	}
 	msg := sched.Message(sched.Task{
 		Agent: s.Name, When: s.When, Trigger: ar.run.Trigger, Report: report, Chat: chatLabel(ar.chat),
-		Preapproved: s.Preapproved, Text: text, Fride: strings.Join(ar.fride, "\n\n"),
+		Preapproved: s.Preapproved, Text: text, Fride: strings.Join(ar.fride, "\n\n"), GateData: ar.gateData,
 	})
 	id := ar.run.ID
 	m := brainruntime.Inbound{Inbound: chat.Inbound{

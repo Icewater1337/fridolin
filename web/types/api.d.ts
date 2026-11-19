@@ -76,6 +76,17 @@ export interface ScheduleCommand {
   dir?: string;
 }
 
+/** A program that runs before a scheduled agent's brain run and decides whether it wakes (manifest.ScheduleGate). */
+export interface ScheduleGate {
+  argv: string[];
+  /** In the brain folder, relative to it; with node, absolute on the node. */
+  dir?: string;
+  /** 0 or left out is 30. */
+  timeout_seconds?: number;
+  /** The node it runs on; left out, the brain's sandbox. */
+  node?: string;
+}
+
 /** A scheduled agent as brain.json writes it (manifest.Schedule). */
 export interface Schedule {
   name: string;
@@ -88,6 +99,7 @@ export interface Schedule {
   prompt_file?: string;
   template?: string;
   command?: ScheduleCommand;
+  gate?: ScheduleGate;
   vars?: Record<string, string>;
   /** always, worth (the default) or silent. */
   report?: string;
@@ -1709,7 +1721,7 @@ export interface ScheduleRun {
   started: string;
   ended?: string;
   duration_ms?: number;
-  /** running, ok, nothing, failed, stopped, dropped, refused, skipped or interrupted. */
+  /** running, ok, nothing, gated, failed, stopped, dropped, refused, skipped or interrupted. */
   status: string;
   result?: string;
   error?: string;
