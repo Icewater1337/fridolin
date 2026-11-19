@@ -90,6 +90,10 @@ type waits struct {
 	// errandCallIdle is how long a silence on an errand's call ends it
 	// (call_runtime.go).
 	errandCallIdle time.Duration
+	// callNoAudio is how long a call may bring no sound from the other
+	// side once its audio flows before Fridolin hangs up and writes
+	// instead (call_runtime.go).
+	callNoAudio time.Duration
 }
 
 // defaultWaits are the waits of the binary's bridge.
@@ -123,6 +127,7 @@ func defaultWaits() waits {
 		errandSweep:         time.Minute,
 		callRing:            45 * time.Second,
 		errandCallIdle:      45 * time.Second,
+		callNoAudio:         5 * time.Second,
 	}
 }
 
