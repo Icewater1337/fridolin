@@ -19,6 +19,11 @@ type Inbound struct {
 	// there were several (see merge), so that an edit or a deletion of one
 	// of them can redo the merge (see applyChange). Empty for one message.
 	parts []Inbound
+	// Slot, when set, is the run slot of the run that handed the message
+	// over and waits for its answer: the task a run delegated. The task's
+	// run goes in that slot while the run holds it, rather than wait for
+	// one of its own (see runSlots).
+	Slot *Slot
 }
 
 // merge folds a later message into m. The batch is tagged if any part was:

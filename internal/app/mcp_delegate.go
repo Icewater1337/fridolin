@@ -212,7 +212,11 @@ func delegateChat(coreRun string) string { return chat.DelegateChatPrefix + core
 // delegate hands task to brain to as a message from the core brain in
 // its delegate chat, and waits up to wait for the answer: the sub-brain's
 // worker runs it like any message, with its own prompt, memory and
-// sandbox. Its answer comes back here, never to a chat (delegationFinished).
+// sandbox, in its chat lane, even for a scheduled agent's run. Its run
+// goes in the run slot of c's run, which waits for it, rather than take
+// a slot of its own (see brain.Slot): an agent and its task take one
+// slot, of the agents' share, and the chats keep theirs. Its answer
+// comes back here, never to a chat (delegationFinished).
 func (b *App) delegate(ctx context.Context, c mcpCaller, to, task string, approval store.Approval, wait time.Duration) *mcp.CallResult {
 	d := &delegation{id: "d" + randomToken(9), from: c.run, to: to, task: task, approval: approval, started: time.Now(), result: make(chan delegationResult, 1)}
 	b.delegations.add(d)
@@ -227,7 +231,7 @@ func (b *App) delegate(ctx context.Context, c mcpCaller, to, task string, approv
 			}
 			b.endDelegation(d.id, "", err)
 		},
-	}}
+	}, Slot: c.run.Slot}
 	if _, _, _, err := b.brainMgr.Submit(m); err != nil {
 		b.delegations.end(d.id)
 		b.auditDelegation(d, "refused: "+err.Error())

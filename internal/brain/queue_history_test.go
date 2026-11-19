@@ -52,6 +52,58 @@ func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 	}
 }
 
+// A run that starts in one lane and rotates the activity log loses none
+// of what the run in the other lane writes after it: those lines go to
+// the new log, which the viewer follows, not to the old one, nor to one
+// a second rotation removes.
+func TestRotationKeepsTheOtherLanesLines(t *testing.T) {
+	br := bareBrain(t)
+	logPath := filepath.Join(br.Dir(), StreamLogName)
+	fill := func() {
+		t.Helper()
+		f, err := os.OpenFile(logPath, os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Truncate(fi.Size() + streamLogMax); err != nil { // sparse: takes no room
+			t.Fatal(err)
+		}
+	}
+	read := func(name string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(br.Dir(), name))
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+
+	agent, closeAgent := br.openRunStream(agentMsg("a", "upkeep", "the upkeep"), "the agent's run", nil)
+	defer closeAgent()
+	for _, run := range []string{"first", "second"} {
+		fill()
+		_, closeChat := br.openRunStream(dm(run), "the "+run+" chat run", nil)
+		agent.Log("the agent after the " + run + " rotation")
+		closeChat()
+		if got := read(StreamLogName); !strings.Contains(got, "the "+run+" chat run") || !strings.Contains(got, "the agent after the "+run+" rotation") {
+			t.Errorf("after the %s rotation the log holds %q, want the chat's run and the agent's line", run, strings.Trim(got, "\x00"))
+		}
+	}
+	if old := read(StreamLogOld); strings.Contains(old, "the agent after the second rotation") {
+		t.Error("the agent's line went to the old log")
+	}
+	stderr := Inbound{Inbound: chat.Inbound{JID: chat.ScheduleChatPrefix + "upkeep", Sender: "schedule"}}
+	br.logStderr(stderr, 42, "the agent's stderr")
+	if got := read(StreamLogName); !strings.Contains(got, "the agent's stderr") {
+		t.Error("the stderr of a run did not reach the log")
+	}
+}
+
 // A message's history line is written once the brain takes the message,
 // and says when it was sent: not when the debouncer let it through. A
 // message the brain turns away leaves no line, or the sender's retry, or

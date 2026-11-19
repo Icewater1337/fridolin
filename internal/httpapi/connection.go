@@ -93,12 +93,25 @@ func (a *ConnectionAPI) StopRun(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusNotFound, "no such brain")
 		return
 	}
+	// lane names one of the brain's two queues, chat or background: its
+	// run stops, and with clear_queue what waits in it, while the other
+	// goes on. No lane is both.
 	var req struct {
-		ClearQueue bool `json:"clear_queue"`
+		ClearQueue bool   `json:"clear_queue"`
+		Lane       string `json:"lane"`
 	}
 	if err := DecodeOptionalJSON(r, &req); err != nil {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, RunStoppedResponse{Stopped: br.StopCurrent(req.ClearQueue)})
+	if req.Lane == "" {
+		WriteJSON(w, http.StatusOK, RunStoppedResponse{Stopped: br.StopCurrent(req.ClearQueue)})
+		return
+	}
+	lane, ok := brain.ParseLane(req.Lane)
+	if !ok {
+		WriteErr(w, http.StatusBadRequest, `lane must be "chat" or "background", or left out for both`)
+		return
+	}
+	WriteJSON(w, http.StatusOK, RunStoppedResponse{Stopped: br.StopLane(lane, req.ClearQueue)})
 }

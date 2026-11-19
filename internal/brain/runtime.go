@@ -87,6 +87,13 @@ type Brain struct {
 	retired bool     // removed from the configuration, or the bridge stops
 	last    *RunInfo // the last run that finished, in either lane
 
+	// streamMu serialises the lines the runs of both lanes write to the
+	// activity log with its rotation, which a run's start does (see
+	// rotateStreamLogLocked); streamGen counts the rotations, so that a
+	// run whose log was moved aside opens the new one.
+	streamMu  sync.Mutex
+	streamGen int
+
 	// tmuxViewer is an optional Terminal window tailing this brain's
 	// activity log. A run starts it in the background and a reload can close
 	// it, so viewerMu guards it, with viewerStarting, set while a start is
@@ -177,6 +184,9 @@ type brainRun struct {
 	lane    Lane
 	// timeout is how long the run may take, 0 for no limit.
 	timeout time.Duration
+	// slot is the run slot the run goes in, nil without run slots: the
+	// tasks it delegates go in it too (RunSpec.Slot).
+	slot *runSlot
 }
 
 var (
@@ -341,16 +351,24 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 		interrupt = cur
 	}
 	pos = slices.Index(q.order(), len(q.pending)-1) + 1
-	busy = pos > 1 || (q.current != nil && interrupt == nil) || br.slots.busy(!m.Silent, q.background())
+	// A task delegated by a run that waits for it goes in that run's slot
+	// (see Slot), and waits for none.
+	inSlot := m.Slot.held()
+	busy = pos > 1 || (q.current != nil && interrupt == nil) || (!inSlot && br.slots.busy(!m.Silent, q.background()))
 	start := !q.working
 	q.working = true
 	if start {
 		br.workers.Add(1)
 	}
-	// A worker that waits for a slot for chatter now waits for one for a
-	// request, which goes first.
 	var stopOther func()
-	if q.slotWait != nil && !m.Silent {
+	switch {
+	case q.slotWait != nil && inSlot && pos == 1:
+		// The worker waits for a slot, and what runs next now is such a
+		// task: it stops waiting and looks again.
+		br.slots.giveUp(q.slotWait)
+	case q.slotWait != nil && !m.Silent:
+		// A worker that waits for a slot for chatter now waits for one
+		// for a request, which goes first.
 		stopOther = br.slots.upgrade(q.slotWait)
 	}
 	br.mu.Unlock()
@@ -418,7 +436,8 @@ func (br *Brain) worker(q *lane) {
 		}
 		slot, ok := br.waitForSlotLocked(q)
 		if !ok || br.retired || len(q.pending) == 0 {
-			// Retired, or what waited was dropped meanwhile.
+			// Retired, or what waited was dropped meanwhile, or what runs
+			// next now goes in the slot of the run that delegated it.
 			br.mu.Unlock()
 			if ok {
 				slot.release()
@@ -428,7 +447,9 @@ func (br *Brain) worker(q *lane) {
 		i := q.next()
 		m := q.pending[i]
 		q.pending = slices.Delete(q.pending, i, i+1)
-		if slot != nil && !slot.running(!m.Silent) {
+		// A slot the task shares is its run's, which says what it runs.
+		shared := m.Slot != nil && slot == m.Slot.slot
+		if slot != nil && !shared && !slot.running(!m.Silent) {
 			// A request in another brain took this slot's place before
 			// the run began: the chatter is in the history, as for an
 			// observe-only run it stops.
@@ -445,7 +466,7 @@ func (br *Brain) worker(q *lane) {
 			timeout = m.RunTimeout
 		}
 		ctx, cancel := runContext(timeout)
-		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now(), lane: q.which, timeout: timeout}
+		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now(), lane: q.which, timeout: timeout, slot: slot}
 		q.current = run
 		br.mu.Unlock()
 
@@ -469,13 +490,19 @@ func (br *Brain) worker(q *lane) {
 // waitForSlotLocked waits for a run slot for what runs next in q, with
 // br.mu held on entry and again on return, though not while it waits:
 // messages keep coming in, and a request among them makes the wait one
-// for a request (see Submit). It returns a nil slot without a limit, and
-// false when the brain was retired while it waited.
+// for a request (see Submit). A task that a run delegated and waits for
+// goes in that run's slot, while the run holds it, without a wait. It
+// returns a nil slot without a limit, and false when the brain was
+// retired while it waited, or the wait was given up for such a task.
 func (br *Brain) waitForSlotLocked(q *lane) (*runSlot, bool) {
 	if br.slots == nil {
 		return nil, true
 	}
-	request := !q.pending[q.next()].Silent
+	next := q.pending[q.next()]
+	if slot := next.Slot.share(); slot != nil {
+		return slot, true
+	}
+	request := !next.Silent
 	w, stopOther := br.slots.wait(request, q.background(), func() { br.stopObservation(q) })
 	q.slotWait = w
 	br.mu.Unlock()
@@ -628,13 +655,19 @@ func (br *Brain) StopCurrent(clearQueue bool) bool {
 }
 
 // StopLane kills the run in flight in lane l, whichever chat it serves,
-// and leaves what waits in it, and the other lane, alone: the next
-// message in the lane runs once it has stopped. It reports whether a run
-// was stopped.
-func (br *Brain) StopLane(l Lane) bool {
+// and, with clearQueue, drops what waits in that lane. The other lane is
+// left alone; without clearQueue, the next message in l runs once its
+// run has stopped. It reports whether a run was stopped.
+func (br *Brain) StopLane(l Lane, clearQueue bool) bool {
 	br.mu.Lock()
-	cur := br.lane(l).current
+	q := br.lane(l)
+	var gone []Inbound
+	if clearQueue {
+		gone, q.pending = q.pending, nil
+	}
+	cur := q.current
 	br.mu.Unlock()
+	Dropped(gone)
 	return br.stopRun(cur)
 }
 
@@ -1062,6 +1095,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbou
 	}
 	return br.runner.Run(ctx, RunSpec{
 		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m), Message: m.Inbound,
+		Slot:        slotOf(run.slot),
 		BeforeStart: func() { br.ensureViewer(s) },
 		LivePrompt:  func(turn prompttext.LiveTurn) string { return br.buildPromptFor(s, m, turn) },
 	}, claudecli.Callbacks{
@@ -1101,9 +1135,10 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	if m.Log != nil {
 		m.Log(fmt.Sprintf("stderr of the run, pid %d:\n%s", pid, textx.Tail(stderr, stderrLogBytes)))
 	}
-	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		log.Printf("brain %s: could not open stream log: %v", br.id, err)
+	br.streamMu.Lock()
+	defer br.streamMu.Unlock()
+	f := br.openStreamLogLocked()
+	if f == nil {
 		return
 	}
 	defer f.Close()
@@ -1282,34 +1317,78 @@ const (
 	StreamLogOld = "claude-stream.1.log"
 )
 
-// rotateStreamLog moves a full activity log aside, through the folder: a
-// rename replaces a symlink at StreamLogOld itself, never what it points to.
-func (br *Brain) rotateStreamLog() {
+// rotateStreamLogLocked moves a full activity log aside, through the
+// folder: a rename replaces a symlink at StreamLogOld itself, never what
+// it points to. br.streamMu is held. The run in the other lane, which
+// may be writing to the log, opens the new one before its next line (see
+// runSink.Log): its lines go on in the log the viewer follows, not in the
+// old one, or in one that the next rotation removes.
+func (br *Brain) rotateStreamLogLocked() {
 	fi, err := br.root.Lstat(StreamLogName)
 	if err != nil || !fi.Mode().IsRegular() || fi.Size() < streamLogMax {
 		return
 	}
 	if err := br.root.Rename(StreamLogName, StreamLogOld); err != nil {
 		log.Printf("brain %s: could not rotate its stream log: %v", br.id, err)
+		return
 	}
+	br.streamGen++
+}
+
+// openStreamLogLocked opens the activity log to add to, nil when it
+// cannot. Through the folder, like the history: a brain can swap the log
+// for a symlink to a file its sandbox denies it writing. br.streamMu is
+// held.
+func (br *Brain) openStreamLogLocked() *os.File {
+	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("brain %s: could not open stream log: %v", br.id, err)
+		return nil
+	}
+	return f
 }
 
 // runSink is the StreamSink of m's run in br: the brain's activity log, and
 // the chat for the questions the run asks.
 type runSink struct {
-	br       *Brain
-	m        Inbound
-	log      *os.File // nil when it could not be opened
+	br *Brain
+	m  Inbound
+	// log is the activity log the run writes to, as it was when the
+	// rotations had come to gen (Brain.streamGen); nil when it could not
+	// be opened. Under br.streamMu.
+	log      *os.File
+	gen      int
+	closed   bool
 	onResult func(claudecli.Result)
 }
 
 func (s *runSink) Log(line string) {
+	br := s.br
+	br.streamMu.Lock()
+	if !s.closed && s.gen != br.streamGen {
+		// A run that began in the other lane rotated the log.
+		if s.log != nil {
+			_ = s.log.Close()
+		}
+		s.log, s.gen = br.openStreamLogLocked(), br.streamGen
+	}
 	if s.log != nil {
 		_, _ = fmt.Fprintf(s.log, "[%s] %s\n", time.Now().Format("15:04:05"), line)
 	}
+	br.streamMu.Unlock()
 	if s.m.Log != nil {
 		s.m.Log(line)
 	}
+}
+
+// close closes the run's activity log, once its run is over.
+func (s *runSink) close() {
+	s.br.streamMu.Lock()
+	defer s.br.streamMu.Unlock()
+	if s.log != nil {
+		_ = s.log.Close()
+	}
+	s.log, s.closed = nil, true
 }
 
 // Question sends text to the run's chat. Untagged (silent) messages never
@@ -1338,28 +1417,19 @@ func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, on
 }
 
 func (br *Brain) openRunStream(m Inbound, heading string, onResult func(claudecli.Result)) (claudecli.StreamSink, func()) {
-	br.rotateStreamLog()
-	// Through the folder, like the history: a brain can swap the log for a
-	// symlink to a file its sandbox denies it writing.
-	streamLog, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		log.Printf("brain %s: could not open stream log: %v", br.id, err)
-	}
-	closeStream := func() {
-		if streamLog != nil {
-			_ = streamLog.Close()
-		}
-	}
+	br.streamMu.Lock()
+	br.rotateStreamLogLocked()
+	sink := &runSink{br: br, m: m, log: br.openStreamLogLocked(), gen: br.streamGen, onResult: onResult}
+	br.streamMu.Unlock()
 	ready := false
 	defer func() {
 		if !ready {
-			closeStream()
+			sink.close()
 		}
 	}()
-	sink := &runSink{br: br, m: m, log: streamLog, onResult: onResult}
 	sink.Log(heading)
 	ready = true
-	return sink, closeStream
+	return sink, sink.close
 }
 
 func (br *Brain) finishRun(q *lane, run *brainRun) {

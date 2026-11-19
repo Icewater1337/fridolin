@@ -20,6 +20,7 @@ async function openPage(t, opts = {}) {
   const bridge = { brains: opts.brains || [view('Work')] };
   const calls = serve(t, (path, init) => {
     if (path === '/api/brains/work/approve' && init.method === 'POST') return opts.approve;
+    if (path === '/api/brains/work/stop' && init.method === 'POST') return { stopped: true };
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };
     if (path.startsWith('/api/brains/work/contacts')) return { client_configured: true, connected: false, scope: 'https://www.googleapis.com/auth/contacts.readonly', token_path: '/Users/you/.fridolin/google_contacts_token_work.json' };
     if (path === '/api/brains/work' && init.method === 'PUT') return { ok: true };
@@ -91,6 +92,48 @@ test('a scheduled agent\'s run shows beside the chat\'s', async (t) => {
   assert.match(text, /Scheduled agent digest/, 'the agent that waits');
   assert.match(text, /1 waiting/);
   assert.ok(root.querySelectorAll('button').some((b) => b.textContent === 'Stop'), 'the agent\'s run can be stopped');
+});
+
+test('each lane\'s run has a Stop of its own, which leaves the other lane going', async (t) => {
+  const { root, poll, calls } = await openPage(t);
+  await poll([view('Work', {
+    running: { chat: '15551234567@s.whatsapp.net', sender: '15551234567', preview: 'hello', silent: false, started: '2026-10-18T10:00:00Z', pid: 0 },
+    queue: [{ chat: '15551234567@s.whatsapp.net', sender: '15551234567', preview: 'more', silent: false, queued: '2026-10-18T10:01:00Z' }],
+    background: { chat: 'schedule:upkeep', sender: 'schedule', preview: '', silent: false, started: '2026-10-18T10:00:00Z', pid: 0 },
+    background_queue: [{ chat: 'schedule:digest', sender: 'schedule', preview: '', silent: false, queued: '2026-10-18T10:05:00Z' }],
+  })]);
+  const buttons = (/** @type {string} */ label) => root.querySelectorAll('button').filter((b) => b.textContent === label);
+  const stops = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/brains/work/stop').map((c) => c.body);
+  assert.equal(buttons('Stop').length, 2, 'a Stop for the chats\' run and one for the agent\'s');
+  assert.equal(buttons('Stop & clear queue').length, 2);
+
+  buttons('Stop')[1].click();
+  await settle();
+  assert.deepEqual(stops(), [{ clear_queue: false, lane: 'background' }], 'the agent\'s Stop stops the background lane');
+
+  buttons('Stop & clear queue')[0].click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.ok(dialog, 'a confirm dialog');
+  assert.match(dialog.textContent, /The chats' run stops, and 1 waiting message will not be answered/);
+  dialog.querySelectorAll('button').find((b) => b.textContent === 'Stop & clear').click();
+  await settle();
+  assert.deepEqual(stops()[1], { clear_queue: true, lane: 'chat' }, 'the chats\' Stop & clear clears the chat lane only');
+});
+
+test('with nothing running, Stop & clear empties both queues', async (t) => {
+  const { root, poll, calls } = await openPage(t);
+  await poll([view('Work', {
+    running: null, queue: [{ chat: '15551234567@s.whatsapp.net', sender: '15551234567', preview: 'more', silent: false, queued: '2026-10-18T10:01:00Z' }],
+    background: null, background_queue: [],
+  })]);
+  assert.equal(root.querySelectorAll('button').filter((b) => b.textContent === 'Stop').length, 0, 'no run to stop');
+  root.querySelectorAll('button').find((b) => b.textContent === 'Stop & clear queue').click();
+  await settle();
+  document.querySelector('dialog').querySelectorAll('button').find((b) => b.textContent === 'Stop & clear').click();
+  await settle();
+  const stops = calls.filter((c) => c.method === 'POST' && c.path === '/api/brains/work/stop').map((c) => c.body);
+  assert.deepEqual(stops, [{ clear_queue: true }]);
 });
 
 test('a setting typed back to what it was is no unsaved change', async (t) => {

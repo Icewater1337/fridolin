@@ -30,6 +30,18 @@ import (
 // the first agent's run to end. With a limit of one there is nothing to
 // keep free: every run waits for the one that goes, as the limit says.
 //
+// A request stops an observe-only run only when that gets it a slot: the
+// slots already free and those of the runs already asked to stop go to
+// the others waiting before it, in the order they are handed out, and
+// to no background run past its cap. So two agents that find one
+// observe-only run each in their way stop one, not two, when only one of
+// them may have a slot.
+//
+// A task a run delegates and waits for runs in that run's slot (Slot)
+// rather than in one of its own: the run waits meanwhile, so the two are
+// one run's work, and a scheduled agent's task takes no slot the chats
+// were to have. The slot is free once both have ended.
+//
 // It calls nothing while it holds its lock. What stops an observe-only run
 // is returned to the caller, who calls it once it holds no lock of its own.
 type runSlots struct {
@@ -53,6 +65,51 @@ type runSlot struct {
 	// waits; stopped is set once that was asked.
 	stop    func()
 	stopped bool
+	// holders counts the runs in the slot while it is held: its own, and
+	// the delegated tasks that share it (Slot.share). It is free once the
+	// last of them has released it.
+	holders int
+}
+
+// Slot is a run's run slot, as the run hands it to a task it delegates
+// (RunSpec.Slot, Inbound.Slot): the task's run goes in it while the run
+// that waits for the task holds it, rather than wait for a slot of its
+// own. nil without run slots.
+type Slot struct{ slot *runSlot }
+
+// slotOf is s as a Slot, nil for none.
+func slotOf(s *runSlot) *Slot {
+	if s == nil {
+		return nil
+	}
+	return &Slot{slot: s}
+}
+
+// held reports whether the slot is still held, by its run or a task's.
+func (s *Slot) held() bool {
+	if s == nil {
+		return false
+	}
+	s.slot.slots.mu.Lock()
+	defer s.slot.slots.mu.Unlock()
+	return s.slot.holders > 0
+}
+
+// share has one more run go in the slot while it is held, and returns
+// it; nil once the slot is free, when the run waits for one of its own.
+// The run releases it as it would its own (release).
+func (s *Slot) share() *runSlot {
+	if s == nil {
+		return nil
+	}
+	rs := s.slot.slots
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if s.slot.holders == 0 {
+		return nil
+	}
+	s.slot.holders++
+	return s.slot
 }
 
 // slotWait is a brain waiting for a slot.
@@ -111,7 +168,7 @@ func (rs *runSlots) wait(request, background bool, stop func()) (w *slotWait, st
 	defer rs.mu.Unlock()
 	rs.waiting = append(rs.waiting, w)
 	rs.grantLocked()
-	if w.state == slotWaiting && request && rs.withinCapLocked(w.slot) {
+	if w.state == slotWaiting && request && rs.yieldGetsLocked(w) {
 		stopOther = rs.yieldLocked()
 	}
 	return w, stopOther
@@ -153,22 +210,73 @@ func (rs *runSlots) backgroundCapLocked() int {
 // backgroundCap goes: it is not a background run, or the background runs
 // hold fewer than their cap.
 func (rs *runSlots) withinCapLocked(s *runSlot) bool {
-	limit := rs.backgroundCapLocked()
-	if !s.background || limit == 0 {
-		return true
-	}
+	return rs.capAllowsLocked(s, rs.backgroundHeldLocked())
+}
+
+// backgroundHeldLocked counts the slots background runs hold.
+func (rs *runSlots) backgroundHeldLocked() int {
 	n := 0
 	for _, h := range rs.held {
 		if h.background {
 			n++
 		}
 	}
-	return n < limit
+	return n
+}
+
+// capAllowsLocked reports whether s may get a slot while background runs
+// hold n: it is not a background run, or n is below their cap.
+func (rs *runSlots) capAllowsLocked(s *runSlot, n int) bool {
+	limit := rs.backgroundCapLocked()
+	return !s.background || limit == 0 || n < limit
 }
 
 // givesWay reports whether the observe-only run in s would give way to a
 // request that waits: it was not asked to yet.
 func givesWay(s *runSlot) bool { return !s.request && !s.stopped && s.stop != nil }
+
+// givingWay reports whether the observe-only run in s was asked to give
+// way: its slot is about to be free.
+func givingWay(s *runSlot) bool { return !s.request && s.stopped }
+
+// yieldGetsLocked reports whether one more observe-only run that gives
+// way would get w, a request waiting, its slot. The slots free now (a
+// pause holds them back) and those of the runs already asked to give way
+// go first, in the order grantLocked hands them out, to those waiting
+// before w, or to w itself, which then needs no other run stopped; a
+// background run past its cap gets none of them. Only the slot after
+// those is worth stopping a run for, and only when it would be w's.
+// Without a limit there is a slot for everyone once a pause ends.
+func (rs *runSlots) yieldGetsLocked(w *slotWait) bool {
+	if rs.limit <= 0 {
+		return false
+	}
+	free, background := max(0, rs.limit-len(rs.held)), 0
+	for _, h := range rs.held {
+		switch {
+		case givingWay(h):
+			free++
+		case h.background:
+			background++
+		}
+	}
+	served := map[*slotWait]bool{}
+	for range free + 1 {
+		i := rs.nextAmongLocked(background, served)
+		if i < 0 {
+			return false
+		}
+		next := rs.waiting[i]
+		if next == w {
+			return len(served) == free
+		}
+		served[next] = true
+		if next.slot.background {
+			background++
+		}
+	}
+	return false
+}
 
 // upgrade makes w, still waiting, a wait for a request: its brain got one
 // while it waited for chatter's slot. It returns what wait does.
@@ -179,6 +287,9 @@ func (rs *runSlots) upgrade(w *slotWait) (stopOther func()) {
 		return nil
 	}
 	w.slot.request = true
+	if !rs.yieldGetsLocked(w) {
+		return nil
+	}
 	return rs.yieldLocked()
 }
 
@@ -194,8 +305,9 @@ func (rs *runSlots) take(w *slotWait) (*runSlot, bool) {
 	return w.slot, true
 }
 
-// giveUp ends w's wait, for a brain that was retired: a slot it got and
-// nobody took goes to the next.
+// giveUp ends w's wait, for a brain that was retired, or a worker whose
+// next message is to go in a slot it shares (see Submit): a slot it got
+// and nobody took goes to the next.
 func (rs *runSlots) giveUp(w *slotWait) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
@@ -226,14 +338,19 @@ func (s *runSlot) running(request bool) bool {
 	return request || !s.stopped
 }
 
-// release frees the slot once its run is over.
+// release gives the slot back once its run is over: it is free once no
+// other run shares it (see Slot).
 func (s *runSlot) release() {
 	s.slots.mu.Lock()
 	defer s.slots.mu.Unlock()
+	if s.holders--; s.holders > 0 {
+		return
+	}
 	s.slots.releaseLocked(s)
 }
 
 func (rs *runSlots) releaseLocked(s *runSlot) {
+	s.holders = 0
 	for i, h := range rs.held {
 		if h == s {
 			rs.held = append(rs.held[:i], rs.held[i+1:]...)
@@ -258,6 +375,7 @@ func (rs *runSlots) grantLocked() {
 		w := rs.waiting[i]
 		rs.waiting = append(rs.waiting[:i], rs.waiting[i+1:]...)
 		rs.held = append(rs.held, w.slot)
+		w.slot.holders = 1
 		w.state = slotGranted
 		close(w.ready)
 	}
@@ -266,10 +384,16 @@ func (rs *runSlots) grantLocked() {
 // nextLocked returns where in waiting the next to get a slot is, -1 for
 // nobody: the first request that may have one, else the first chatter.
 func (rs *runSlots) nextLocked() int {
+	return rs.nextAmongLocked(rs.backgroundHeldLocked(), nil)
+}
+
+// nextAmongLocked is nextLocked while background runs hold n slots,
+// passing over those in served.
+func (rs *runSlots) nextAmongLocked(n int, served map[*slotWait]bool) int {
 	chatter := -1
 	for i, w := range rs.waiting {
 		switch {
-		case !rs.withinCapLocked(w.slot):
+		case served[w] || !rs.capAllowsLocked(w.slot, n):
 		case w.slot.request:
 			return i
 		case chatter < 0:
