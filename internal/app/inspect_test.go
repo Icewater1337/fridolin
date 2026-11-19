@@ -231,6 +231,37 @@ func TestCheckDisabledDashboardAndUnknownSandboxBrain(t *testing.T) {
 	}
 }
 
+// check says of a brain that asks for a live session whether the bridge's
+// settings let one start, and nothing of a brain that does not ask.
+func TestCheckSaysWhetherALiveSessionCanStart(t *testing.T) {
+	// Serial: check reads the process's HOME and environment.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, c := range []struct {
+		name        string
+		mode        string
+		dangerously bool
+		want        string
+	}{
+		{"allowed", manifest.LiveSessionOwnerDM, true, "live session: owner_dm (your direct messages;"},
+		{"permissions", manifest.LiveSessionOwnerDM, false, "live session: owner_dm, but none starts: it needs dangerously_skip_permissions"},
+		{"off", manifest.LiveSessionOff, true, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ref := brainFolder(t, filepath.Join(home, "brains", c.name), manifest.Manifest{ID: "main", Routing: manifest.Routing{HandlesDMs: true}, LiveSession: c.mode})
+			cfg := resolvedSettings(t, &config.File{ClaudePath: fakeClaudeEnv(t, 0), DataDir: filepath.Join(home, "data"), DangerouslySkipPermissions: c.dangerously, BrainDirs: []config.BrainRef{ref}})
+			var out bytes.Buffer
+			if err := CheckReport(&out, "config.json", cfg, CheckOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			got := strings.TrimSpace(lineWith(out.String(), "live session:"))
+			if c.want == "" && got != "" || !strings.HasPrefix(got, c.want) {
+				t.Errorf("got %q, want %q in:\n%s", got, c.want, out.String())
+			}
+		})
+	}
+}
+
 func TestCheckUnavailableBrainsDoesNotSuggestEmptySetup(t *testing.T) {
 	// Serial: check reads the process's HOME and environment, and redirects
 	// its standard logger.

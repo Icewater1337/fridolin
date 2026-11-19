@@ -64,8 +64,18 @@ type agents struct {
 	// byID the same by run id, which a brain run's message carries.
 	running map[string]*agentRun
 	byID    map[string]*agentRun
-	// recovered is set once the runs a stop cut short were ended.
+	// recovered is set once the runs a stop cut short were ended, and
+	// retries are those of them that may run once more, which the first
+	// tick starts, once the brains run (retryInterrupted).
 	recovered bool
+	retries   []sched.Run
+	// stopping is set as the bridge stops: a brain run the stop cuts
+	// short, or finds waiting, is left running in the store, for the next
+	// start to find interrupted (cut). ctx ends then too, which stops the
+	// gates that run.
+	stopping bool
+	ctx      context.Context
+	cancel   context.CancelFunc
 	// frideWaiting is FrIDE's news for an agent, by agent key, that waits
 	// for a run of it: one at a time, and what arrives meanwhile goes into
 	// the next.
@@ -89,16 +99,20 @@ type agentRun struct {
 	timeout time.Duration
 	// fride is FrIDE's news a TriggerFride run handles.
 	fride []string
+	// gateData is what the agent's gate handed the run, as JSON.
+	gateData string
 }
 
 func newAgents(b *App, layout config.Layout) *agents {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &agents{b: b, store: sched.NewStore(layout.Schedules()),
 		running: map[string]*agentRun{}, byID: map[string]*agentRun{}, frideWaiting: map[string][]string{},
-		frideLast: map[string]time.Time{}, frideLater: map[string]*time.Timer{}}
+		frideLast: map[string]time.Time{}, frideLater: map[string]*time.Timer{}, ctx: ctx, cancel: cancel}
 }
 
 // recover ends, once, the runs the state says are running: the bridge
-// stopped while they ran.
+// stopped while they ran. Those that may run once more wait for the
+// first tick (retryInterrupted).
 func (a *agents) recover(now time.Time) {
 	a.mu.Lock()
 	done := a.recovered
@@ -111,9 +125,95 @@ func (a *agents) recover(now time.Time) {
 	if err != nil {
 		log.Printf("scheduled agents: %v", err)
 	}
+	var retries []sched.Run
 	for _, r := range runs {
 		log.Printf("brain %s: scheduled agent %s: run %s was cut short when the bridge stopped", r.Brain, r.Agent, r.ID)
+		if r.Retry {
+			retries = append(retries, r.Run)
+		}
 	}
+	a.mu.Lock()
+	a.retries = retries
+	a.mu.Unlock()
+}
+
+// retryInterrupted starts, once, one more run of each agent whose run the
+// last stop cut short and may run again (sched.Run.Retryable): if the
+// agent's approved schedule is still the one that run started under, it
+// runs on its schedule (not paused, not switched off, schedules.enabled
+// on) and its retry_interrupted is not false. The retry's message tells
+// it to check what the cut run did first (sched.Message). An agent whose
+// next run started already gets none.
+func (a *agents) retryInterrupted(cfg config.SchedulesSettings, states map[string]sched.AgentState) {
+	a.mu.Lock()
+	runs := a.retries
+	a.retries = nil
+	a.mu.Unlock()
+	for _, r := range runs {
+		br := a.b.brainMgr.Get(r.Brain)
+		var s manifest.Schedule
+		found := false
+		if br != nil {
+			s, found = br.Manifest().ScheduleNamed(r.Agent)
+		}
+		why := ""
+		switch {
+		case !found:
+			why = "the agent no longer runs"
+		case !s.RetriesInterrupted():
+			why = "its retry_interrupted is false"
+		case !cfg.Enabled:
+			why = "schedules.enabled is off"
+		case !s.IsEnabled() || states[sched.Key(r.Brain, r.Agent)].Paused:
+			why = "it is paused or switched off"
+		case r.Rev == "" || r.Rev != s.Revision():
+			why = "its schedule changed since"
+		}
+		if why != "" {
+			log.Printf("brain %s: scheduled agent %s: run %s is not retried: %s", r.Brain, r.Agent, r.ID, why)
+			continue
+		}
+		if _, err := a.startWith(br, s, startOpts{trigger: sched.TriggerRestartRetry, retryOf: r.ID}); err != nil {
+			if errors.Is(err, errAgentRunning) {
+				err = errors.New("its next run started already")
+			}
+			log.Printf("brain %s: scheduled agent %s: run %s is not retried: %v", r.Brain, r.Agent, r.ID, err)
+		}
+	}
+}
+
+// stop tells the agents the bridge stops: from now on, a brain run that
+// ends cut short is one the next start may retry (cut). The gates that
+// run are stopped.
+func (a *agents) stop() {
+	a.mu.Lock()
+	a.stopping = true
+	a.mu.Unlock()
+	a.cancel()
+}
+
+// isStopping reports whether the bridge stops.
+func (a *agents) isStopping() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.stopping
+}
+
+// cutByStop reports whether the bridge is stopping, which cut short a run
+// that ended with err (or found it waiting).
+func (a *agents) cutByStop(err error) bool {
+	return a.isStopping() && (errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, context.Canceled) ||
+		errors.Is(err, brainruntime.ErrDropped) || errors.Is(err, brainruntime.ErrStopped))
+}
+
+// cut leaves ar, a brain run the bridge's stop cut short or found
+// waiting, as running in the store: the next start finds it there, ends it
+// as interrupted, and may run it once more (recover). Only its log ends
+// now.
+func (a *agents) cut(ar *agentRun) {
+	ar.log.Line("■ cut short: the bridge stops; its next start records the run as interrupted")
+	_ = ar.log.Close()
+	log.Printf("brain %s: scheduled agent %s: run %s was cut short as the bridge stops", ar.run.Brain, ar.run.Agent, ar.run.ID)
 }
 
 // jitterOf is s's jitter, its own or schedules.jitter_minutes.
@@ -144,6 +244,7 @@ func (a *agents) tick(now time.Time) {
 			a.consider(br, s, states[key], cfg, now)
 		}
 	}
+	a.retryInterrupted(cfg, states)
 	// An agent taken out of a brain that runs loses its state; its
 	// history stays until it ages out. A brain that does not run now
 	// keeps its agents' state for when it comes back.
@@ -198,6 +299,15 @@ func (a *agents) consider(br *brainruntime.Brain, s manifest.Schedule, st sched.
 	}
 }
 
+// startOpts is what starts a run of an agent: its trigger, who asked for
+// a manual one, FrIDE's news for a TriggerFride run, the run a
+// TriggerRestartRetry run retries.
+type startOpts struct {
+	trigger, by string
+	fride       []string
+	retryOf     string
+}
+
 func runKind(s manifest.Schedule) string {
 	if s.Command != nil {
 		return sched.KindCommand
@@ -211,15 +321,17 @@ var errAgentRunning = apperr.New(apperr.Conflict, "this agent's last run is stil
 // start starts a run of agent s of br, for trigger, by whoever asked
 // for a manual one, and returns it as it starts.
 func (a *agents) start(br *brainruntime.Brain, s manifest.Schedule, trigger, by string) (sched.Run, error) {
-	return a.startWith(br, s, trigger, by, nil)
+	return a.startWith(br, s, startOpts{trigger: trigger, by: by})
 }
 
-// startWith is start, with FrIDE's news for a TriggerFride run; when the
-// agent runs already, the news waits for its next run.
-func (a *agents) startWith(br *brainruntime.Brain, s manifest.Schedule, trigger, by string, fride []string) (sched.Run, error) {
+// startWith is start as o says; when the agent runs already, FrIDE's
+// news waits for its next run.
+func (a *agents) startWith(br *brainruntime.Brain, s manifest.Schedule, o startOpts) (sched.Run, error) {
 	key := sched.Key(br.ID(), s.Name)
 	now := time.Now()
-	r := sched.Run{ID: sched.NewRunID(now), Brain: br.ID(), Agent: s.Name, Kind: runKind(s), Trigger: trigger, By: by, Started: now, Status: sched.StatusRunning}
+	trigger, by, fride := o.trigger, o.by, o.fride
+	r := sched.Run{ID: sched.NewRunID(now), Brain: br.ID(), Agent: s.Name, Kind: runKind(s), Trigger: trigger, By: by, Started: now, Status: sched.StatusRunning,
+		Rev: s.Revision(), RetryOf: o.retryOf}
 	cfg := a.b.cfgs.Get()
 	ar := &agentRun{run: r, agent: s, chat: a.resultChat(br, s, cfg), fride: fride}
 	a.mu.Lock()
@@ -246,9 +358,17 @@ func (a *agents) startWith(br *brainruntime.Brain, s manifest.Schedule, trigger,
 		what = "a program on node " + s.Command.Node
 	}
 	lg.Line(fmt.Sprintf("Scheduled agent %s of brain %s (%s), %s; started by %s%s", s.Name, br.ID(), s.When, what, trigger, map[bool]string{true: ", " + by, false: ""}[by != ""]))
+	if o.retryOf != "" {
+		lg.Line("It retries run " + o.retryOf + ", which a restart of the bridge cut short: its message says to check what that run did first")
+	}
 	log.Printf("brain %s: scheduled agent %s starts (%s, run %s)", br.ID(), s.Name, trigger, r.ID)
 	if s.Command != nil {
 		go a.runCommand(ar)
+		return r, nil
+	}
+	if s.Gate != nil && trigger != sched.TriggerFride {
+		// FrIDE's news needs the run whatever the gate would say.
+		go a.gated(br, ar)
 		return r, nil
 	}
 	if err := a.startBrainRun(br, ar); err != nil {
@@ -346,7 +466,7 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 	}
 	msg := sched.Message(sched.Task{
 		Agent: s.Name, When: s.When, Trigger: ar.run.Trigger, Report: report, Chat: chatLabel(ar.chat),
-		Preapproved: s.Preapproved, Text: text, Fride: strings.Join(ar.fride, "\n\n"),
+		Preapproved: s.Preapproved, Text: text, Fride: strings.Join(ar.fride, "\n\n"), GateData: ar.gateData,
 	})
 	id := ar.run.ID
 	m := brainruntime.Inbound{Inbound: chat.Inbound{
@@ -414,6 +534,10 @@ func (a *agents) ended(id string, err error) {
 	if ar == nil {
 		return
 	}
+	if a.cutByStop(err) {
+		a.cut(ar)
+		return
+	}
 	status := sched.StatusFailed
 	if errors.Is(err, brainruntime.ErrDropped) || errors.Is(err, brainruntime.ErrStopped) {
 		status = sched.StatusDropped
@@ -437,6 +561,9 @@ func (a *agents) finished(br *brainruntime.Brain, m brainruntime.Inbound, res cl
 	}
 	s := ar.agent
 	switch {
+	case res.Err != nil && a.cutByStop(res.Err):
+		ar.log.Line("Error: " + res.Err.Error())
+		a.cut(ar)
 	case res.Err != nil:
 		status, why := sched.StatusFailed, runFailure(res.Err)
 		if refused, ok := errors.AsType[*brainruntime.RunRefused](res.Err); ok {
@@ -506,6 +633,7 @@ func (a *agents) deliver(ar *agentRun, brain, text string) {
 		ar.log.Line("Not sent: the agent reports to no chat")
 		return
 	}
+	a.sending(ar)
 	if err := a.b.pipeline.Reply(context.Background(), brain, ar.chat, text, a.b.cfgs.Get().MaxChunkSize); err != nil {
 		log.Printf("brain %s: scheduled agent %s: sending its result: %v", brain, ar.agent.Name, err)
 		ar.log.Line("The result could not be sent: " + err.Error())
@@ -514,6 +642,15 @@ func (a *agents) deliver(ar *agentRun, brain, text string) {
 	ar.run.Sent, ar.run.SentTo = true, ar.chat
 	a.b.live.endIfAnswersInChat(brain, ar.chat)
 	ar.log.Line("Sent to " + ar.chat)
+}
+
+// sending records, before ar's result or failure goes to its chat, that
+// it is sent: a stop that cuts the run short from here on leaves it to
+// its next time, rather than have a retry send it again.
+func (a *agents) sending(ar *agentRun) {
+	if err := a.store.Sending(ar.run.Brain, ar.run.Agent, ar.run.ID, ar.chat); err != nil {
+		log.Printf("brain %s: scheduled agent %s: %v", ar.run.Brain, ar.run.Agent, err)
+	}
 }
 
 // finish is complete for a run that take has not ended yet.
@@ -533,6 +670,7 @@ func (a *agents) complete(ar *agentRun, status, result, why string, usage claude
 	r.Status, r.Result, r.Error = status, textx.Truncate(strings.TrimSpace(result), 2000), why
 	r.CostUSD, r.InputTokens, r.OutputTokens = usage.CostUSD, usage.InputTokens, usage.OutputTokens
 	if notice != "" {
+		a.sending(ar)
 		if err := a.b.pipeline.Notice(context.Background(), ar.chat, notice); err != nil {
 			log.Printf("brain %s: scheduled agent %s: telling the chat it failed: %v", r.Brain, r.Agent, err)
 		} else {
@@ -641,7 +779,7 @@ func (a *agents) frideRun(brain, agent string) {
 		log.Printf("brain %s: FrIDE's news for scheduled agent %s, which is paused, off or runs a program: dropped", brain, agent)
 		return
 	}
-	if _, err := a.startWith(br, *s, sched.TriggerFride, "", news); err != nil && !errors.Is(err, errAgentRunning) {
+	if _, err := a.startWith(br, *s, startOpts{trigger: sched.TriggerFride, fride: news}); err != nil && !errors.Is(err, errAgentRunning) {
 		log.Printf("brain %s: scheduled agent %s did not start for FrIDE's news: %v", brain, agent, err)
 	}
 }

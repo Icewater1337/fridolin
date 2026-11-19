@@ -668,7 +668,8 @@ make it serve more.
 ### Programs from the core
 
 A [scheduled agent](BRAINS.md#scheduled-agents) of kind `command` runs a
-program on a node. Rather than adding each such program to `node.json` by
+program on a node, and so does an agent's [gate](BRAINS.md#gates) with a
+`node`. Rather than adding each such program to `node.json` by
 hand, a node can name folders whose programs the core may add, once, on
 the node:
 

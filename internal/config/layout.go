@@ -70,6 +70,11 @@ func (l Layout) Connections() string { return l.join("connections") }
 // OTP holds the one-time-code hand-off files, one per brain.
 func (l Layout) OTP() string { return l.join("otp") }
 
+// OutboxFiles holds the bridge's copies of the files brains send
+// (reply_file) while their replies wait in the outbox
+// (outbound.Shelf).
+func (l Layout) OutboxFiles() string { return l.join("outbox-files") }
+
 // SiteDevices lists the paired phone apps' keys for the site process.
 func (l Layout) SiteDevices() string { return l.join("site", "devices.json") }
 

@@ -24,6 +24,10 @@ import (
 type fakeCall struct {
 	peer   types.JID
 	pickUp bool // an outgoing call the other side answers
+	// noMedia: they pick up, and the audio never flows. endsWith: the
+	// call ends with this reason (meowcaller's) as it rings.
+	noMedia  bool
+	endsWith string
 
 	mu       sync.Mutex
 	listen   func([]float32)
@@ -44,7 +48,9 @@ func (f *fakeCall) Answer() error {
 	f.mu.Lock()
 	f.answered = true
 	f.mu.Unlock()
-	f.becomeReady()
+	if !f.noMedia && f.endsWith == "" {
+		f.becomeReady()
+	}
 	return nil
 }
 
@@ -58,7 +64,7 @@ func (f *fakeCall) becomeReady() {
 	}
 }
 
-func (f *fakeCall) Hangup() error { f.end("hung up"); return nil }
+func (f *fakeCall) Hangup() error { f.end("hangup"); return nil }
 
 func (f *fakeCall) end(reason string) {
 	f.mu.Lock()
@@ -75,12 +81,26 @@ func (f *fakeCall) end(reason string) {
 }
 
 func (f *fakeCall) Listen(fn func([]float32)) { f.mu.Lock(); f.listen = fn; f.mu.Unlock() }
-func (f *fakeCall) OnEnd(fn func(string))     { f.mu.Lock(); f.onEnd = fn; f.mu.Unlock() }
+
+func (f *fakeCall) OnEnd(fn func(string)) {
+	f.mu.Lock()
+	f.onEnd = fn
+	f.mu.Unlock()
+	if f.endsWith != "" {
+		go f.end(f.endsWith)
+	}
+}
+
+func (f *fakeCall) OnPeerAccept(fn func()) {
+	if f.pickUp || f.noMedia {
+		fn()
+	}
+}
 
 func (f *fakeCall) OnReady(fn func()) {
 	f.mu.Lock()
 	f.onReady = fn
-	ready := f.ready || f.pickUp
+	ready := f.ready || (f.pickUp && !f.noMedia)
 	f.mu.Unlock()
 	if ready {
 		f.becomeReady()
@@ -160,7 +180,7 @@ func TestOwnerCallsFridolin(t *testing.T) {
 	owner.speak()
 	// "One moment.", then the answer.
 	h.WaitFor("the answer, read aloud", func() bool { return owner.spoke() >= 3 })
-	owner.end("they hung up")
+	owner.end("") // their terminate, without a reason
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
@@ -174,11 +194,11 @@ func TestOwnerCallsFridolin(t *testing.T) {
 	if got := h.SentTo(harnessDM); len(got) != before {
 		t.Errorf("the call's answer went to the chat too: %q", got[before:])
 	}
-	steps := map[string]bool{}
+	steps := map[string]string{}
 	for _, l := range h.auditOf("voice_call") {
-		steps[l["detail"].(string)] = true
+		steps[l["detail"].(string)], _ = l["outcome"].(string)
 	}
-	if !steps["answered"] || !steps["ended"] {
+	if steps["answered"] == "" || steps["ended"] != "hung_up (they ended it), 1 turn(s)" {
 		t.Errorf("the audit's call lines: %v", h.auditOf("voice_call"))
 	}
 	runs := h.auditOf("run_start")
@@ -403,7 +423,10 @@ func TestCallSilenceOnAnOpenErrandSaysLater(t *testing.T) {
 	if len(spoken) != 2 || spoken[1] != errandCallLater {
 		t.Errorf("spoke %q, want the opener and %q", spoken, errandCallLater)
 	}
-	h.WaitSent(harnessDM, outboundmsg.ErrandCallEndedNotice("Alex", e.ID))
+	h.WaitSent(harnessDM, outboundmsg.ErrandCallEndedNotice("Alex", e.ID, "nobody spoke for a while"))
+	if got := callEndedLine(h); got != "hung_up (nobody spoke for a while)" {
+		t.Errorf("the call's end in the audit log: %q", got)
+	}
 	if e = h.errandOf(e.ID); e.State != store.ErrandOpen {
 		t.Errorf("the errand: %+v", e)
 	}

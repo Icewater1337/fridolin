@@ -16,7 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/nodes"
 )
 
-// The programs of approved command agents, added to their nodes'
+// The programs of approved command agents and gates, added to their nodes'
 // allowlists (docs/NODES.md, "Programs from the core"). Whenever the
 // approved agents change, a node connects, or the scheduler ticks, the
 // core works out each node's list, the programs its approved command
@@ -67,6 +67,10 @@ func approvedCommands(brainDirs []config.BrainRef) []commandProgram {
 		for _, s := range m.Schedules {
 			if c := s.Command; c != nil && len(c.Argv) > 0 {
 				out = append(out, commandProgram{Node: c.Node, Argv: c.Argv, Agent: m.ID + "/" + s.Name})
+			}
+			// A gate on a node runs through its exec like a command.
+			if g := s.Gate; g != nil && g.Node != "" && len(g.Argv) > 0 {
+				out = append(out, commandProgram{Node: g.Node, Argv: g.Argv, Agent: m.ID + "/" + s.Name})
 			}
 		}
 	}

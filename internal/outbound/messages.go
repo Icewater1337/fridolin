@@ -1126,11 +1126,40 @@ func ErrandNoAnswerNotice(name, id string) string {
 	return fmt.Sprintf("📞 %s did not pick up (errand %s). Ask me to write to them instead, or to call again later.", name, id)
 }
 
-// ErrandCallEndedNotice says errand id's call with name ended before the
-// errand did, which goes on by message.
-func ErrandCallEndedNotice(name, id string) string {
-	return fmt.Sprintf("📞 The call with %s ended before the errand did (%s). It goes on by message: what they write comes to it.", name, id)
+// ErrandCallDeclinedNotice says name, or a device of theirs, declined
+// errand id's call, so its first message went to them as a message and
+// the errand goes on that way.
+func ErrandCallDeclinedNotice(name, id string) string {
+	return fmt.Sprintf("📞 %s declined the call (errand %s), so I wrote to them instead. What they write comes to the errand.", name, id)
 }
+
+// ErrandCallFailedNotice says errand id's call to name failed before they
+// picked up (why), which ended the errand.
+func ErrandCallFailedNotice(name, id, why string) string {
+	return fmt.Sprintf("⚠️ The call to %s failed (errand %s): %s. The errand ended; ask me to write to them instead, or to call again later.", name, id, textx.Truncate(why, 300))
+}
+
+// ErrandCallNoAudioNotice says no sound came from name on errand id's
+// call, so Fridolin hung up and the errand goes on by message.
+func ErrandCallNoAudioNotice(name, id string) string {
+	return fmt.Sprintf("📞 I could not hear %s on the call (errand %s), so I hung up and wrote to them instead. What they write comes to the errand.", name, id)
+}
+
+// ErrandCallEndedNotice says errand id's call with name ended before the
+// errand did, and how ("they ended it"), which goes on by message.
+func ErrandCallEndedNotice(name, id, how string) string {
+	return fmt.Sprintf("📞 The call with %s ended before the errand did (%s): %s. It goes on by message: what they write comes to it.", name, id, how)
+}
+
+// OwnerCallFailedNotice says the owner's call to Fridolin did not work
+// (why).
+func OwnerCallFailedNotice(why string) string {
+	return fmt.Sprintf("⚠️ Your call did not work: %s. Write to me here instead.", textx.Truncate(why, 300))
+}
+
+// OwnerCallNoAudioNotice says no sound came from the owner on their call
+// to Fridolin, so it hung up.
+const OwnerCallNoAudioNotice = "📞 I could not hear you on the call, so I hung up. Write to me here instead."
 
 // ErrandOpenedNotice says the first message of errand id went to name.
 func ErrandOpenedNotice(name, id string) string {

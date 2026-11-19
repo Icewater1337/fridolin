@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 func TestDevMessenger(t *testing.T) {
@@ -121,6 +123,24 @@ func TestDevMessageJSON(t *testing.T) {
 	}
 	if want := `{"ts":"1970-01-01T00:00:00Z","jid":"chat","text":"hello","poll":["a","b"]}`; string(got) != want {
 		t.Fatalf("poll JSON = %s, want %s", got, want)
+	}
+}
+
+// A file shows in the dev chat by its name and kind, with its caption as
+// the text, and in the outbox's JSON.
+func TestDevMessengerFiles(t *testing.T) {
+	d := New(nil)
+	if err := d.SendFile(context.Background(), "chat", chat.File{Path: "/nowhere/blob", Name: "chart.png", Kind: chat.FileImage, Caption: "Sales"}); err != nil {
+		t.Fatal(err)
+	}
+	box := d.Outbox()
+	if len(box) != 1 || box[0].File != "chart.png" || box[0].Kind != chat.FileImage || box[0].Text != "Sales" || box[0].JID != "chat" {
+		t.Fatalf("outbox = %+v", box)
+	}
+	box[0].TS = time.Unix(0, 0).UTC()
+	got, _ := json.Marshal(box[0])
+	if want := `{"ts":"1970-01-01T00:00:00Z","jid":"chat","text":"Sales","file":"chart.png","kind":"image"}`; string(got) != want {
+		t.Errorf("JSON = %s, want %s", got, want)
 	}
 }
 

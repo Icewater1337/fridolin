@@ -40,6 +40,8 @@ type Outbox struct {
 	// nil only removes it.
 	delivered func(ctx context.Context, r store.OutboxRow) error
 	now       func() time.Time
+	// shelf keeps the files replies carry (KeepFiles).
+	shelf Shelf
 
 	wake   chan struct{}
 	cancel context.CancelFunc
@@ -215,6 +217,9 @@ func (o *Outbox) run(ctx context.Context) {
 			if err := o.store.PruneNotes(ctx, now.Add(-store.NoteKeep)); err != nil && ctx.Err() == nil {
 				log.Printf("outbox: %v", err)
 			}
+			// A reply older than OutboxTTL is given up on, its files
+			// with it; these were left by a stop in between.
+			o.shelf.Prune(now.Add(-OutboxTTL - outboxPruneEvery))
 		}
 		wait, waiting, failedOffline := o.flush(ctx, force)
 		force = false
@@ -282,7 +287,7 @@ func (o *Outbox) flush(ctx context.Context, force bool) (wait time.Duration, wai
 			continue
 		case ctx.Err() != nil:
 			return wait, true, offline
-		case errors.Is(err, ErrRefusedRecipient) || errors.Is(err, ErrNotAChat):
+		case errors.Is(err, ErrRefusedRecipient) || errors.Is(err, ErrNotAChat) || errors.Is(err, errFileGone):
 			o.giveUp(ctx, r, err.Error())
 			continue
 		case errors.Is(err, errNotRecorded):
@@ -350,6 +355,7 @@ func (o *Outbox) deliver(ctx context.Context, r *store.OutboxRow) error {
 	if err := o.finish(record, *r); err != nil {
 		return fmt.Errorf("%w: a reply to %s: %w", errNotRecorded, r.Chat, err)
 	}
+	o.dropFiles(*r)
 	return nil
 }
 
@@ -369,8 +375,15 @@ func (o *Outbox) finish(ctx context.Context, r store.OutboxRow) error {
 // send sends one part. A poll WhatsApp refuses while connected goes out
 // as a numbered list instead; while it is not, the poll waits like text.
 func (o *Outbox) send(ctx context.Context, m Link, r *store.OutboxRow, p store.OutboxPart) error {
-	ctx, cancel := context.WithTimeout(ctx, outboxSendLimit)
+	limit := outboxSendLimit
+	if p.IsFile() {
+		limit = outboxFileLimit
+	}
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
+	if p.IsFile() {
+		return o.sendFile(ctx, m, r, p)
+	}
 	if !p.IsPoll() {
 		if p.Ref != "" {
 			return o.sendNote(ctx, m, r, p)
@@ -436,7 +449,9 @@ func (o *Outbox) giveUp(ctx context.Context, r store.OutboxRow, why string) {
 	log.Printf("outbox: giving up on a reply to %s after %d attempts: %s", r.Chat, r.Attempts, why)
 	if err := o.store.OutboxGiveUp(ctx, r.ID, why, o.now()); err != nil && ctx.Err() == nil {
 		log.Printf("outbox: %v", err)
+		return
 	}
+	o.dropFiles(r)
 }
 
 // isConnected reports whether m can send now.

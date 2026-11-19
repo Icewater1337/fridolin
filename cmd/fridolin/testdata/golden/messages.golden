@@ -774,5 +774,15 @@ errandCallingNotice
 	📞 Calling Alex (errand e1a2b3c4). I'll tell you how it goes.
 errandNoAnswerNotice
 	📞 Alex did not pick up (errand e1a2b3c4). Ask me to write to them instead, or to call again later.
+errandCallDeclinedNotice
+	📞 Alex declined the call (errand e1a2b3c4), so I wrote to them instead. What they write comes to the errand.
+errandCallFailedNotice
+	⚠️ The call to Alex failed (errand e1a2b3c4): WhatsApp's server ended it (server:503). The errand ended; ask me to write to them instead, or to call again later.
+errandCallNoAudioNotice
+	📞 I could not hear Alex on the call (errand e1a2b3c4), so I hung up and wrote to them instead. What they write comes to the errand.
 errandCallEndedNotice
-	📞 The call with Alex ended before the errand did (e1a2b3c4). It goes on by message: what they write comes to it.
+	📞 The call with Alex ended before the errand did (e1a2b3c4): they ended it. It goes on by message: what they write comes to it.
+ownerCallFailedNotice
+	⚠️ Your call did not work: the audio did not start. Write to me here instead.
+ownerCallNoAudioNotice
+	📞 I could not hear you on the call, so I hung up. Write to me here instead.

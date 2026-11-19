@@ -266,6 +266,9 @@ A run whose brain may use Fridolin's [connections](CONNECTIONS.md#brains)
 the run's temp folder. A call the bridge refuses (no budget left, a model
 the provider does not know) is a failed call the model reads.
 
+A run that answers someone in a WhatsApp chat also gets `reply_file`,
+which sends a file of its brain's into that chat ([BRAINS.md](BRAINS.md#sending-files)).
+
 ## The connections' dashboard routes
 
 The Integrations page's OpenAI and ElevenLabs cards use these, guarded
@@ -328,7 +331,7 @@ listed here because they decide what runs may do
 | `GET /api/schedules` | the scheduled agents of every brain that runs ([BRAINS.md](BRAINS.md#scheduled-agents)): each with its `schedule` (its `brain.json` entry), `kind`, `task`, `report`, `chat`, `enabled`, `paused`, `running`, `next`, `last_run` and a `problem` that keeps it from running; the `reminders` (standing intents with a time); the built-in `templates`; and `enabled` (`schedules.enabled`); ETag-cached |
 | `POST /api/schedules/{brain}/{name}/run` | runs the agent now and answers with the run as it starts; `{"trigger": "cli"}` marks it as the CLI's; `409` while its last run goes on |
 | `POST /api/schedules/{brain}/{name}/pause`, `.../resume` | keeps it from running on its schedule, or lets it again: `{"paused", "changed"}` |
-| `GET /api/schedules/{brain}/{name}/runs?limit=` | its runs, newest first (50, at most 1000), the one in progress included: `id`, `trigger`, `by`, `started`, `ended`, `duration_ms`, `status` (`running`, `ok`, `nothing`, `failed`, `stopped`, `dropped`, `refused`, `skipped`, `interrupted`), `result`, `error`, `sent`, `sent_to`, `cost_usd`, `input_tokens`, `output_tokens`, `exit_code`, `node`, `log_bytes`; ETag-cached |
+| `GET /api/schedules/{brain}/{name}/runs?limit=` | its runs, newest first (50, at most 1000), the one in progress included: `id`, `trigger`, `by`, `started`, `ended`, `duration_ms`, `status` (`running`, `ok`, `nothing`, `gated`, `failed`, `stopped`, `dropped`, `refused`, `skipped`, `interrupted`), `result`, `error`, `sent`, `sent_to`, `cost_usd`, `input_tokens`, `output_tokens`, `exit_code`, `node`, `log_bytes`, `rev` (the revision of the approved agent it started under), `retry_of` (for a `restart-retry` run, the run a restart cut short that it retries); ETag-cached |
 | `GET /api/schedules/{brain}/{name}/runs/{run}/log` | `{"id", "log", "cut", "running"}`: the run's log, its last 4 MiB; `404` once it aged out |
 | `PUT /api/schedules/{brain}/{name}` | the agent's `brain.json` entry, written into `brain.json` and its approved copy, a new agent or in place of the one of that name; `422` for an entry the bridge refuses |
 | `DELETE /api/schedules/{brain}/{name}` | takes the agent out of `brain.json` (its history stays until it ages out) |

@@ -169,7 +169,10 @@ this brain → Calendar), use it with:
 ```
 
 Each prints JSON; an error says what to do. `create` emails the attendees an
-invitation unless you add `--send-updates none`, so confirm first.
+invitation unless you add `--send-updates none`, and `delete` takes an event
+out of its other attendees' calendars too: both need the owner's yes first.
+Call `request_approval`, and pass the `approval_id` it answers approved with
+as `--approval-id`.
 
 ## Group chats
 

@@ -6,6 +6,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestScheduleValidate(t *testing.T) {
@@ -15,6 +16,9 @@ func TestScheduleValidate(t *testing.T) {
 		{Name: "review", When: "cron 0 3 * * *", Template: "code-review-bugs", Vars: map[string]string{"repos": "a/b"}, GitHub: &chat.GitHubGrant{Repos: []string{"a/b"}, Permissions: map[string]string{"issues": "write", "contents": "read"}}, Risk: "irreversible", Preapproved: []string{"file issues on a/b"}, TimeoutMinutes: 60},
 		{Name: "scrape", When: "daily 21:00", Command: &ScheduleCommand{Node: "mac-mini", Argv: []string{"/Users/you/run.sh"}}, Report: ReportSilent, Missed: MissedSkip},
 		{Name: "inline", When: "weekly mon 09:00", Prompt: "Check the inbox", JitterMinutes: new(0)},
+		{Name: "no-retry", When: "daily 03:00", Prompt: "Send the invoices", RetryInterrupted: new(false)},
+		{Name: "gated", When: "every 15m", Prompt: "Sort the new files", Gate: &ScheduleGate{Argv: []string{"scripts/new-files.sh"}, Dir: "inbox", TimeoutSeconds: 10}},
+		{Name: "gated-node", When: "every 15m", Prompt: "Look at CI", Gate: &ScheduleGate{Argv: []string{"/Users/you/bin/ci-changed"}, Dir: "/Users/you", Node: "mac-mini"}},
 	}
 	for _, s := range ok {
 		if err := s.Validate(); err != nil {
@@ -38,6 +42,14 @@ func TestScheduleValidate(t *testing.T) {
 		"long":        {Name: "a", When: "every 6h", TimeoutMinutes: MaxScheduleTimeout + 1},
 		"effort":      {Name: "a", When: "every 6h", Effort: "huge"},
 		"cmd effort":  {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, Effort: "max"},
+		"cmd retry":   {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, RetryInterrupted: new(false)},
+		"cmd gate":    {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, Gate: &ScheduleGate{Argv: []string{"y"}}},
+		"gate argv":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{" "}}},
+		"gate line":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x", "two\nlines"}}},
+		"gate dir":    {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, Dir: "../other"}},
+		"gate abs":    {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, Dir: "/tmp"}},
+		"gate node":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, Dir: "rel", Node: "n"}},
+		"gate time":   {Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}, TimeoutSeconds: MaxGateTimeout + 1}},
 		"jitter":      {Name: "a", When: "every 6h", JitterMinutes: new(99999)},
 		"prompt file": {Name: "a", When: "every 6h", PromptFile: "../x.md"},
 		"command":     {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n"}},
@@ -103,5 +115,51 @@ func TestSchedulesRoundTrip(t *testing.T) {
 	empty := Manifest{ID: "a", Name: "A", Schedules: []Schedule{}}
 	if !empty.Equal(Manifest{ID: "a", Name: "A"}) {
 		t.Error("no schedules and an empty list differ")
+	}
+}
+
+// TestRetriesInterrupted: a brain run is retried after a restart unless
+// its schedule says retry_interrupted false; a program never is. true is
+// the default, so it neither changes the schedule nor its revision.
+func TestRetriesInterrupted(t *testing.T) {
+	brain := Schedule{Name: "a", When: "every 6h", Prompt: "x"}
+	cmd := Schedule{Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}}
+	off := brain
+	off.RetryInterrupted = new(false)
+	on := brain
+	on.RetryInterrupted = new(true)
+	for _, c := range []struct {
+		s    Schedule
+		want bool
+	}{{brain, true}, {on, true}, {off, false}, {cmd, false}} {
+		if got := c.s.RetriesInterrupted(); got != c.want {
+			t.Errorf("%+v: RetriesInterrupted %v, want %v", c.s, got, c.want)
+		}
+	}
+	if !on.Equal(brain) || on.Revision() != brain.Revision() {
+		t.Error("retry_interrupted true is not the default")
+	}
+	if off.Equal(brain) || off.Revision() == brain.Revision() {
+		t.Error("retry_interrupted false changes nothing")
+	}
+	other := brain
+	other.Prompt = "y"
+	if len(brain.Revision()) != 16 || other.Revision() == brain.Revision() {
+		t.Errorf("revisions %q and %q", brain.Revision(), other.Revision())
+	}
+	if data, _ := EncodeSchedule(on); strings.Contains(string(data), "retry_interrupted") {
+		t.Errorf("the default is written: %s", data)
+	}
+}
+
+func TestGateTimeout(t *testing.T) {
+	if (ScheduleGate{}).Timeout() != DefaultGateTimeout || (ScheduleGate{TimeoutSeconds: 5}).Timeout() != 5*time.Second {
+		t.Error("Timeout")
+	}
+	a := Schedule{Name: "a", When: "every 6h", Gate: &ScheduleGate{Argv: []string{"x"}}}
+	b := a
+	b.Gate = &ScheduleGate{Argv: []string{"y"}}
+	if a.Equal(b) || a.Revision() == b.Revision() {
+		t.Error("a gate's change goes unnoticed, by the approval too")
 	}
 }
