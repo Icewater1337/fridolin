@@ -375,6 +375,43 @@ func (g leaseGate) SendPoll(ctx context.Context, jid, q string, opts []string, m
 	return g.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
 }
 
+// Typing is outbound.Presence's, where the messenger has it; without,
+// it shows nothing.
+func (g leaseGate) Typing(ctx context.Context, jid string, on bool) error {
+	p, ok := g.Messenger.(outboundmsg.Presence)
+	if !ok {
+		return nil
+	}
+	if g.lost() {
+		return errLeaseLost
+	}
+	return p.Typing(ctx, jid, on)
+}
+
+// MarkRead is outbound.Presence's, as Typing.
+func (g leaseGate) MarkRead(ctx context.Context, jid string, ids []string) error {
+	p, ok := g.Messenger.(outboundmsg.Presence)
+	if !ok {
+		return nil
+	}
+	if g.lost() {
+		return errLeaseLost
+	}
+	return p.MarkRead(ctx, jid, ids)
+}
+
+// MarkPlayed is outbound.Presence's, as Typing.
+func (g leaseGate) MarkPlayed(ctx context.Context, jid string, ids []string) error {
+	p, ok := g.Messenger.(outboundmsg.Presence)
+	if !ok {
+		return nil
+	}
+	if g.lost() {
+		return errLeaseLost
+	}
+	return p.MarkPlayed(ctx, jid, ids)
+}
+
 // ── the tailnet ───────────────────────────────────────────────────────────
 
 // tailnetStateRecord is <data>/core/tailnet.json.

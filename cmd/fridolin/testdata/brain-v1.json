@@ -23,6 +23,7 @@
   "observe": "run",
   "approvals": "auto",
   "live_session": "owner_dm",
+  "presence": false,
   "backup": {
     "enabled": true,
     "exclude": [

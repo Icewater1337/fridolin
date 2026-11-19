@@ -125,6 +125,8 @@ export interface BrainManifest {
   observe?: Observe;
   approvals?: ApprovalsMode;
   live_session?: LiveSessionMode;
+  /** false: no typing and no read receipts in the brain's chats; unset leaves it to whatsapp.presence. */
+  presence?: boolean;
   backup: BrainBackup;
   calendar?: BrainCalendar;
   /** "core" for the brain that may reach the others through its grants. */
@@ -608,8 +610,15 @@ export interface ConfigFile {
   schedules: SchedulesConfig;
   connections?: ConnectionsConfig;
   fride?: FrideConfig;
+  whatsapp?: WhatsAppConfig;
   /** The IANA zone schedules are read in; left out for the bridge's own. */
   timezone?: string;
+}
+
+/** whatsapp (config.WhatsAppConfig). */
+export interface WhatsAppConfig {
+  /** Online, typing and read receipts in the chats; default true. */
+  presence?: boolean;
 }
 
 /** GET /api/config: the file and what is in effect, with the etag a PUT sends back. */
