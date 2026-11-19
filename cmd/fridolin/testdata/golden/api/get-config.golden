@@ -69,7 +69,8 @@ Content-Type: application/json
       "enabled": false
     },
     "version": 3,
-    "viewer": false
+    "viewer": false,
+    "whatsapp": {}
   },
   "effective": {
     "agent_provider": "claude",
@@ -200,7 +201,10 @@ Content-Type: application/json
       "snapshots_bucket": "fridolin-snapshots"
     },
     "version": 3,
-    "viewer": false
+    "viewer": false,
+    "whatsapp": {
+      "presence": true
+    }
   },
   "etag": "<ETAG>",
   "path": "<ROOT>/config.json"

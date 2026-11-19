@@ -69,6 +69,11 @@ type Manifest struct {
 	// of starting `claude -p` per message (LiveSessionOff, the default).
 	LiveSession string `json:"live_session,omitempty"`
 
+	// Presence false keeps the bridge from showing "typing…" in the
+	// brain's chats while it works, and from marking the messages it
+	// takes as read there; nil or true leaves it to whatsapp.presence.
+	Presence *bool `json:"presence,omitempty"`
+
 	Backup Backup `json:"backup"`
 
 	// Calendar is the Google account this brain signed in with and the

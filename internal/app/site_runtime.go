@@ -179,6 +179,32 @@ func (s siteChatMessenger) SendPoll(ctx context.Context, jid, q string, opts []s
 	return s.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
 }
 
+// Typing is outbound.Presence's: a build chat shows that a run works
+// anyway, and others what the messenger shows, if anything.
+func (s siteChatMessenger) Typing(ctx context.Context, jid string, on bool) error {
+	if p, ok := s.Messenger.(outboundmsg.Presence); ok && brainOfBuildJID(jid) == "" {
+		return p.Typing(ctx, jid, on)
+	}
+	return nil
+}
+
+// MarkRead is outbound.Presence's, as Typing: a build chat has no
+// receipts.
+func (s siteChatMessenger) MarkRead(ctx context.Context, jid string, ids []string) error {
+	if p, ok := s.Messenger.(outboundmsg.Presence); ok && brainOfBuildJID(jid) == "" {
+		return p.MarkRead(ctx, jid, ids)
+	}
+	return nil
+}
+
+// MarkPlayed is outbound.Presence's, as MarkRead.
+func (s siteChatMessenger) MarkPlayed(ctx context.Context, jid string, ids []string) error {
+	if p, ok := s.Messenger.(outboundmsg.Presence); ok && brainOfBuildJID(jid) == "" {
+		return p.MarkPlayed(ctx, jid, ids)
+	}
+	return nil
+}
+
 func (s siteChatMessenger) toChat(brainID, text string) error {
 	// "Working on it" is what the page shows anyway while a run lasts. Only
 	// that notice: others start with the same ⏳, and a build chat must not

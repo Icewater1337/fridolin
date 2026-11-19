@@ -53,6 +53,10 @@ type Workflow struct {
 	// command in lower case and the words after it. It decides itself
 	// who may send them, and where; nil leaves them to the brain.
 	Owner func(m brainruntime.Inbound, command string, args []string) string
+	// Read hears that br took m, a batch the debouncer handed on: its
+	// messages can be marked read. It decides itself which. Nil for
+	// none.
+	Read func(br *brainruntime.Brain, m brainruntime.Inbound)
 }
 
 // OwnerCommands are the commands only the owner may send, in their
@@ -278,5 +282,8 @@ func (p *Workflow) Dispatch(m brainruntime.Inbound) {
 	case busy && !m.Silent && settings.QueueNotify:
 		// Interrupt mode queues too: behind other chats and other people.
 		_ = p.Notice(ctx, m.JID, outboundmsg.QueuedNotice(pos))
+	}
+	if err == nil && p.Read != nil {
+		p.Read(br, m)
 	}
 }

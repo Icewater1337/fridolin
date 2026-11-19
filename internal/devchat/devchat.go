@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,10 +19,11 @@ import (
 // messages are kept in memory and shown on the dashboard; incoming ones are
 // injected through the dev API.
 type Messenger struct {
-	chunk  func(string) []string
-	mu     sync.Mutex
-	outbox []Message
-	ids    atomic.Int64 // numbers the ids of polls and notices
+	chunk   func(string) []string
+	mu      sync.Mutex
+	outbox  []Message
+	signals []Signal     // what Signals returns
+	ids     atomic.Int64 // numbers the ids of polls and notices
 }
 
 // New takes the current chunking policy. Each SendChunked call
@@ -96,6 +98,62 @@ func (d *Messenger) SendPoll(_ context.Context, jid, q string, opts []string, _ 
 	}
 	d.record(Message{JID: jid, Text: q, Poll: opts, ID: id})
 	return id, nil
+}
+
+// Signal is a chat state or receipt the bridge "sent" in dev mode
+// (outbound.Presence).
+type Signal struct {
+	JID string
+	// Kind is SignalTyping, SignalPaused, SignalRead or SignalPlayed.
+	Kind string
+	IDs  []string // a receipt's messages
+}
+
+// The kinds of Signal.
+const (
+	SignalTyping = "typing"
+	SignalPaused = "paused"
+	SignalRead   = "read"
+	SignalPlayed = "played"
+)
+
+func (d *Messenger) signal(s Signal) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.signals = append(d.signals, s)
+	if len(d.signals) > 200 {
+		d.signals = d.signals[len(d.signals)-200:]
+	}
+}
+
+// Typing records that the bridge shows typing in jid, or stopped.
+func (d *Messenger) Typing(_ context.Context, jid string, on bool) error {
+	kind := SignalPaused
+	if on {
+		kind = SignalTyping
+	}
+	d.signal(Signal{JID: jid, Kind: kind})
+	return nil
+}
+
+// MarkRead records that the bridge marked ids in jid as read.
+func (d *Messenger) MarkRead(_ context.Context, jid string, ids []string) error {
+	d.signal(Signal{JID: jid, Kind: SignalRead, IDs: slices.Clone(ids)})
+	return nil
+}
+
+// MarkPlayed records that the bridge marked the voice notes among ids in
+// jid as played; dev mode cannot tell which they are.
+func (d *Messenger) MarkPlayed(_ context.Context, jid string, ids []string) error {
+	d.signal(Signal{JID: jid, Kind: SignalPlayed, IDs: slices.Clone(ids)})
+	return nil
+}
+
+// Signals returns the recorded chat states and receipts, oldest first.
+func (d *Messenger) Signals() []Signal {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.signals)
 }
 
 // Outbox returns the recorded messages, newest first.

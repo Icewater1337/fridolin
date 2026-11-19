@@ -213,6 +213,18 @@ type File struct {
 	Connections ConnectionsConfig `json:"connections"`
 	// Calls are WhatsApp voice calls (calls.go).
 	Calls CallsConfig `json:"calls"`
+	// WhatsApp is what the bridge shows of itself in its chats.
+	WhatsApp WhatsAppConfig `json:"whatsapp"`
+}
+
+// WhatsAppConfig is what the bridge shows of itself in its WhatsApp
+// chats.
+type WhatsAppConfig struct {
+	// Presence (default true) shows the bridge online once it connects,
+	// "typing…" in a chat while a brain works on its message, and marks
+	// the messages a brain took as read (a voice note as played once its
+	// run answered).
+	Presence *bool `json:"presence,omitempty"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all
