@@ -38,6 +38,7 @@
   },
   "policy": {},
   "queue": {},
+  "run_files": {},
   "sandbox": {
     "allow_paths": [],
     "deny_paths": [],

@@ -26,7 +26,7 @@ and `-journal` files and Litestream's `.<db>-litestream/` folders (a file
 sync could copy a live database halfway through a write: Litestream
 replicates them instead, and the snapshots take `VACUUM INTO` copies),
 the brains' own state under `brains/` (CLI sign-ins, TMPDIR, caches), run
-tokens and run records, the dashboard and scripts tokens, the dashboard
+tokens, run records and the runs' records of their files (`run-files/`), the dashboard and scripts tokens, the dashboard
 sessions, the `rclone/`, `google/`, `plaud/`, `otp/`, `site/`, `tsnet/`,
 `nodes/`, `core/` and `backup/` folders and lock files; inside the vault's
 folders also `.git/`, `node_modules/`, `.venv/`, `__pycache__/`,
@@ -88,9 +88,11 @@ and the run asks again with `allow_over_budget`.
 restic, to the repository `b2:<snapshots_bucket>:restic`:
 
 - every night after 03:00 local time, the whole data dir (less what is
-  rebuilt: run tokens, the brains' `tmp/` and `cache/`; and less
+  rebuilt: run tokens, the brains' `tmp/` and `cache/`; less
   `core/local-secrets/`, the GitLab connection, which never goes to the
-  cloud: [CONNECTIONS.md](CONNECTIONS.md#gitlab)), every brain folder
+  cloud: [CONNECTIONS.md](CONNECTIONS.md#gitlab); and less `run-files/`,
+  the runs' records of their files, which hold copies of brain folders
+  whose backup may be off: [BRAINS.md](BRAINS.md#what-a-run-changed)), every brain folder
   outside it (each as its backup settings say, below), and `VACUUM INTO` copies of `bridge.db` and `vault.db` in
   `core/snapshot-staging/`; never the live database files;
 - every hour, the brain folders and `audit/`;

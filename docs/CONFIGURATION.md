@@ -1751,6 +1751,30 @@ run, as they only remove the bridge's own records), and the bridge after
 each run of the agent. The vault's nightly snapshot of the data dir takes
 them with it, like the audit log.
 
+### `run_files`
+
+The record each brain run keeps of the files it created, changed and
+deleted in its folder, with their earlier contents
+([BRAINS.md](BRAINS.md#what-a-run-changed)).
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | keep the records; off, no run walks its folder |
+| `max_files` | `20000` | the most files a run's folder may hold, less what is left out, for its files to be recorded |
+| `max_mb` | `1024` | the most megabytes it may hold |
+| `keep_days` | `14` | records of runs older than this go |
+| `max_store_mb` | `4096` | the oldest records go once the stored copies take more than this |
+
+A run whose folder holds more than `max_files` or `max_mb` keeps a record
+that says so, without its files; leave big folders out with the brain's
+`backup.exclude` or a `.gitignore`. The records and the copies are in
+`run-files/` in the data dir, where brains never reach. The copies of
+what the folders hold now stay whatever `max_store_mb` says, as the next
+run would store them again. No snapshot, Drive backup or core export
+takes `run-files/`: it holds copies of brain folders whose backup may be
+off. The housekeeping job applies the limits every time it runs, and the
+bridge after a run every six hours.
+
 ### `fride.news`
 
 How FrIDE's news reaches the chat that handed it work

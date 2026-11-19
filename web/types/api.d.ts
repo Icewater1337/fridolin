@@ -513,6 +513,15 @@ export interface SchedulesConfig {
   max_log_kb?: number;
 }
 
+/** run_files: the record each run keeps of the files it changed. */
+export interface RunFilesConfig {
+  enabled?: boolean;
+  max_files?: number;
+  max_mb?: number;
+  keep_days?: number;
+  max_store_mb?: number;
+}
+
 export interface ConnectionConfig {
   brains?: string[];
   brain_monthly_usd?: number;
@@ -604,6 +613,7 @@ export interface ConfigFile {
   policy: PolicyConfig;
   housekeeping: HousekeepingConfig;
   schedules: SchedulesConfig;
+  run_files?: RunFilesConfig;
   connections?: ConnectionsConfig;
   fride?: FrideConfig;
   /** The IANA zone schedules are read in; left out for the bridge's own. */

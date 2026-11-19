@@ -131,6 +131,13 @@ const (
 	// "dashboard" or "idle", ID the instance, Detail the node, the memory
 	// and why, Outcome ok or why it failed. Never a token.
 	FrideInstance = "fride_instance"
+	// RunFiles is what a brain run created, changed and deleted in its
+	// folder (internal/runsnap): Brain, Run, Chat and Thread the run's,
+	// Detail the counts and the first paths, Outcome ok, or why its files
+	// were not recorded ("skipped: ..."). A run that changed nothing has
+	// no line. Putting a run back is a line of its own: Detail "undo" and
+	// what it did, By who asked.
+	RunFiles = "run_files"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores

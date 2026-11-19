@@ -213,6 +213,9 @@ type File struct {
 	Connections ConnectionsConfig `json:"connections"`
 	// Calls are WhatsApp voice calls (calls.go).
 	Calls CallsConfig `json:"calls"`
+	// RunFiles is the record each run keeps of the files it changed
+	// (runfiles.go).
+	RunFiles RunFilesConfig `json:"run_files"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all
