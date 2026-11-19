@@ -10,6 +10,20 @@ for compatibility.
 
 ### Added
 
+- **Brains send files into their chat.** A run that answers someone in
+  a WhatsApp chat has a new tool, `reply_file(path, caption, as)`: it
+  sends a file of the brain's folder, media inbox or temp folder into
+  that chat as an image (JPEG or PNG, with a preview), a document or a
+  voice note, at most `max_media_mb`. Audio such as `elevenlabs_speak`'s
+  MP3 becomes a voice note with ffmpeg when it is installed, and goes as
+  a document when it is not. The bridge keeps a copy in
+  `<data_dir>/outbox-files/` and sends it through the outbox like any
+  reply, with its retries and its hour; no snapshot or core export
+  takes the copy. A write action: refused in a lockdown and for a run
+  whose risk level is `read`, and a caption that looks like a secret
+  needs your approval, as for the other outbound tools. Going back to
+  an older version while a file waits in the outbox sends its caption,
+  not the file. [docs/BRAINS.md](docs/BRAINS.md#sending-files)
 - **A brain's page shows its live session.** For a brain with
   `"live_session": "owner_dm"`, *Current run* now says whether the session
   is ready (since when, and its turns), in a turn, starting, not running,

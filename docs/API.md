@@ -266,6 +266,9 @@ A run whose brain may use Fridolin's [connections](CONNECTIONS.md#brains)
 the run's temp folder. A call the bridge refuses (no budget left, a model
 the provider does not know) is a failed call the model reads.
 
+A run that answers someone in a WhatsApp chat also gets `reply_file`,
+which sends a file of its brain's into that chat ([BRAINS.md](BRAINS.md#sending-files)).
+
 ## The connections' dashboard routes
 
 The Integrations page's OpenAI and ElevenLabs cards use these, guarded

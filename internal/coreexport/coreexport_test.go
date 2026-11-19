@@ -108,6 +108,7 @@ func dataDir(t *testing.T) string {
 	write(t, dir, "runs/123.json", "{}", 0o600)
 	write(t, dir, "run-tokens/family/run-1.token", "t", 0o600)
 	write(t, dir, "media/family/photo.jpg", "jpg", 0o600)
+	write(t, dir, "outbox-files/0123abcd.pdf", "pdf", 0o600)
 	write(t, dir, "vault/documents/big.pdf", "pdf", 0o600)
 	write(t, dir, "core/device-id", "0123456789abcdef0123456789abcdef", 0o600)
 	write(t, dir, "core/encryption.json", `{"retired":["drive"]}`, 0o600)

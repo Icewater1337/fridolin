@@ -2424,6 +2424,10 @@ export interface DevMessage {
   poll?: string[];
   /** A poll's message id, which a vote names. */
   id?: string;
+  /** A file's name; text is then its caption. */
+  file?: string;
+  /** How the chat shows the file: image, document or voice. */
+  kind?: 'image' | 'document' | 'voice';
 }
 
 export interface LogLine {

@@ -12,6 +12,7 @@ import (
 
 	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
@@ -166,6 +167,15 @@ func (s siteChatMessenger) SendChunked(ctx context.Context, jid, text string) er
 		return s.toChat(id, text)
 	}
 	return s.Messenger.SendChunked(ctx, jid, text)
+}
+
+// SendFile sends a file on, but not into a build chat: the Build page
+// shows no files.
+func (s siteChatMessenger) SendFile(ctx context.Context, jid string, f chat.File) error {
+	if brainOfBuildJID(jid) != "" {
+		return fmt.Errorf("%w: a build chat takes no files", outboundmsg.ErrNotAChat)
+	}
+	return s.Messenger.SendFile(ctx, jid, f)
 }
 
 // TakesWhole reports that a build chat shows a reply in one piece, as

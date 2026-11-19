@@ -163,4 +163,7 @@ type testHooks struct {
 	// google changes the Google sign-in's options before the bridge makes
 	// it: tests point it at a fake Google.
 	google func(google.Options) google.Options
+	// ffmpeg finds the ffmpeg voice notes are made with in place of the
+	// helper folders: tests hand in theirs, or none ("").
+	ffmpeg func() string
 }
