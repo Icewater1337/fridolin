@@ -24,7 +24,10 @@ import (
 // the run never sees, and counts it against the brain's monthly limit.
 // Files go by path: a recording the run names is read through os.Root
 // from its folder, its media inbox or its temp folder (openRunFile), and
-// speech is written into its temp folder.
+// speech is written into its temp folder. The tools that send text to
+// the vendor (elevenlabs_speak, openai_transcribe's prompt) are
+// outbound: no secret-like value without the owner's approval
+// (tools.GuardedOutbound).
 
 // mayUseConnection reports whether brain's runs have conn's tools.
 func (b *App) mayUseConnection(brain, conn string) bool {
@@ -47,13 +50,14 @@ func (b *App) registerConnectionTools(r *tools.Set[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{Description: "Turn a recording into text with OpenAI, through Fridolin's key. The recording leaves this machine for OpenAI. It answers {\"text\"}.",
 				InputSchema: tools.Schema(map[string]any{
-					"path":     pathArg,
-					"language": languageArg,
-					"prompt":   tools.Str("Names and words to expect, so that they are spelled right."),
-					"model":    tools.Str("The model; " + connections.DefaultOpenAITranscribe + " when left out."),
+					"path":        pathArg,
+					"language":    languageArg,
+					"prompt":      tools.Str("Names and words to expect, so that they are spelled right."),
+					"model":       tools.Str("The model; " + connections.DefaultOpenAITranscribe + " when left out."),
+					"approval_id": tools.ApprovalIDProp(),
 				}, "path")}
 		},
-		Call: r.Guarded(skill.RiskWrite, b.callConnectionTranscribe(connections.OpenAI)),
+		Call: r.GuardedOutbound(skill.RiskWrite, b.callConnectionTranscribe(connections.OpenAI)),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name: "elevenlabs_transcribe", Available: may(connections.ElevenLabs),
@@ -72,13 +76,14 @@ func (b *App) registerConnectionTools(r *tools.Set[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{Description: "Read a text aloud with ElevenLabs, through Fridolin's key, into an audio file in your temp folder. It answers {\"path\", \"content_type\", \"characters\"}. The file stays on this machine: the bridge cannot send audio to WhatsApp yet.",
 				InputSchema: tools.Schema(map[string]any{
-					"text":   tools.Str("What to read, at most 10,000 characters."),
-					"voice":  tools.Str("A voice id from elevenlabs_voices; the default voice when left out."),
-					"model":  tools.Str("The model; " + connections.DefaultElevenLabsSpeech + " when left out."),
-					"format": tools.Str("The output format, such as mp3_44100_128 (the default) or pcm_16000."),
+					"text":        tools.Str("What to read, at most 10,000 characters."),
+					"voice":       tools.Str("A voice id from elevenlabs_voices; the default voice when left out."),
+					"model":       tools.Str("The model; " + connections.DefaultElevenLabsSpeech + " when left out."),
+					"format":      tools.Str("The output format, such as mp3_44100_128 (the default) or pcm_16000."),
+					"approval_id": tools.ApprovalIDProp(),
 				}, "text")}
 		},
-		Call: r.Guarded(skill.RiskWrite, b.callElevenLabsSpeak),
+		Call: r.GuardedOutbound(skill.RiskWrite, b.callElevenLabsSpeak),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name: "elevenlabs_voices", Available: may(connections.ElevenLabs),

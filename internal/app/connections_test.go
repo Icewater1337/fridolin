@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -13,9 +14,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // Fake keys, never real ones.
@@ -597,6 +600,73 @@ func TestConnectionsBrainTools(t *testing.T) {
 	}
 	if strings.Join(by, "|") != "openai transcribe gpt-4o-mini-transcribe|openai transcribe gpt-4o-mini-transcribe|elevenlabs transcribe scribe_v1|elevenlabs tts eleven_multilingual_v2|elevenlabs voices" {
 		t.Errorf("audit %v", by)
+	}
+}
+
+// TestOutboundToolRefusesSecrets: elevenlabs_speak sends its text to
+// ElevenLabs, so a key in it is refused, and logged so, until the owner
+// approves that call; the approval goes once.
+func TestOutboundToolRefusesSecrets(t *testing.T) {
+	t.Parallel()
+	fake := useFakeAI(t)
+	h := newHarness(t, `{"connections": {"elevenlabs": {"brains": ["personal"], "voice": "v1"}}}`)
+	h.AddBrain(manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
+	h.setConnectionKeys()
+	tok, revoke := h.b.runTokens.mintRun(runInfo{Brain: "personal", ID: "r1", Chat: harnessDM})
+	defer revoke()
+	speak := func(args map[string]any) string {
+		data, _ := json.Marshal(map[string]any{"name": "elevenlabs_speak", "arguments": args})
+		w := h.Script("POST", "/brain/mcp/call", string(data), func(r *http.Request) {
+			r.Header.Set("Authorization", "Bearer "+tok)
+			r.Header.Set("X-Fridolin-Run", "r1")
+		})
+		return w.Body.String()
+	}
+	secret := "Read this out: the key is " + testOpenAIKey
+	got := speak(map[string]any{"text": secret})
+	if !strings.Contains(got, `"isError":true`) || !strings.Contains(got, "the argument text looks like a secret (an API key or access token)") ||
+		!strings.Contains(got, "request_approval") || strings.Contains(got, testOpenAIKey) {
+		t.Errorf("a key went out, or the refusal does not say what to do: %s", got)
+	}
+	if got := speak(map[string]any{"text": secret, "approval_id": "anone"}); !strings.Contains(got, `there is no approval \"anone\" of yours. Do not send it.`) {
+		t.Errorf("an approval that does not exist: %s", got)
+	}
+	fake.mu.Lock()
+	spoken := len(fake.spoken)
+	fake.mu.Unlock()
+	if spoken != 0 {
+		t.Fatalf("ElevenLabs got the text of a refused call")
+	}
+
+	ctx := context.Background()
+	now := time.Now()
+	a := store.Approval{ID: "akey", Kind: approvalKind, Brain: "personal", Notify: "personal", Action: "Read the key out", Risk: "irreversible", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if err := h.b.store.AddApproval(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.b.store.DecideApproval(ctx, a.ID, store.ApprovalApproved, "", "15551234567", now); err != nil {
+		t.Fatal(err)
+	}
+	if got := speak(map[string]any{"text": secret, "approval_id": "akey"}); strings.Contains(got, `"isError":true`) {
+		t.Errorf("the owner's approval: %s", got)
+	}
+	if got := speak(map[string]any{"text": secret, "approval_id": "akey"}); !strings.Contains(got, "approval akey was used already") {
+		t.Errorf("an approval went twice: %s", got)
+	}
+	if got := speak(map[string]any{"text": "Hallo, commit 3f2a9c1e5b7d4f6a8c0e2b4d6f8a0c2e4b6d8f0a"}); strings.Contains(got, `"isError":true`) {
+		t.Errorf("ordinary text: %s", got)
+	}
+	var outcomes []string
+	for _, l := range h.auditOf("tool_call") {
+		if l["detail"] == "elevenlabs_speak" {
+			outcomes = append(outcomes, l["outcome"].(string))
+		}
+	}
+	if want := "refused: secret-like value|refused: secret-like value|ok (a secret-like value, approval akey)|refused: secret-like value|ok"; strings.Join(outcomes, "|") != want {
+		t.Errorf("audit outcomes %q, want %q", outcomes, want)
+	}
+	if lines, _ := json.Marshal(h.auditLines()); strings.Contains(string(lines), testOpenAIKey) {
+		t.Errorf("the key reached the audit log: %s", lines)
 	}
 }
 

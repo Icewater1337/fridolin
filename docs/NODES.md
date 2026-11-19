@@ -1384,8 +1384,11 @@ repository already it says so and does nothing, else it calls
 **Policy.** `fride_task`, `fride_reply`, `fride_move`, `fride_close`
 and `fride_repo_add` are write actions of M5's policy (`tools.Guarded`): a lockdown refuses them,
 as it refuses `!move`, and so does a run whose risk budget is read;
-`fride_status` only reads. Every call is a `tool_call` line in the audit
-log.
+`fride_status` only reads. What `fride_task` and `fride_reply` say may
+end up in a pull request or an issue, so a text that looks like a secret
+is refused unless you approved that call (`approval_id`;
+[BRAINS.md](BRAINS.md#skills-risk-and-approvals), "Secrets stay home").
+Every call is a `tool_call` line in the audit log.
 
 **Not yet.** The
 dashboard shows the FrIDE address each node reports and links it; FrIDE's
