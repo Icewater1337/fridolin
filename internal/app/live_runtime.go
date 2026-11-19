@@ -92,11 +92,12 @@ type liveSession struct {
 	idleSince time.Time
 }
 
-// liveFailure is how often a brain's session failed to come up, and until
-// when it is left alone.
+// liveFailure is how often a brain's session failed to come up, until
+// when it is left alone, and why the last did not come up.
 type liveFailure struct {
 	n     int
 	until time.Time
+	err   string
 }
 
 // liveHost keeps the live sessions of the brains.
@@ -145,16 +146,67 @@ func (h *liveHost) up(brainID string) bool {
 	return s != nil && s.ready && !s.stopped
 }
 
+// view is the state of the live session of brain brainID, whose brain.json
+// says mode, for the dashboard (brain.LiveView): nil for a brain that asks
+// for none. blocked is liveBlocker of the bridge's settings.
+func (h *liveHost) view(brainID, mode, blocked string) *brain.LiveView {
+	if mode != manifest.LiveSessionOwnerDM {
+		return nil
+	}
+	if blocked != "" {
+		return &brain.LiveView{State: brain.LiveUnavailable, Reason: blocked}
+	}
+	v := &brain.LiveView{State: brain.LiveDown}
+	if h == nil {
+		return v
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s := h.sess[brainID]; s != nil && !s.stopped {
+		started := s.started.UTC()
+		v.Started, v.Turns = &started, s.turns
+		switch {
+		case !s.ready:
+			v.State = brain.LiveStarting
+		case s.busy:
+			v.State = brain.LiveBusy
+		default:
+			v.State = brain.LiveReady
+		}
+		return v
+	}
+	if f := h.fails[brainID]; time.Now().Before(f.until) {
+		retry := f.until.UTC()
+		v.State, v.Error, v.RetryAt = brain.LiveFailed, f.err, &retry
+	}
+	return v
+}
+
+// liveBlocker is why the bridge's settings rule a live session out, ""
+// when they do not: a session runs Claude Code (not Codex), without
+// asking for permissions, which a session has nobody to answer, and in
+// the brain's own Claude state, not the user's.
+func liveBlocker(provider string, dangerously, inheritUser bool) string {
+	switch {
+	case provider == "codex":
+		return "the bridge runs Codex (Settings → AI mode); a live session needs Claude Code"
+	case !dangerously:
+		return "it needs dangerously_skip_permissions: a session has nobody to answer a permission prompt"
+	case inheritUser:
+		return "it does not run with inherit_claude_user_config: a session needs the brain's own Claude config"
+	}
+	return ""
+}
+
 // eligible reports whether spec's message is one a live session takes:
 // the brain has one, and it is its owner's direct message to it, from
-// WhatsApp, in a brain that runs the CLI as the session needs it (without
-// asking for permissions, which a session has nobody to answer, and in its
-// own sandboxed state). A brain's own GitHub grant goes with the session
-// as with a one-off run: each turn gets a token of its own (loginGitHub).
+// WhatsApp, in a brain that runs the CLI as the session needs it
+// (liveBlocker). A brain's own GitHub grant goes with the session as with
+// a one-off run: each turn gets a token of its own (loginGitHub).
 func (h *liveHost) eligible(spec brain.RunSpec) bool {
 	s, m := spec.Settings, spec.Message
 	switch {
-	case s.Manifest.LiveSession != manifest.LiveSessionOwnerDM, s.Provider == "codex", !s.Dangerously, s.InheritUser:
+	case s.Manifest.LiveSession != manifest.LiveSessionOwnerDM, liveBlocker(s.Provider, s.Dangerously, s.InheritUser) != "":
 		return false
 	case m.Silent, m.IsGroup(), m.HandedIn(), m.GitHub != nil, chat.IsInternalChat(m.JID):
 		return false
@@ -275,7 +327,7 @@ func (h *liveHost) start(r *commandRunner, spec brain.RunSpec, s *liveSession) {
 	f := h.fails[s.brain]
 	f.n = min(f.n+1, liveMaxFails)
 	backoff := h.b.waits.liveBackoff << (f.n - 1)
-	f.until = time.Now().Add(backoff)
+	f.until, f.err = time.Now().Add(backoff), err.Error()
 	h.fails[s.brain] = f
 	h.mu.Unlock()
 	log.Printf("brain %s: the live session did not come up (%v); messages run as one-off runs for %s. What it showed: %q", s.brain, err, backoff.Round(time.Second), screen)

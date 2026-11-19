@@ -14,6 +14,12 @@ import { errorMessage } from '../lib/errors.js';
 /** @import { PageModule } from '../app/page.js' */
 /** @import { DevMessage } from '../../types/api.js' */
 
+/**
+ * What a file the bridge sent is, by its kind.
+ * @param {string | undefined} kind
+ */
+const fileLabel = (kind) => (kind === 'image' ? 'Image' : kind === 'voice' ? 'Voice note' : 'Document');
+
 const DM = '15551234567@s.whatsapp.net';
 const GROUP = '120363000000000000@g.us';
 const DM_SENDER = 'defaults to the number in the JID';
@@ -87,8 +93,9 @@ export default /** @satisfies {PageModule} */ ({
       if (!items.length) { paint(outbox, 'none', () => h('div.card', empty('Nothing sent yet', 'Replies and polls the bridge sends appear here.'))); return; }
       paint(outbox, 'list', () => sent);
       // A message keeps its card, so one that was unfolded stays unfolded.
-      reconcile(sent, items.map((m) => ({ ...m, chat_name: chatName(m.jid) })), (m) => `${m.ts}|${m.jid}|${(m.text || '').length}`, (m) => h('article.card.outbox-item',
-        h('div.act-meta', h('span.act-who', m.poll ? 'Poll' : 'Message'), h('span.act-sep', 'to'), chatEl(m.jid), h('span.act-time', timeAgo(m.ts))),
+      reconcile(sent, items.map((m) => ({ ...m, chat_name: chatName(m.jid) })), (m) => `${m.ts}|${m.jid}|${m.file || ''}|${(m.text || '').length}`, (m) => h('article.card.outbox-item',
+        h('div.act-meta', h('span.act-who', m.poll ? 'Poll' : m.file ? fileLabel(m.kind) : 'Message'), h('span.act-sep', 'to'), chatEl(m.jid), h('span.act-time', timeAgo(m.ts))),
+        m.file ? h('div.mono.small.outbox-file', m.file) : null,
         longText(m.text, { limit: 600, lines: 10 }),
         m.poll ? h('ul.poll-options', m.poll.map((o) => h('li', o, m.id ? h('button.chip', { type: 'button', title: `Vote as ${voterOf()}`, onclick: () => vote(m, o) }, 'Vote') : null))) : null));
     };

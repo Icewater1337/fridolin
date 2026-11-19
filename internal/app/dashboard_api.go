@@ -98,7 +98,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		}
 	}
 	for _, br := range b.brainMgr.Brains() {
-		resp.Brains = append(resp.Brains, br.Snapshot())
+		resp.Brains = append(resp.Brains, b.brainRuntime(cfg, br))
 	}
 	resp.Brains = nonNil(resp.Brains)
 	return resp
@@ -229,13 +229,21 @@ func (b *App) brainViews() []httpapi.BrainView {
 		out[i].View = v
 
 		if br := b.brainMgr.Get(out[i].ID); br != nil && fsx.Canonical(br.Dir()) == fsx.Canonical(out[i].Path) {
-			rt := br.Snapshot()
+			rt := b.brainRuntime(cfg, br)
 			out[i].Runtime = &rt
 			out[i].Fallback = br == fallback
 			out[i].Intents, _ = b.intents.List(br.ID())
 		}
 	}
 	return nonNil(out)
+}
+
+// brainRuntime is br's state for the dashboard: its lanes, and its live
+// session when its brain.json asks for one.
+func (b *App) brainRuntime(cfg *config.Settings, br *brain.Brain) brain.Runtime {
+	rt := br.Snapshot()
+	rt.Live = b.live.view(br.ID(), rt.Manifest.LiveSession, liveBlocker(string(cfg.AgentProvider), cfg.DangerouslySkipPermissions, cfg.InheritClaudeUserConfig))
+	return rt
 }
 
 var pickMu sync.Mutex

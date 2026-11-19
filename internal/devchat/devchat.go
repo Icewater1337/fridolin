@@ -39,6 +39,10 @@ type Message struct {
 	// ID is a poll's message id, which a vote names (POST /api/dev/vote),
 	// or a notice's (SendMessageWithID), which a reply may quote.
 	ID string `json:"id,omitempty"`
+	// File and Kind are a file's name and how the chat shows it
+	// (chat.FileImage, …); Text is then its caption.
+	File string `json:"file,omitempty"`
+	Kind string `json:"kind,omitempty"`
 }
 
 // devConnected is always closed: dev mode can always send.
@@ -86,6 +90,13 @@ func (d *Messenger) SendMessageWithID(_ context.Context, jid, text string, sendi
 		sending(id)
 	}
 	d.record(Message{JID: jid, Text: text, ID: id})
+	return nil
+}
+
+// SendFile shows the file in the dev chat, by its name, with its
+// caption; it reads nothing of it.
+func (d *Messenger) SendFile(_ context.Context, jid string, f chat.File) error {
+	d.record(Message{JID: jid, Text: f.Caption, File: f.Name, Kind: f.Kind})
 	return nil
 }
 

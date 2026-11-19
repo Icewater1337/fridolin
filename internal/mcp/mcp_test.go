@@ -387,6 +387,28 @@ func TestServerDeclaresNoChannelByDefault(t *testing.T) {
 	}
 }
 
+// TestServerStaysOnAProtocolWithChannels: Claude Code's probe of the
+// 2026-07-28 protocol (server/discover) is answered "method not found",
+// and initialize settles on an older version, the only ones on which
+// Claude Code passes a channel's notifications on (ProtocolVersions).
+func TestServerStaysOnAProtocolWithChannels(t *testing.T) {
+	s := newSession(t, &fakeHandler{})
+	s.send(`{"jsonrpc":"2.0","id":"probe","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`)
+	if m := s.recv(); m["id"] != "probe" || errCode(m) != CodeMethodNotFound {
+		t.Fatalf("server/discover: %v", m)
+	}
+	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28"}}`)
+	m := s.recv()
+	if v, _ := m["result"].(map[string]any)["protocolVersion"].(string); v == "" || v >= "2026-07-28" {
+		t.Fatalf("initialize settled on %q, want a version before 2026-07-28: %v", v, m)
+	}
+	for _, v := range ProtocolVersions {
+		if v >= "2026-07-28" {
+			t.Errorf("ProtocolVersions has %s, on which Claude Code drops channel notifications", v)
+		}
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	data, err := json.Marshal(v)

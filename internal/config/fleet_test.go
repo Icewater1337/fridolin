@@ -161,6 +161,7 @@ func TestLayoutNamesTheDataDirsPaths(t *testing.T) {
 		l.Plaud():             "plaud",
 		l.Connections():       "connections",
 		l.OTP():               "otp",
+		l.OutboxFiles():       "outbox-files",
 		l.SiteDevices():       "site/devices.json",
 		l.Secrets():           "secrets",
 		l.Audit():             "audit",
