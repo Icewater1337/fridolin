@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
@@ -59,6 +60,7 @@ type Client struct {
 	log        waLog.Logger
 	media      Downloader             // nil: the client; tests set a fake
 	lister     GroupLister            // nil: the client; tests set a fake
+	presence   Presencer              // nil: the client; tests set a fake
 	notify     func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads,
@@ -80,6 +82,12 @@ type Client struct {
 	pairing bool
 
 	groups groupCache // what JoinedGroups answers with
+
+	// handled is where receipts for the messages handed on lately go,
+	// and shownOnline is set once WhatsApp heard the bridge is online
+	// since it last connected (presence.go).
+	handled     handledMessages
+	shownOnline atomic.Bool
 
 	mu sync.Mutex // guards the fields below, client included
 	// client is replaced when WhatsApp logged the device out (see
@@ -135,6 +143,7 @@ func New(opts Options) (*Client, error) {
 		log:        logger,
 		media:      opts.Downloader,
 		lister:     opts.Groups,
+		presence:   opts.Presence,
 		ctx:        ctx,
 		cancel:     cancel,
 		state:      chat.LinkState{Mode: "connecting", Since: time.Now()},
@@ -534,6 +543,7 @@ func (wa *Client) handleDMMessage(msg *events.Message, sender types.JID, policy 
 	if !alt.IsEmpty() {
 		m.ChatAlt = alt.String()
 	}
+	wa.handled.add(chatJID, msg.Info.ID, handledMessage{chat: msg.Info.Chat.ToNonAD(), voice: isVoiceNote(msg.Message)})
 	// On the chat's worker, so the chat's messages reach the bridge in
 	// the order they came.
 	wa.handler(wa.ctx, m)
@@ -669,6 +679,9 @@ func (wa *Client) handleGroupMessage(msg *events.Message) {
 	}
 
 	log.Printf("Group message from %s by %s: processing (silent=%v)", groupLabel(groupJID, groupName), senderNumber, silent)
+	if !msg.Info.IsFromMe {
+		wa.handled.add(groupJID, msg.Info.ID, handledMessage{chat: msg.Info.Chat.ToNonAD(), sender: msg.Info.Sender.ToNonAD(), voice: isVoiceNote(msg.Message)})
+	}
 	wa.handler(wa.ctx, chat.Inbound{JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
 		Quoted: quoted, Silent: silent, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)})
 }

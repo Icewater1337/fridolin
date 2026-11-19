@@ -14,8 +14,9 @@ import (
 // Set is the tools a run's MCP server offers, for callers of type C. A
 // tool's Available decides, per caller, whether it has the tool at all;
 // one it does not have is neither listed nor callable (mcp.Registry).
-// Tools that act on the world register through Guarded, and every call
-// writes an audit line.
+// Tools that act on the world register through Guarded, those that send
+// text off the machine through GuardedOutbound, and every call writes an
+// audit line.
 type Set[C any] struct {
 	reg   mcp.Registry[C]
 	guard Guard[C]
@@ -39,6 +40,12 @@ func (s *Set[C]) Guarded(risk skill.Risk, call Call[C]) Call[C] {
 	return Guarded(s.guard, risk, call)
 }
 
+// GuardedOutbound is call behind the Set's guard for a tool of risk that
+// sends text off the machine (GuardedOutbound).
+func (s *Set[C]) GuardedOutbound(risk skill.Risk, call Call[C]) Call[C] {
+	return GuardedOutbound(s.guard, risk, call)
+}
+
 // List returns the tools c has, in the order registered.
 func (s *Set[C]) List(c C) []mcp.Tool { return s.reg.List(c) }
 
@@ -49,8 +56,16 @@ func (s *Set[C]) Call(ctx context.Context, c C, name string, args json.RawMessag
 	if len(args) == 0 || string(args) == "null" {
 		args = json.RawMessage("{}")
 	}
-	res, err := s.reg.Call(ctx, c, name, args)
-	s.audit(c, name, outcome(res, err))
+	var n callNote
+	res, err := s.reg.Call(context.WithValue(ctx, noteKey{}, &n), c, name, args)
+	out := outcome(res, err)
+	if n.outcome != "" {
+		out = n.outcome
+	}
+	if n.approved != "" {
+		out += " (a secret-like value, approval " + n.approved + ")"
+	}
+	s.audit(c, name, out)
 	return res, err
 }
 
