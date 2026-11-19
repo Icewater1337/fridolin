@@ -40,6 +40,11 @@ two connections (`brain_monthly_usd`), as its tools' calls are.
 - The answer is not sent to the chat as well.
 - A call ends when you hang up, after two minutes of silence, or after
   15 minutes.
+- When no sound at all comes from you in the first five seconds after
+  the call connects, Fridolin says "I can't hear you, so I'll write
+  instead", hangs up and tells you in the chat. A call whose audio does
+  not start, or that WhatsApp's server ends, is a failed call: the chat
+  says so, with why.
 
 ## Errand calls
 
@@ -63,8 +68,18 @@ two connections (`brain_monthly_usd`), as its tools' calls are.
   far as it may by message ([BRAINS.md](BRAINS.md#calendar-in-errands));
   with `book_after_yes`, the confirmation follows by message.
 - Nobody picks up within 45 seconds: the errand ends and you are told.
+- They decline the call (or a device of theirs does): the errand stays
+  open, its first message goes to them as a message, and you are told.
+- The call fails before they pick up (WhatsApp's server refuses it, or
+  they pick up and the audio never starts): the errand ends and you are
+  told the call failed, with why, not that they did not pick up.
+- No sound at all comes from them in the first five seconds after the
+  call connects (one-way audio, a known failure of the call stack):
+  Fridolin says "I can't hear you, so I'll write instead", hangs up, and
+  the errand goes on by message, its first message going to them as one.
 - A call that ends before the errand did (they hang up, 45 seconds of
-  silence, 10 minutes) leaves the errand open: it goes on by message.
+  silence, 10 minutes) leaves the errand open: it goes on by message,
+  and you are told how the call ended.
 - The conversation, what they said as transcribed, is the errand's, in
   bridge.db, as for messages.
 
@@ -87,6 +102,19 @@ two connections (`brain_monthly_usd`), as its tools' calls are.
 
 ## The audit log
 
-Your calls to Fridolin are `voice_call` lines (answered, ended, with the
-number of turns); an errand's calls are its `errand` lines (opened,
-called, said, answered, ended). Neither holds what was said.
+Your calls to Fridolin are `voice_call` lines (answered, ended, with how
+it ended and the number of turns); an errand's calls are its `errand`
+lines (opened, called, said, answered, call ended, ended). Neither holds
+what was said.
+
+How a call ended is one of:
+
+| | |
+| --- | --- |
+| `declined` | they declined it, or a device of theirs did |
+| `no_answer` | nobody picked up |
+| `hung_up` | it was picked up, and one side hung up: they did, or Fridolin after a silence, its time, a question for you or the errand's end |
+| `failed` | WhatsApp's server ended it (`server:<code>`), the audio did not start, or no sound came from the other side (`no inbound audio`) |
+
+with why in brackets, such as `failed (no inbound audio)` or
+`hung_up (they ended it)`.

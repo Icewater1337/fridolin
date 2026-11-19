@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **Calls say how they ended, and fall back to messages.** A call's
+  audit line now says whether it was `declined`, had `no_answer`, was
+  `hung_up` or `failed`, and why. An errand call they decline no longer
+  ends the errand: its message goes to them as a message instead. A call
+  that fails (WhatsApp's server refuses it, or the audio never starts)
+  tells you it failed instead of that they did not pick up. When no sound
+  comes from the other side in the first five seconds, Fridolin says it
+  cannot hear them, hangs up and writes instead: an errand goes on by
+  message, and your own call ends with a note in the chat.
+  [docs/CALLS.md](docs/CALLS.md)
+
 - **FrIDE and scheduled agents can rerun a failed check.** A GitHub App
   made with *Let FrIDE open pull requests* now also gets `actions:
   write`, so a check that failed for a reason of GitHub's own (a release

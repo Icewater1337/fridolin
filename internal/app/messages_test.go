@@ -254,7 +254,12 @@ func catalogue() []struct{ name, text string } {
 		{"errandCallDraft", outboundmsg.ErrandCallDraft("Alex", "15551234567", "Hi, this is Fridolin, Sam's assistant. I'm an AI assistant, and I keep notes of this call. Could we move dinner to 8pm?", "Move dinner", "8pm or later.")},
 		{"errandCallingNotice", outboundmsg.ErrandCallingNotice("Alex", "e1a2b3c4")},
 		{"errandNoAnswerNotice", outboundmsg.ErrandNoAnswerNotice("Alex", "e1a2b3c4")},
-		{"errandCallEndedNotice", outboundmsg.ErrandCallEndedNotice("Alex", "e1a2b3c4")},
+		{"errandCallDeclinedNotice", outboundmsg.ErrandCallDeclinedNotice("Alex", "e1a2b3c4")},
+		{"errandCallFailedNotice", outboundmsg.ErrandCallFailedNotice("Alex", "e1a2b3c4", "WhatsApp's server ended it (server:503)")},
+		{"errandCallNoAudioNotice", outboundmsg.ErrandCallNoAudioNotice("Alex", "e1a2b3c4")},
+		{"errandCallEndedNotice", outboundmsg.ErrandCallEndedNotice("Alex", "e1a2b3c4", "they ended it")},
+		{"ownerCallFailedNotice", outboundmsg.OwnerCallFailedNotice("the audio did not start")},
+		{"ownerCallNoAudioNotice", outboundmsg.OwnerCallNoAudioNotice},
 	}
 }
 

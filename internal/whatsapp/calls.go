@@ -39,9 +39,13 @@ type Call interface {
 	// Say plays pcm (signed 16-bit little-endian, mono, 16 kHz) and
 	// closes the channel it returns once all of it played.
 	Say(pcm []byte) <-chan struct{}
-	// OnReady runs fn once audio flows; OnEnd once the call ended, with
-	// why. Each takes one fn.
+	// OnReady runs fn once audio flows; OnPeerAccept once the other side
+	// picked up a call the bridge placed; OnEnd once the call ended, with
+	// meowcaller's reason: "rejected" (declined), "hangup" (this side hung
+	// up), "server:<code>" (WhatsApp's server refused it), or the reason
+	// of the other side's terminate. Each takes one fn.
 	OnReady(fn func())
+	OnPeerAccept(fn func())
 	OnEnd(fn func(reason string))
 }
 
@@ -58,6 +62,7 @@ func (m *meowCall) Answer() error                   { return m.c.Answer() }
 func (m *meowCall) Hangup() error                   { return m.c.Hangup() }
 func (m *meowCall) Listen(fn func(frame []float32)) { m.c.Receive(meowcaller.SinkFunc(fn)) }
 func (m *meowCall) OnReady(fn func())               { m.c.OnReady(fn) }
+func (m *meowCall) OnPeerAccept(fn func())          { m.c.OnPeerAccept(fn) }
 func (m *meowCall) OnEnd(fn func(reason string))    { m.c.OnEnd(fn) }
 
 func (m *meowCall) Say(pcm []byte) <-chan struct{} {
