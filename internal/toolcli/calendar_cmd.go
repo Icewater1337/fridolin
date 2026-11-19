@@ -33,6 +33,12 @@ Commands:
   free        the busy times and free windows of --date
   delete      an event, by --event-id
 
+create and delete write, which a run whose risk level is read, or any run
+in a lockdown, may not. An event Google emails attendees about (create with
+--attendees, unless --send-updates none) and deleting one with other
+attendees reach other people: they need the owner's yes first, from
+request_approval, passed as --approval-id.
+
 --calendar-id picks one of the brain's calendars; "primary" is its default.
 Times are in --timezone, else $CALENDAR_TZ, else the system's timezone.
 
@@ -85,6 +91,7 @@ func Calendar(args []string, t IO) int {
 		attendees := flags.String("attendees", "", "email addresses, separated by commas")
 		reminders := flags.String("reminders", "", "method:minutes pairs, such as popup:10,email:60 (default popup:10)")
 		flags.StringVar(&ev.SendUpdates, "send-updates", "all", "whether Google emails the attendees: all, externalOnly or none")
+		flags.StringVar(&ev.ApprovalID, "approval-id", "", "the approval_id request_approval answered approved with: an event Google emails attendees about needs one")
 		run = func() (any, error) { return c.create(*calID, ev, *start, *end, *attendees, *reminders) }
 	case "free":
 		date := flags.String("date", "", "the day, YYYY-MM-DD (required)")
@@ -93,7 +100,8 @@ func Calendar(args []string, t IO) int {
 		run = func() (any, error) { return c.free(*calID, *date, *hours, *minSlot) }
 	case "delete":
 		id := flags.String("event-id", "", "the event's ID, from list (required)")
-		run = func() (any, error) { return c.delete(*calID, *id) }
+		approval := flags.String("approval-id", "", "the approval_id request_approval answered approved with: an event with other attendees needs one")
+		run = func() (any, error) { return c.delete(*calID, *id, *approval) }
 	case "auth":
 		return t.fail("fridolin calendar: a brain's calendar is connected in the dashboard, not here: Brains → this brain → Calendar → Connect Google Calendar")
 	default:
@@ -206,13 +214,20 @@ func (c *calendarRun) create(calendar string, ev google.NewEvent, start, end, at
 	return out, err
 }
 
-func (c *calendarRun) delete(calendar, id string) (any, error) {
+func (c *calendarRun) delete(calendar, id, approval string) (any, error) {
 	if id == "" {
 		return nil, errors.New("delete needs --event-id")
 	}
 	path := "/brain/calendar/events/" + url.PathEscape(id)
+	q := url.Values{}
 	if calendar != "" {
-		path += "?" + url.Values{"calendar": {calendar}}.Encode()
+		q.Set("calendar", calendar)
+	}
+	if approval != "" {
+		q.Set("approval_id", approval)
+	}
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 	var out any
 	err := c.call("DELETE", path, nil, &out)

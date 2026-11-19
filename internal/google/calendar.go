@@ -180,6 +180,8 @@ type googleEvent struct {
 	} `json:"end"`
 	Attendees []struct {
 		Email string `json:"email"`
+		// Self is the calendar's own entry among the attendees.
+		Self bool `json:"self"`
 	} `json:"attendees"`
 }
 
@@ -328,6 +330,10 @@ type NewEvent struct {
 	Attendees   []string   `json:"attendees"`
 	Reminders   []Reminder `json:"reminders"` // nil: one popup 10 minutes before
 	SendUpdates string     `json:"send_updates"`
+	// ApprovalID is the owner's approval of an event Google emails its
+	// attendees about (docs/CALENDAR.md, "What a brain's calendar writes
+	// need"); Body leaves it out.
+	ApprovalID string `json:"approval_id,omitempty"`
 }
 
 // Reminder is one of an event's reminders.
@@ -406,6 +412,22 @@ func (g *Auth) InsertEvent(ctx context.Context, tok *Token, calendar string, bod
 	var created googleEvent
 	err := g.calendarAPI(ctx, tok, http.MethodPost, "/calendars/"+url.PathEscape(calendar)+"/events", url.Values{"sendUpdates": {sendUpdates}}, body, &created)
 	return created.brief(), err
+}
+
+// EventGuests is how many attendees event id of calendar has besides the
+// calendar itself: the people (and rooms) a change to it reaches.
+func (g *Auth) EventGuests(ctx context.Context, tok *Token, calendar, id string) (int, error) {
+	var ev googleEvent
+	if err := g.calendarAPI(ctx, tok, http.MethodGet, "/calendars/"+url.PathEscape(calendar)+"/events/"+url.PathEscape(id), nil, nil, &ev); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, a := range ev.Attendees {
+		if !a.Self {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // DeleteEvent deletes event id of calendar.

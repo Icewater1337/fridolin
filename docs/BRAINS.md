@@ -655,7 +655,11 @@ riskiest skill that matches, with that skill's risk as its level, and of
 none, `write`. A delegated task's run has its core run's level and is in
 its thread. The level shows in the audit log and the Threads page; the
 bridge's own tools that write need `write`, and those that take an
-irreversible step (none today; the vault's later) need an approval.
+irreversible step (none today; the vault's later) need an approval. So
+do the brain's calendar writes: `fridolin calendar create` and `delete`
+need `write`, and an invitation Google emails, or deleting an event with
+other attendees, needs an approval
+([CALENDAR.md](CALENDAR.md#what-a-brains-calendar-writes-need)).
 
 **Irreversible steps ask first.** Every run's prompt says: before any
 irreversible step, and before each step a skill lists under `approve`,
@@ -736,9 +740,9 @@ next message you send in that chat.
 Approvals page) pauses everything but reading: a run of a skill that
 writes or submits is refused, every other run runs at `read`, no approval
 is asked and no write or irreversible tool goes ahead, until `!unlock` or
-*Unlock*. The bridge enforces this for its own tools; what a brain does
-with its shell is up to its sandbox and its instructions. It survives a
-restart.
+*Unlock*. The bridge enforces this for its own tools and the calendar
+writes it makes for a brain; what a brain does with its shell is up to its
+sandbox and its instructions. It survives a restart.
 
 **Rate limit.** One chat starts at most `policy.max_runs_per_hour` (20)
 runs in an hour; the next is refused with a notice. Files handed in,
@@ -760,7 +764,9 @@ name and how it ended, never its arguments), `approval_requested`,
 and `node_revoked` (`!deny`, `!revoke`), never with the code or link, and
 `owner_approval`: the owner's `!approve` and `!deny` of anything else, a
 vote in the poll that lists them (each tick it newly makes), and the confirmation an unexpected one
-asks for. Texts are shortened, and what looks like a password or
+asks for, and `calendar_write`, an event a run created or deleted (the
+event's id, the calendar, how many attendees it reaches, the approval,
+never its title or attendees). Texts are shortened, and what looks like a password or
 token is masked. The dashboard's Threads page groups the runs by thread,
 and its Audit page filters the lines. `fridolin doctor` warns about an
 approval that has waited more than an hour, and says when the bridge is

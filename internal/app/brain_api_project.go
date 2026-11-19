@@ -23,11 +23,12 @@ func (b *App) brainAPIHandler() http.Handler {
 			p, err := b.store.RecentPolls(ctx, jid, n, keep)
 			return p, len(p), err
 		},
-		Google:   func() httpapi.BrainCalendarService { return b.google },
-		MCPTools: b.mcpToolsFor,
-		MCPCall:  b.mcpCall,
-		LiveNext: b.live.next,
-		LiveEnd:  b.live.end,
-		Memory:   brainMemory{b},
+		Google:         func() httpapi.BrainCalendarService { return b.google },
+		CalendarWrites: calendarWrites{b},
+		MCPTools:       b.mcpToolsFor,
+		MCPCall:        b.mcpCall,
+		LiveNext:       b.live.next,
+		LiveEnd:        b.live.end,
+		Memory:         brainMemory{b},
 	}).Handler()
 }
