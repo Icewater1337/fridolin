@@ -124,6 +124,7 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 	for _, s := range specs {
 		m := s.Manifest
 		fmt.Fprintf(w, "  brain %-14s → %s (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
+		fmt.Fprintf(w, "    web: %s\n", webTools(settingsFor(cfg, s), s.Dir))
 		if m.LiveSession == manifest.LiveSessionOwnerDM {
 			fmt.Fprintf(w, "    live session: %s\n", liveCheckSummary(cfg))
 		}

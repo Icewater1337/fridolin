@@ -10,6 +10,14 @@ for compatibility.
 
 ### Added
 
+- **`fridolin check` says which web tools each brain has.** Under each
+  brain a `web:` line names WebSearch and WebFetch (or Codex's web
+  search) and, for one it has not, why: `disallowed_tools` in config.json
+  or in its brain.json, a deny rule, or no one to approve WebFetch without
+  `dangerously_skip_permissions`. A brain without a list of its own
+  inherits config.json's, so a list meant for the group brains used to
+  take the web from the DM brain too without a word.
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md#disallowed_tools)
 - **Each run keeps a record of the files it changed.** As a brain run
   starts and ends, the bridge walks the brain's folder and keeps what
   the run created, changed and deleted, with the earlier contents, in
