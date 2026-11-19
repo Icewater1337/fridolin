@@ -14,7 +14,7 @@
 # against the SHA-256 their release publishes.
 
 ARG GO_IMAGE=golang:1.26.10-bookworm
-ARG NODE_IMAGE=node:26.13.0-bookworm-slim
+ARG NODE_IMAGE=node:26.13.1-bookworm-slim
 ARG RUNTIME_IMAGE=debian:bookworm-20261104-slim
 
 # ── the bridge ────────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ ARG LITESTREAM_VERSION=0.5.18
 # renovate: datasource=github-releases depName=cli/cli
 ARG GH_VERSION=2.103.3
 # renovate: datasource=github-releases depName=cloudflare/cloudflared
-ARG CLOUDFLARED_VERSION=2026.10.7
+ARG CLOUDFLARED_VERSION=2026.11.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
