@@ -22,7 +22,7 @@ type InboundHandler func(context.Context, brain.Inbound)
 func whatsAppSettings(get func() config.Settings) func() whatsapp.Settings {
 	return func() whatsapp.Settings {
 		cfg := get()
-		return whatsapp.Settings{Policy: accessPolicyOf(cfg.Live), MediaDir: cfg.Boot.MediaDir, MaxMediaBytes: int64(cfg.Live.MaxMediaMB) * 1024 * 1024, MaxChunkSize: cfg.Live.MaxChunkSize}
+		return whatsapp.Settings{Policy: accessPolicyOf(cfg.Live), MediaDir: cfg.Boot.MediaDir, MaxMediaBytes: int64(cfg.Live.MaxMediaMB) * 1024 * 1024, MaxChunkSize: cfg.Live.MaxChunkSize, Presence: cfg.Live.WhatsApp.Presence}
 	}
 }
 

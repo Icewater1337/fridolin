@@ -42,6 +42,7 @@ func (b *App) newMessagePipeline() *pipeline.Workflow {
 		Lockdown:    b.lockdownCommand,
 		Owner:       b.ownerCommand,
 		Answer:      b.answerText,
+		Read:        b.tookMessage,
 		Chats:       chatJIDs,
 		ReplyChat: func(br *brain.Brain, ownerDM string) string {
 			return replyChatForBrain(b.brainMgr.Manager, br, ownerDM)

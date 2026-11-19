@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **Fridolin types while it works and reads what it took.** While a
+  brain works on a message, its chat shows "typing…", and once a brain
+  took a message it is marked read (blue ticks), a voice note played
+  once its run answered. The bridge shows itself online when it
+  connects, which WhatsApp wants before it shows typing. Untagged
+  chatter, files handed in, scheduled runs and delegated tasks show
+  none of it. New setting `whatsapp.presence` (default on) turns it all
+  off, and `"presence": false` in a brain's brain.json for that brain's
+  chats; turn it off if the bridge is linked to your own number, whose
+  phone may hold back notifications while a linked device is online.
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md#whatsapppresence)
 - **FrIDE and scheduled agents can rerun a failed check.** A GitHub App
   made with *Let FrIDE open pull requests* now also gets `actions:
   write`, so a check that failed for a reason of GitHub's own (a release

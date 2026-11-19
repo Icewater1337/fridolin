@@ -12,6 +12,9 @@ import (
 
 // BrainHooks connect brains to the rest of the bridge.
 type BrainHooks struct {
+	// Typing shows that br works on m in its chat, from its run's start
+	// until what it returns is called (nil for nothing to end).
+	Typing func(br *brain.Brain, m brain.Inbound) func()
 	// Notice tells the chat jid, ready to send, that a run is working on
 	// its message: of use only now.
 	Notice func(jid, text string)
@@ -67,6 +70,13 @@ type BrainHooks struct {
 // brainHooksSink keeps command callbacks compatible while runtime users move
 // to the owned Sink interface. Chat formatting stays in command composition.
 type brainHooksSink struct{ hooks *BrainHooks }
+
+func (s brainHooksSink) Running(br *brain.Brain, m brain.Inbound) func() {
+	if s.hooks != nil && s.hooks.Typing != nil {
+		return s.hooks.Typing(br, m)
+	}
+	return nil
+}
 
 func (s brainHooksSink) Working(jid string) {
 	if s.hooks != nil && s.hooks.Notice != nil {
