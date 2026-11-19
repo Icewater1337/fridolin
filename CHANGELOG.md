@@ -306,10 +306,13 @@ for compatibility.
   same memory files too. Each queue has `max_pending` places of its own;
   with `max_concurrent_runs` at 2 or more, the agents of all brains
   together take at most one run fewer than the limit, so one is left for
-  the chats. `!stop` in a chat still stops only that chat's run; the Stop
-  on a brain's dashboard page stops both. `/api/status` and
-  `/api/brains` show the agent's run as `background`, and what waits for
-  it as `background_queue`.
+  the chats. `!stop` in a chat still stops only that chat's run. On a
+  brain's dashboard page each of the two runs has a Stop of its own,
+  which leaves the other going, and its *Stop & clear queue* drops what
+  waits in that queue only: `POST /api/brains/{id}/stop` takes a `lane`,
+  `chat` or `background`, and without one stops both, as before.
+  `/api/status` and `/api/brains` show the agent's run as `background`,
+  and what waits for it as `background_queue`.
   [docs/BRAINS.md](docs/BRAINS.md#scheduled-agents)
 
 - **The core's and FrIDE's images run Node.js 26** (was 22), the LTS
@@ -353,6 +356,22 @@ for compatibility.
 
 ### Fixed
 
+- **A task a scheduled agent delegates no longer takes the chats' run.**
+  It ran in a run of its own, outside the agents' share of
+  `max_concurrent_runs`, so with the default of 2 an agent and its task
+  took both and every chat waited for them. A delegated task now goes in
+  the run that delegated it, which waits for it: the two count as one.
+  With a limit of 1, a task no longer waits for the end of the very run
+  that waits for it, whose wait ran out first.
+- **Two requests no longer stop two observe-only runs for one free
+  run.** A request, an agent's say, stops an observe-only run only when
+  that gets it the run: no longer when the run of one stopped already
+  goes to it, or to another that asked first.
+- **The activity log keeps an agent's output while a chat's run starts.**
+  A run that found the log full moved it aside while the other queue's
+  run still wrote to it, so that run's output went to
+  `claude-stream.1.log`, or was lost at the next rotation. It now goes
+  on in the new `claude-stream.log`, which the viewer follows.
 - **A core move that fails on a stale lease no longer offers to forget
   the target's secrets.** When the target stopped renewing the lease and
   the move failed (or the source could not take the core back), you were

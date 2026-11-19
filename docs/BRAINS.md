@@ -1240,9 +1240,13 @@ have it add to a shared file rather than rewrite it. With
 [`max_concurrent_runs`](CONFIGURATION.md#max_concurrent_runs) at 2 or
 more, the agents of all brains together take at most one run fewer than
 the limit, so one is always left for the chats; at 1, a chat waits for an
-agent's run as for any other. `!stop` in a chat stops that chat's run,
-never an agent's; the Stop on the brain's dashboard page stops both, and
-its brain card shows the agent's run beside the chat's.
+agent's run as for any other. A task an agent's run delegates runs in
+the other brain's chat queue, but in the agent's own run, which waits
+for it: the two count as one run, of the agents' share. `!stop` in a
+chat stops that chat's run, never an agent's. The brain's dashboard page
+shows the agent's run beside the chat's, each with a Stop of its own,
+which leaves the other going; its **Stop & clear queue** also drops
+what waits in that queue only.
 
 **FrIDE and workstation sessions from an agent.** A run of an agent
 may hand work to FrIDE (`fride_task`). That work's news never goes to

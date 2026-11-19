@@ -270,32 +270,51 @@ export default /** @satisfies {PageModule} */ ({
       const bgQueue = rt.background_queue || [];
       const waiting = queue.length + bgQueue.length;
       const last = rt.last;
-      const stop = (/** @type {boolean} */ clear) => btn(clear ? 'Stop & clear queue' : 'Stop', {
-        kind: clear ? 'danger' : '', icon: 'stop', small: true,
-        title: 'Stops every run of this brain: its chats\' and its scheduled agent\'s',
+      // A Stop stops one lane's run, the chats' or the scheduled agent's,
+      // and leaves the other going; with clear, it drops what waits in
+      // that lane too. Without a lane, it is both lanes.
+      const stops = {
+        chat: {
+          title: 'Stops the chats\' run; a scheduled agent\'s run goes on', waits: queue.length,
+          message: `The chats' run stops, and ${plural(queue.length, 'waiting message')} will not be answered.`,
+        },
+        background: {
+          title: 'Stops the scheduled agent\'s run; the chats\' run goes on', waits: bgQueue.length,
+          message: `The scheduled agent's run stops, and ${plural(bgQueue.length, 'waiting agent run')} will not run.`,
+        },
+        '': {
+          title: 'Stops every run of this brain: its chats\' and its scheduled agent\'s', waits: waiting,
+          message: `The current runs stop, and ${plural(waiting, 'waiting message')} will not be answered.`,
+        },
+      };
+      const stop = (/** @type {boolean} */ clear, /** @type {'chat' | 'background' | ''} */ lane) => btn(clear ? 'Stop & clear queue' : 'Stop', {
+        kind: clear ? 'danger' : '', icon: 'stop', small: true, title: stops[lane].title,
         onClick: async () => {
-          if (clear && waiting) {
-            const ok = await confirmDialog({ title: 'Stop and clear the queue?', message: `The current runs stop and ${plural(waiting, 'waiting message')} will not be answered.`, confirm: 'Stop & clear', danger: true });
+          const { waits, message } = stops[lane];
+          if (clear && waits) {
+            const ok = await confirmDialog({ title: 'Stop and clear the queue?', message, confirm: 'Stop & clear', danger: true });
             if (!ok) return;
           }
-          const r = await post(`/api/brains/${encodeURIComponent(id)}/stop`, { clear_queue: clear });
+          const r = await post(`/api/brains/${encodeURIComponent(id)}/stop`, lane ? { clear_queue: clear, lane } : { clear_queue: clear });
           toast(r && r.stopped ? 'Stopped' : 'Nothing was running', r && r.stopped ? 'ok' : 'info');
           await refresh();
         },
       });
+      const stopsOf = (/** @type {'chat' | 'background'} */ lane) => h('div.actions', stop(false, lane), stop(true, lane));
       return h('div.grid.two',
         h('div.card',
           h('div.card-head', h('div.card-title', h('h3', 'Current run')), run || bg ? pill('Working', 'info', { pulse: true }) : pill('Idle', 'neutral')),
           run ? h('div.card-body',
             h('div.run-meta', h('span', 'From ', h('strong', run.sender ? phoneish(run.sender) : 'someone')), isGroupJid(run.chat) ? [h('span', 'in'), chatEl(run.chat)] : h('span.muted', '(direct message)'), run.silent ? badge('silent', 'neutral', 'Untagged group message: an observe-only run, which sends nothing') : null),
             run.preview ? h('blockquote.preview', run.preview) : null,
-            h('div.muted.small', timeAgo(run.started, 'Started '), run.pid ? ` · pid ${run.pid}` : ''))
+            h('div.muted.small', timeAgo(run.started, 'Started '), run.pid ? ` · pid ${run.pid}` : ''),
+            stopsOf('chat'))
             : h('div.card-body', h('p.muted', 'Waiting for messages.')),
           bg ? h('div.card-body',
             h('div.run-meta', h('span', 'Scheduled agent ', h('strong', agentOfChat(bg.chat) || bg.chat)), h('span.muted', 'beside the chats')),
-            h('div.muted.small', timeAgo(bg.started, 'Started '), bg.pid ? ` · pid ${bg.pid}` : '')) : null,
-          run || bg ? h('div.card-body', h('div.actions', stop(false), stop(true)))
-            : waiting ? h('div.card-body', h('div.actions', stop(true))) : null,
+            h('div.muted.small', timeAgo(bg.started, 'Started '), bg.pid ? ` · pid ${bg.pid}` : ''),
+            stopsOf('background')) : null,
+          !run && !bg && waiting ? h('div.card-body', h('div.actions', stop(true, ''))) : null,
           rt.live ? liveSessionEl(rt.live) : null),
         h('div.card',
           h('div.card-head', h('div.card-title', h('h3', 'Queue')), waiting ? badge(`${waiting} waiting`, 'warn') : badge('empty', 'neutral')),

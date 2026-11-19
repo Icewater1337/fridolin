@@ -58,6 +58,7 @@ func TestDashboardRequestBodiesDecode(t *testing.T) {
 		{"PUT", "/api/brains/notes", map[string]any{"manifest": manifest}},
 		{"POST", "/api/brains/notes/approve", map[string]any{"manifest": manifest}},
 		{"POST", "/api/brains/notes/stop", map[string]any{"clear_queue": true}},
+		{"POST", "/api/brains/notes/stop", map[string]any{"clear_queue": false, "lane": "background"}},
 		{"POST", "/api/chats/allow", map[string]any{"jid": "15559876543@s.whatsapp.net", "kind": "dm", "number": "15559876543"}},
 		{"POST", "/api/chats/allow", map[string]any{"jid": "120363000000000001@g.us", "kind": "group", "brain": "notes"}},
 		{"POST", "/api/chats/dismiss", map[string]any{"jid": "120363000000000002@g.us"}},

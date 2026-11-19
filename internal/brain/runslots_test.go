@@ -15,6 +15,7 @@ type slotScript struct {
 	waits   map[string]*slotWait
 	slots   map[string]*runSlot
 	stopped []string // the holders asked to give way, in order
+	resume  func()   // ends the pause "p" began
 }
 
 func newSlotScript(t *testing.T, limit int) *slotScript {
@@ -24,13 +25,17 @@ func newSlotScript(t *testing.T, limit int) *slotScript {
 // do runs one step: "+name" waits for a request, "~name" for chatter,
 // "*name" for a background lane's run (a scheduled agent's), "-name"
 // releases name's slot, "^name" upgrades name's wait, "xname" gives
-// name's wait up and "=n" sets the limit to n. A slot that is ready is
-// taken at once.
+// name's wait up, "=n" sets the limit to n, and "p" pauses the grants
+// until "u". A slot that is ready is taken at once.
 func (s *slotScript) do(step string) {
 	s.t.Helper()
 	name := step[1:]
 	var stopOther func()
 	switch step[0] {
+	case 'p':
+		s.resume = s.rs.pause()
+	case 'u':
+		s.resume()
 	case '+', '~', '*':
 		stop := func() { s.stopped = append(s.stopped, name) }
 		s.waits[name], stopOther = s.rs.wait(step[0] != '~', step[0] == '*', stop)
@@ -114,6 +119,23 @@ func TestRunSlots(t *testing.T) {
 		{"an agent stops chatter for a slot", 1, []string{"~a", "*b"}, "a", "a"},
 		{"an agent at its cap stops no chatter", 2, []string{"*a", "~b", "*c"}, "a b", ""},
 		{"a raised limit lets agents in", 2, []string{"*a", "*b", "*c", "=4"}, "a b c", ""},
+		// A request stops chatter only for a slot it would get: those of
+		// the runs already asked to give way go to those waiting first.
+		{"two agents stop one chatter run for the one slot they may have", 2, []string{"~a", "~b", "*c", "*d"}, "a b", "a"},
+		{"the stopped run's slot goes to the first agent", 2, []string{"~a", "~b", "*c", "*d", "-a"}, "b c", "a"},
+		{"a chat's request behind an agent stops the next chatter", 2, []string{"~a", "~b", "*c", "+d"}, "a b", "a b"},
+		{"three requests, two chatter runs", 2, []string{"~a", "~b", "+c", "+d", "+e"}, "a b", "a b"},
+		{"an upgrade behind a request that stopped chatter", 2, []string{"~a", "~b", "+c", "~d", "^d"}, "a b", "a b"},
+		{"an agent past its cap waits behind a chat's request", 3, []string{"*a", "*b", "~c", "*d", "+e"}, "a b c", "c"},
+		{"a slot a pause holds back stops nothing", 2, []string{"~a", "p", "+b"}, "a", ""},
+		{"which goes to the request once the pause ends", 2, []string{"~a", "p", "+b", "u"}, "a b", ""},
+		{"a pause without a limit stops nothing", 0, []string{"~a", "p", "+b"}, "a", ""},
+		// Lowered while agents hold slots: none of them stops, and the
+		// agents hold no more than their new share once theirs end.
+		{"a lowered limit stops no agent", 3, []string{"*a", "*b", "+c", "=2", "*d", "+e"}, "a b c", ""},
+		{"the chats' slot comes back first", 3, []string{"*a", "*b", "+c", "=2", "*d", "+e", "-c", "-a"}, "b e", ""},
+		{"then an agent's, once the agents are below their share", 3, []string{"*a", "*b", "+c", "=2", "*d", "+e", "-c", "-a", "-b"}, "d e", ""},
+		{"lowered to one, the agent that asked first goes next", 2, []string{"*a", "+b", "=1", "*c", "+d", "-b", "-a"}, "c", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -183,6 +205,8 @@ func TestRunSlotsBusyForAgents(t *testing.T) {
 		{"all taken", 2, []string{"*a", "+b"}, true, true},
 		{"a limit of one", 1, []string{"+a"}, true, true},
 		{"no limit", 0, []string{"*a", "*b"}, false, false},
+		{"a lowered limit with the agents past their share", 3, []string{"*a", "*b", "=2"}, true, true},
+		{"a lowered limit, the agents back at their share", 3, []string{"*a", "*b", "=2", "-a"}, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -197,6 +221,47 @@ func TestRunSlotsBusyForAgents(t *testing.T) {
 				t.Errorf("a chat's request waits: %v, want %v", got, c.chat)
 			}
 		})
+	}
+}
+
+// A run's slot, shared with a task it delegated, is free once both have
+// released it, in either order; a slot that is free shares nothing.
+func TestRunSlotsShared(t *testing.T) {
+	for _, parentFirst := range []bool{true, false} {
+		rs := newRunSlots(1)
+		a, _ := rs.wait(true, true, nil)
+		sa, _ := rs.take(a)
+		task := slotOf(sa).share()
+		if task != sa {
+			t.Fatal("a held slot was not shared")
+		}
+		next, _ := rs.wait(true, false, nil)
+		first, second := sa, task
+		if !parentFirst {
+			first, second = task, sa
+		}
+		first.release()
+		select {
+		case <-next.ready:
+			t.Fatal("the slot went to the next while a run still went in it")
+		default:
+		}
+		if !slotOf(sa).held() {
+			t.Error("the slot is not held while a run still goes in it")
+		}
+		second.release()
+		select {
+		case <-next.ready:
+		default:
+			t.Fatal("the slot did not go to the next once both had released it")
+		}
+		if slotOf(sa).share() != nil || slotOf(sa).held() {
+			t.Error("a slot that is free was shared")
+		}
+	}
+	var none *Slot
+	if none.share() != nil || none.held() {
+		t.Error("no slot shared something")
 	}
 }
 

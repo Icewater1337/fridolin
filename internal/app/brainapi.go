@@ -45,6 +45,9 @@ type runInfo struct {
 	// OwnerGitHub is the brain's own GitHub grant (brain.json's github),
 	// which the run gets only when it answers the owner (githubGrantOf).
 	OwnerGitHub *chat.GitHubGrant
+	// Slot is the run slot the run goes in (RunSpec.Slot): a task it
+	// delegates goes in it too, while the run waits for the answer.
+	Slot *brainruntime.Slot
 }
 
 // runInfoFor is the run of brain that answers m.
