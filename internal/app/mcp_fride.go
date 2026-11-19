@@ -28,7 +28,10 @@ func threadProp() map[string]any {
 // registerFrideTools registers them behind M5's policy (tools.Guarded):
 // fride_task, fride_reply, fride_move, fride_close and fride_repo_add
 // change work or files on a node and so are write, refused in a lockdown
-// and to a read budget; fride_status only reads.
+// and to a read budget; fride_status only reads. What fride_task and
+// fride_reply say may end up in a pull request or an issue, so they are
+// outbound too: no secret-like value without the owner's approval
+// (tools.GuardedOutbound).
 func (b *App) registerFrideTools(r *tools.Set[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "fride_task",
@@ -36,9 +39,10 @@ func (b *App) registerFrideTools(r *tools.Set[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			desc := "Hand coding work to FrIDE, the coding IDE on one of the owner's machines: anything that changes code (a feature, a fix, a refactor) goes here, never into a repository you edit yourself. FrIDE's orchestrator decides how to do it, may ask back, and reports in this chat; its questions and news arrive here as messages naming the thread (FrIDE #3). Returns the thread number. If no machine can take it now, it waits and starts when one can."
 			props := map[string]any{
-				"message": tools.Str("What to build or change, in full: the person's request with everything FrIDE needs. FrIDE cannot see this chat."),
-				"repos":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The repositories to work in, by folder name, when the person named them."},
-				"node":    tools.Str("The machine to run it on: a node's name, id or tag (such as macos or gpu), when the person asked for one; leave it out to let fridolin pick. Not with instance."),
+				"message":     tools.Str("What to build or change, in full: the person's request with everything FrIDE needs. FrIDE cannot see this chat."),
+				"repos":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The repositories to work in, by folder name, when the person named them."},
+				"node":        tools.Str("The machine to run it on: a node's name, id or tag (such as macos or gpu), when the person asked for one; leave it out to let fridolin pick. Not with instance."),
+				"approval_id": tools.ApprovalIDProp(),
 			}
 			if list := b.frideInstanceList(); list != "" {
 				desc += " Work that belongs to one of the FrIDE instances goes to that instance (instance): each is a FrIDE of its own for one trust domain, which is started when work needs it (medium, unless it runs) and keeps the work until it is closed. Pick it by what the work is for: " + list + ". Work that belongs to none of them goes to a machine's own FrIDE (leave instance out)."
@@ -46,7 +50,7 @@ func (b *App) registerFrideTools(r *tools.Set[mcpCaller]) {
 			}
 			return mcp.Tool{Description: desc, InputSchema: tools.Schema(props, "message")}
 		},
-		Call: r.Guarded(skill.RiskWrite, b.callFrideTask),
+		Call: r.GuardedOutbound(skill.RiskWrite, b.callFrideTask),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "fride_status",
@@ -65,10 +69,10 @@ func (b *App) registerFrideTools(r *tools.Set[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Pass the person's answer to FrIDE's question, or more instructions for its work, to a FrIDE thread. Use it when the person answers a FrIDE message in this chat.",
-				InputSchema: tools.Schema(map[string]any{"thread": threadProp(), "text": tools.Str("The answer or instruction, in the person's words.")}, "thread", "text"),
+				InputSchema: tools.Schema(map[string]any{"thread": threadProp(), "text": tools.Str("The answer or instruction, in the person's words."), "approval_id": tools.ApprovalIDProp()}, "thread", "text"),
 			}
 		},
-		Call: r.Guarded(skill.RiskWrite, b.callFrideReply),
+		Call: r.GuardedOutbound(skill.RiskWrite, b.callFrideReply),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "fride_move",

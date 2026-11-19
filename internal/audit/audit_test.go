@@ -73,3 +73,75 @@ func TestScrubCommandLines(t *testing.T) {
 		t.Errorf("an ordinary command changed: %q", got)
 	}
 }
+
+// made-up random parts of keys; the keys are put together in the test, so
+// that no line holds one whole.
+const (
+	rnd36 = "A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6S7t8"
+	hex48 = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a6978"
+)
+
+func TestSecretIn(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		// Keys by their prefix, as their vendors make them.
+		{"use sk-proj-" + rnd36 + " for it", SecretKey},
+		{"the ElevenLabs key is sk_" + hex48, SecretKey},
+		{"token " + "gh" + "p_" + rnd36, SecretKey},
+		{"github_" + "pat_11ABCDEFG0" + rnd36, SecretKey},
+		{"xo" + "xb-1234567890-0987654321-" + rnd36, SecretKey},
+		{"aws: " + "AK" + "IAIOSFODNN7EXAMPLE", SecretKey},
+		{"gl" + "pat-xY9zA8bC7dE6fG5hI4jK", SecretKey},
+		{"SK-PROJ-" + rnd36, SecretKey},
+		// Credentials in a header or on a command line.
+		{"Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.e30.Zm9vYmFy", SecretAuth},
+		{"Authorization: Basic dXNlcjpwYXNz", SecretAuth},
+		{"mysql --password=hunter2hunter -u root", SecretFlag},
+		{"deploy --token 7f3a9c1e5b2d", SecretFlag},
+		// A secret named with its value.
+		{"the wifi password: hunter2", SecretKeyValue},
+		{"Her PIN: 4821", SecretKeyValue},
+		{`api_key="Zx81Qw72Er63"`, SecretKeyValue},
+		{"TOKEN=abc123 ./deploy.sh", SecretKeyValue},
+		{"secret = 'Tr0ub4dor&3'", SecretKeyValue},
+
+		// Near-misses: none of these is a secret.
+		{"", ""},
+		{"See you at 8, the table is booked for 4 people.", ""},
+		{"commit 3f2a9c1e5b7d4f6a8c0e2b4d6f8a0c2e4b6d8f0a fixed it", ""},
+		{"run 123e4567-e89b-12d3-a456-426614174000 ended", ""},
+		{"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", ""},
+		{"Donaudampfschifffahrtsgesellschaftskapitän and internationalization", ""},
+		{"sha256:" + hex48 + hex48[:16], ""},
+		{"Add a field token: string to the config, and a --token flag.", ""},
+		{"a basic setup, by the bearer of good news", ""},
+		{"Basic Auth is enough", ""},
+		{"set password: <your password> and token=$GITHUB_TOKEN", ""},
+		{"api_key: [redacted], secret: ****, pin: 12", ""},
+		{"api_key: {{API_KEY}}, token: %TOKEN%", ""},
+		{"the task-runner and desk_reservation_2024 and Ask-me-anything-2024", ""},
+		{"scikit-learn and sk-learn", ""},
+	} {
+		if got := SecretIn(tc.in); got != tc.want {
+			t.Errorf("SecretIn(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestScrubMasksWhatSecretInFinds holds the two to the same patterns:
+// what SecretIn calls a secret, Scrub masks.
+func TestScrubMasksWhatSecretInFinds(t *testing.T) {
+	for _, s := range []string{
+		"use sk-proj-" + rnd36,
+		"Authorization: Basic dXNlcjpwYXNz",
+		"mysql --password=hunter2hunter",
+		"the wifi password: hunter2",
+		"xo" + "xb-1234567890-0987654321",
+	} {
+		if SecretIn(s) == "" {
+			t.Errorf("SecretIn(%q) found nothing", s)
+		}
+		if out := Scrub(s); SecretIn(out) != "" || !strings.Contains(out, "[redacted]") {
+			t.Errorf("Scrub(%q) = %q", s, out)
+		}
+	}
+}
