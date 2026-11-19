@@ -29,7 +29,10 @@ const (
 	StatusOK = "ok"
 	// StatusNothing is a run that found nothing worth reporting.
 	StatusNothing = "nothing"
-	StatusFailed  = "failed"
+	// StatusGated is a run whose gate said not to wake the brain: no
+	// model ran.
+	StatusGated  = "gated"
+	StatusFailed = "failed"
 	// StatusStopped is a run the owner stopped, or its brain's removal;
 	// one that hit its timeout is StatusFailed, with the error saying so.
 	StatusStopped = "stopped"
@@ -92,9 +95,9 @@ type Run struct {
 	CostUSD      float64 `json:"cost_usd,omitempty"`
 	InputTokens  int64   `json:"input_tokens,omitempty"`
 	OutputTokens int64   `json:"output_tokens,omitempty"`
-	// ExitCode is a program's exit code.
+	// ExitCode is a program's exit code, or its gate's.
 	ExitCode *int `json:"exit_code,omitempty"`
-	// Node is the node a program ran on.
+	// Node is the node a program, or its gate, ran on.
 	Node string `json:"node,omitempty"`
 	// LogBytes is the size of the run's log.
 	LogBytes int64 `json:"log_bytes,omitempty"`

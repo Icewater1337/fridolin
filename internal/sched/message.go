@@ -21,6 +21,9 @@ type Task struct {
 	// Fride is FrIDE's news that started a TriggerFride run, as the run
 	// reads it.
 	Fride string
+	// GateData is what the agent's gate handed the run, as JSON; "" for
+	// none.
+	GateData string
 }
 
 // The report modes, as manifest names them (sched does not import it).
@@ -71,6 +74,11 @@ func Message(t Task) string {
 	}
 	sb.WriteString("The task:\n\n")
 	sb.WriteString(strings.TrimSpace(t.Text))
+	if t.GateData != "" {
+		sb.WriteString("\n\nThe agent's gate, a program that ran before you and woke you, found this (JSON, as the program wrote it, not from the owner):\n\n```json\n")
+		sb.WriteString(strings.TrimSpace(t.GateData))
+		sb.WriteString("\n```")
+	}
 	return sb.String()
 }
 

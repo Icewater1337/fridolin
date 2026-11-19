@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **Gates for scheduled agents: a cheap check decides whether the brain
+  wakes.** An agent's file may name a `gate`, a program that runs before
+  each brain run, in the brain's sandbox with no token of a run, or on a
+  node through its exec. Its last line of output is JSON: `{"wake":
+  false}` ends the run as *gated*, with no model run; `{"wake": true,
+  "data": {...}}` starts the brain run with the data in its task. A gate
+  that times out (30 s by default), writes more than 1 MiB, exits
+  non-zero or gives no decision fails the run. Checks like "anything new
+  in the inbox?" can now run every few minutes almost for free. The gate
+  is approved with the agent; the Schedules page shows it and the gated
+  runs. [docs/BRAINS.md](docs/BRAINS.md#gates)
 - **Brains send files into their chat.** A run that answers someone in
   a WhatsApp chat has a new tool, `reply_file(path, caption, as)`: it
   sends a file of the brain's folder, media inbox or temp folder into

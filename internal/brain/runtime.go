@@ -202,6 +202,10 @@ func (br *Brain) Dir() string { return br.workDir }
 // Callers must not mutate its slices or optional nested settings.
 func (br *Brain) Manifest() manifest.Manifest { return br.settings.Load().Manifest }
 
+// OwnPATH are the folders that go first on the PATH of the brain's runs
+// (Settings.OwnPATH), for a program the bridge runs as the brain.
+func (br *Brain) OwnPATH() []string { return slices.Clone(br.settings.Load().OwnPATH) }
+
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
 // alone, and with the time it was sent, not the time the debouncer let it

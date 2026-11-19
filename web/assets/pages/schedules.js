@@ -12,7 +12,7 @@ import { brainsResource, nodesResource, resource, schedulesResource } from '../a
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fieldDiff, lineDiff, sortKeys } from '../lib/diff.js';
 import { fmtDuration, prettyJSON } from '../lib/format.js';
-import { STATES, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, runTime, stateOf, triggerText, varsText, zoneNote } from '../lib/schedules.js';
+import { STATES, fileJSON, filterAgents, gateText, groupByBrain, inTime, permissionsOf, runTime, stateOf, triggerText, varsText, zoneNote } from '../lib/schedules.js';
 import { agentWizard } from '../components/agent-wizard.js';
 import { btn } from '../components/buttons.js';
 import { badge, callout, empty, kv, mono, pageHeader, spinner, timeAgo } from '../components/common.js';
@@ -437,6 +437,7 @@ function details(a) {
       ['File', a.file ? mono(a.file, { copy: true }) : h('span.muted', 'memory.consolidate in brain.json')],
       ['Description', s.description || null],
       ['Does', what],
+      ['Gate', s.gate ? h('span', mono((s.gate.argv || []).join(' ')), h('div.muted.small', gateText(s.gate))) : null],
       ['Template vars', s.vars && Object.keys(s.vars).length ? h('pre.code', varsText(s.vars)) : null],
       ['When', mono(s.when)],
       ['Next run', a.next ? `${runTime(a.next)} (${inTime(a.next)})` : (a.state === 'pending' ? 'after approval' : '—')],
