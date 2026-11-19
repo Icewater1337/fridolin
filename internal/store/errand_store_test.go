@@ -222,6 +222,12 @@ func TestErrandBooking(t *testing.T) {
 	if e, _ := s.GetErrand(ctx, "e1"); e.Booked != "" || !e.BookedFrom.IsZero() {
 		t.Errorf("cleared: %+v", e)
 	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE errands SET state = ? WHERE id = ?`, ErrandStopped, "e1"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.SetErrandBooking(ctx, "e1", "", BookingMaking, from, to); ok {
+		t.Error("making a booking for an errand that ended (#709)")
+	}
 }
 
 func TestErrandCallsSince(t *testing.T) {

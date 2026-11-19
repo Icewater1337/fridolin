@@ -35,6 +35,9 @@ type fakeCalendarAPI struct {
 	queries  []string
 	refresh  int // token requests
 	revoked  bool
+	// held, when set, holds the next free/busy request: it is sent the
+	// release channel, and the request answers once that is closed.
+	held chan chan struct{}
 }
 
 func newFakeCalendarAPI(t *testing.T) *fakeCalendarAPI {
@@ -67,6 +70,14 @@ func newFakeCalendarAPI(t *testing.T) *fakeCalendarAPI {
 			}
 			_ = json.NewEncoder(w).Encode(resp)
 		case path == "/freeBusy":
+			if held := f.held; held != nil {
+				f.held = nil
+				release := make(chan struct{})
+				f.mu.Unlock()
+				held <- release
+				<-release
+				f.mu.Lock()
+			}
 			var req struct {
 				Items []struct{ ID string } `json:"items"`
 			}

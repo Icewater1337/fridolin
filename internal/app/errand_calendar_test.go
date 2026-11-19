@@ -359,3 +359,49 @@ func TestErrandBookingYesAfterDone(t *testing.T) {
 		h.WaitFor("the end", func() bool { return h.errandOf(e.ID).State == store.ErrandDone })
 	})
 }
+
+// TestErrandBookingEndsDuringTheCalendarCheck: an errand stopped while
+// the yes to its booking reads the calendar books nothing, and the owner
+// hears it was not booked because the errand had ended (#709).
+func TestErrandBookingEndsDuringTheCalendarCheck(t *testing.T) {
+	t.Parallel()
+	h, runs, f := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarAsk, Days: everyDay, DaysAhead: 5})
+	loc := RuntimeConfig(h.b.cfgs).Location()
+	at := h.inTwoDays(14)
+	when := errand.FormatSpan(errand.Span{Start: at, End: at.Add(time.Hour)}, loc)
+	if _, err := h.b.openErrand(context.Background(), h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	runs.say(bookAnswer(at, "Let me check with Sam!"))
+	h.theyWrite("14:00 the day after tomorrow?")
+	poll := h.waitPoll(harnessDM, "Book "+when+" with Alex")
+	h.WaitSent(errandJID, "Let me check with Sam!")
+
+	held := make(chan chan struct{})
+	f.mu.Lock()
+	f.held = held
+	f.mu.Unlock()
+	h.vote(poll.ID, "15551234567", outboundmsg.ApprovalYes)
+	var release chan struct{}
+	select {
+	case release = <-held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the yes never read the calendar")
+	}
+	if err := h.b.stopErrand(context.Background(), "core", e.ID); err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	close(release)
+	h.WaitSent(harnessDM, outboundmsg.ErrandBookingEndedNotice("Alex", e.ID, when))
+	if got := h.errandOf(e.ID); got.Booked != "" {
+		t.Errorf("the booking after the end: %+v", got)
+	}
+	f.mu.Lock()
+	n := len(f.inserted)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Errorf("%d events booked for an errand that ended during the calendar check", n)
+	}
+}
