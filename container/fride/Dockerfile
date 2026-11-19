@@ -22,7 +22,7 @@
 # old when they were chosen.
 
 ARG GO_IMAGE=golang:1.27.4-bookworm
-ARG NODE_IMAGE=node:26.13.0-bookworm-slim
+ARG NODE_IMAGE=node:26.13.1-bookworm-slim
 
 # ── FrIDE and ponytail ────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS fride
