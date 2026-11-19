@@ -20,7 +20,7 @@
   prHourlyLimit: 0,
   prConcurrentLimit: 20,
   labels: ["dependencies"],
-  dependencyDashboard: true,
+  dependencyDashboard: { enabled: true },
   osvVulnerabilityAlerts: true,
   vulnerabilityAlerts: {
     labels: ["dependencies", "security"],
