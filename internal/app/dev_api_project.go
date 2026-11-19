@@ -86,5 +86,8 @@ func (b *App) newPolicyAPI() *httpapi.PolicyAPI {
 		Fride:              func(ctx context.Context) (any, error) { return b.frideView(ctx) },
 		StopFrideInstance:  b.stopFrideInstance,
 		StartFrideInstance: b.startFrideInstance,
+		RunFilesList:       b.runFiles.list,
+		RunFiles:           b.runFiles.view,
+		UndoRun:            b.runFiles.undoRun,
 	}
 }

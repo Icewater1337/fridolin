@@ -1117,6 +1117,95 @@ export interface AuditEntry {
   duration_ms?: number;
 }
 
+// ---------------------------------------------------------------------------
+// What a run changed in its folder (internal/runsnap)
+
+/** A file as a walk saw it (runsnap.File); mtime in Unix nanoseconds. */
+export interface RunFile {
+  size: number;
+  mtime: number;
+  mode: number;
+  hash: string;
+}
+
+/** One file a run created, changed or deleted (runsnap.Change). */
+export interface RunFileChange {
+  root: string;
+  path: string;
+  op: 'created' | 'changed' | 'deleted';
+  before?: RunFile;
+  after?: RunFile;
+}
+
+/** When a run was put back, and by whom. */
+export interface RunUndone {
+  at: string;
+  by: string;
+}
+
+/** The record of what a run changed (runsnap.Record). */
+export interface RunFilesRecord {
+  v: number;
+  run: string;
+  brain: string;
+  chat?: string;
+  thread?: string;
+  started: string;
+  ended: string;
+  roots: { name: string; dir: string }[];
+  /** Why its files were not recorded; changes is then empty. */
+  skipped?: string;
+  /** The runs of the brain that ran at the same time. */
+  alongside?: string[];
+  changes: RunFileChange[];
+  undone?: RunUndone;
+}
+
+/** What undoing a change does to its file. */
+export type UndoAction = 'restore' | 'trash' | 'none' | 'conflict';
+
+/** One file of an undo (runsnap.Step). */
+export interface UndoStep extends RunFileChange {
+  action: UndoAction;
+  why?: string;
+  /** Where a trashed file went, in its folder. */
+  to?: string;
+  done?: boolean;
+  error?: string;
+}
+
+/** POST /api/runs/{run}/undo, and the plan of GET /api/runs/{run}/files (runsnap.UndoResult). */
+export interface UndoResult {
+  run: string;
+  brain: string;
+  dry_run: boolean;
+  steps: UndoStep[];
+  undone?: RunUndone;
+}
+
+/** GET /api/runs/{run}/files: a run's record and what undoing it would do; record is null while it runs. */
+export interface RunFilesView {
+  record: RunFilesRecord | null;
+  plan?: UndoResult;
+  running: boolean;
+}
+
+/** One run of GET /api/run-files. */
+export interface RunFilesItem {
+  run: string;
+  brain: string;
+  chat?: string;
+  started: string;
+  ended: string;
+  summary: string;
+  created: number;
+  changed: number;
+  deleted: number;
+  skipped?: string;
+  alongside?: string[];
+  undone?: string;
+}
+
 /** An approval or a question a run asked (store.Approval). */
 export interface Approval {
   id: string;
@@ -2875,6 +2964,7 @@ export interface ApiGet {
   '/api/gitlab': GitLabConnection;
   '/api/git-identities': GitIdentities;
   '/api/audit': AuditEntry[];
+  '/api/run-files': RunFilesItem[];
   '/api/approvals': Approvals;
   '/api/errands': Errands;
   '/api/policy': PolicyStatus;
@@ -2923,6 +3013,7 @@ export type GetResponse<P extends string> =
   P extends `/api/brains/${string}/backup/versions` ? BackupVersions :
   P extends `/api/brains/${string}` ? Brain :
   P extends `/api/errands/${string}` ? ErrandDetail :
+  P extends `/api/runs/${string}/files` ? RunFilesView :
   P extends `/api/schedules/preview${string}` ? SchedulePreview :
   P extends `/api/schedules/${string}/runs/${string}/log` ? ScheduleRunLog :
   P extends `/api/schedules/${string}/runs` ? ScheduleRun[] :
@@ -2932,6 +3023,7 @@ export type GetResponse<P extends string> =
   P extends `/api/wiki/${string}/page${string}` ? WikiPage :
   P extends `/api/activity${string}` ? ActivityEntry[] :
   P extends `/api/audit${string}` ? AuditEntry[] :
+  P extends `/api/run-files${string}` ? RunFilesItem[] :
   P extends `/api/threads${string}` ? Thread[] :
   P extends `/api/logs${string}` ? Logs :
   P extends `/api/whatsapp/groups${string}` ? WhatsAppGroup[] :

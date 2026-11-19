@@ -388,6 +388,7 @@ writes there is not read.
 | `!approve`, `!deny` | Owner only, direct chat: approve, or turn down, what waits for you: a node, a brain's scheduled agent, changed brain.json or skill, a run's request. The bridge tells you of each in plain words; with several waiting a multi-select poll approves each one you tick, and one you did not start asks for a second `!approve` ([NODES.md](docs/NODES.md#approving-from-whatsapp)). `!approve <ref>` names one. `!approved`, `!denied` and `!revoked` mean the same. Audited |
 | `!revoke <ref>` | Owner only, direct chat: shut a node out, approved or not, named by its ref or its name. Audited |
 | `!unblock <number>` | Owner only, direct chat: let Fridolin hear someone again whom it stopped listening to in an [errand](docs/BRAINS.md#errands); their messages go to you until you let it talk with them again. Audited |
+| `!undo <run>` | Owner only, direct chat: what undoing a run would do to the files it changed in its brain's folder; `!undo <run> yes` writes them back and moves the ones it created to the folder's trash, leaving any that changed since ([BRAINS.md](docs/BRAINS.md#undoing-a-run)). `!undo` lists the runs that changed files. Audited |
 | `!lockdown` | Owner only (a number in `allowed_numbers`): pause all work but reading, everywhere, until `!unlock` or the dashboard's *Unlock* ([BRAINS.md](docs/BRAINS.md#skills-risk-and-approvals)) |
 | `!unlock` | Owner only: end a lockdown |
 

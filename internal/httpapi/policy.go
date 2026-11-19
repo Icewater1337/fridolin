@@ -87,6 +87,31 @@ type PolicyAPI struct {
 	// StartFrideInstance starts one at size ("" for medium) and answers
 	// its view (POST /api/fride/instances/{name}/start).
 	StartFrideInstance func(ctx context.Context, name, size string) (any, error)
+	// RunFilesList lists the records of the files runs changed, of a
+	// brain or all (GET /api/run-files); RunFiles is one run's record with
+	// what undoing it would do (GET /api/runs/{run}/files), and UndoRun
+	// puts the run back, or with dryRun says what it would do (POST
+	// /api/runs/{run}/undo).
+	RunFilesList func(ctx context.Context, brain string, limit int) (any, error)
+	RunFiles     func(ctx context.Context, run string) (any, error)
+	UndoRun      func(ctx context.Context, run string, dryRun bool) (any, error)
+}
+
+// UndoRunRequest is the optional body of POST /api/runs/{run}/undo:
+// dry_run only says what the undo would do.
+type UndoRunRequest struct {
+	DryRun bool `json:"dry_run"`
+}
+
+// UndoRunHandler is POST /api/runs/{run}/undo.
+func (a *PolicyAPI) UndoRunHandler(w http.ResponseWriter, r *http.Request) {
+	var req UndoRunRequest
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	out, err := a.UndoRun(r.Context(), r.PathValue("run"), req.DryRun)
+	writeResult(w, out, err)
 }
 
 // FrideInstanceStopRequest is the optional body of POST

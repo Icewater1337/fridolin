@@ -74,7 +74,7 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 	if n, err := chat.PhoneNumber(m.Sender); err == nil {
 		by = n
 	}
-	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!deny": audit.NodeRevoked, "!revoke": audit.NodeRevoked, "!movecore": audit.CoreMoveRequested, "!unblock": audit.Errand}[command]
+	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!deny": audit.NodeRevoked, "!revoke": audit.NodeRevoked, "!movecore": audit.CoreMoveRequested, "!unblock": audit.Errand, "!undo": audit.RunFiles}[command]
 	record := func(id, outcome string) {
 		b.audit.Append(audit.Entry{Kind: kind, Chat: m.JID, By: by, ID: id, Detail: command, Outcome: outcome})
 		log.Printf("owner command: %s from %s in %s: %s", command, by, m.JID, outcome)
@@ -96,6 +96,8 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 		return b.moveCoreCommand(args, record)
 	case "!unblock":
 		return b.unblockCommand(args, record)
+	case "!undo":
+		return b.undoCommand(args, by, record)
 	}
 	ctx := context.Background()
 	approve := command == "!approve"

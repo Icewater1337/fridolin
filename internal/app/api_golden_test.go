@@ -251,6 +251,8 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		// Run ids are random, and how long a run took is the machine's.
 		{"threads", "/api/threads", []string{"run", "duration_ms"}},
 		{"audit", "/api/audit", []string{"run", "duration_ms"}},
+		{"run-files", "/api/run-files", []string{"run", "started", "ended"}},
+		{"run-files-unknown-run", "/api/runs/nope/files", nil},
 		{"fride", "/api/fride", nil},
 		// This month.
 		{"connections", "/api/connections", []string{"month"}},
