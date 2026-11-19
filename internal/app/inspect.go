@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/doctor"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/registry"
 )
 
@@ -123,6 +124,9 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 	for _, s := range specs {
 		m := s.Manifest
 		fmt.Fprintf(w, "  brain %-14s → %s (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
+		if m.LiveSession == manifest.LiveSessionOwnerDM {
+			fmt.Fprintf(w, "    live session: %s\n", liveCheckSummary(cfg))
+		}
 	}
 	for _, is := range issues {
 		fmt.Fprintf(w, "  ! %s %s: %s\n", is.Kind, is.Path, is.Detail)
@@ -208,6 +212,16 @@ func claudeSummary(path string, passthrough []string) string {
 		s += " — older than " + claudecli.TestedClaudeVersion + ", the oldest release tested; update it (claude update)"
 	}
 	return s
+}
+
+// liveCheckSummary is what check says of a brain that asks for a live
+// session: whether the bridge's settings allow one. Whether one runs is
+// the running bridge's to say (the brain's page in the dashboard).
+func liveCheckSummary(cfg *config.Settings) string {
+	if why := liveBlocker(string(cfg.AgentProvider), cfg.DangerouslySkipPermissions, cfg.InheritClaudeUserConfig); why != "" {
+		return "owner_dm, but none starts: " + why + "; every message runs claude -p"
+	}
+	return "owner_dm (your direct messages; the brain's page in the dashboard shows whether it is up)"
 }
 
 // dmAllowSummary says who may DM the bridge. A bare empty list would read

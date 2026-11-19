@@ -69,7 +69,7 @@ var imports = map[string][]string{
 	"internal/media":        {"internal/fsx", "internal/textx"},
 	"internal/memindex":     {"internal/chat", "internal/fsx", "internal/history", "internal/store", "internal/textx"},
 	"internal/otp":          {"internal/fsx", "internal/history"},
-	"internal/outbound":     {"internal/store", "internal/textx"},
+	"internal/outbound":     {"internal/chat", "internal/store", "internal/textx"},
 	"internal/pipeline":     {"internal/brain", "internal/chat", "internal/claudecli", "internal/otp", "internal/outbound", "internal/testutil"},
 	"internal/platform":     nil,
 	"internal/housekeeping": {"internal/platform"},

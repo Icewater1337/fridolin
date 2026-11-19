@@ -3,6 +3,8 @@ package manifest
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +42,9 @@ func (s Schedule) Normalized() Schedule {
 	if s.Enabled != nil && *s.Enabled {
 		s.Enabled = nil
 	}
+	if s.RetryInterrupted != nil && *s.RetryInterrupted {
+		s.RetryInterrupted = nil
+	}
 	if len(s.Vars) == 0 {
 		s.Vars = nil
 	}
@@ -55,6 +60,15 @@ func (s Schedule) Equal(o Schedule) bool {
 	a, _ := json.Marshal(s.Normalized())
 	b, _ := json.Marshal(o.Normalized())
 	return bytes.Equal(a, b)
+}
+
+// Revision is a short digest of s, which two schedules that mean the same
+// thing share (Equal): a run keeps the one it started under, so that the
+// bridge can tell whether the agent changed since.
+func (s Schedule) Revision() string {
+	data, _ := json.Marshal(s.Normalized())
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 // EncodeSchedule returns the contents of s's file, or why s is not a

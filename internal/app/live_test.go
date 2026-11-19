@@ -220,6 +220,9 @@ func TestLiveSessionFallsBackWhenChannelsAreOff(t *testing.T) {
 		defer h.b.live.mu.Unlock()
 		return h.b.live.fails["main"].n == 1 && h.b.live.sess["main"] == nil
 	})
+	if v := h.b.live.view("main", manifest.LiveSessionOwnerDM, ""); v.State != brain.LiveFailed || !strings.Contains(v.Error, "did not answer the check") || v.RetryAt == nil {
+		t.Errorf("the brain page says of the failed session: %+v", v)
+	}
 	for _, text := range []string{"two", "three"} {
 		if got := h.Answer(inbound{JID: harnessDM, Text: text}); !strings.HasPrefix(got, "echo:") {
 			t.Errorf("%s: %q", text, got)
@@ -331,6 +334,130 @@ func TestLiveSessionStartsAnewAfterItsTurns(t *testing.T) {
 	}
 	if starts != 2 {
 		t.Errorf("sessions started: %d, want 2", starts)
+	}
+}
+
+// TestLiveSessionView: what the dashboard shows of a brain's session, in
+// each state it can be in, and why the bridge's settings rule one out.
+func TestLiveSessionView(t *testing.T) {
+	t.Parallel()
+	h := newLiveHost(&App{waits: defaultWaits()})
+	t.Cleanup(h.Stop)
+	started := time.Now().Add(-time.Minute)
+	set := func(s *liveSession, f *liveFailure) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		delete(h.sess, "main")
+		delete(h.fails, "main")
+		if s != nil {
+			s.brain, s.started = "main", started
+			h.sess["main"] = s
+		}
+		if f != nil {
+			h.fails["main"] = *f
+		}
+	}
+	for _, c := range []struct {
+		name    string
+		s       *liveSession
+		f       *liveFailure
+		blocked string
+		want    string
+		turns   int
+		err     string
+	}{
+		{name: "none yet", want: brain.LiveDown},
+		{name: "starting", s: &liveSession{}, want: brain.LiveStarting},
+		{name: "ready", s: &liveSession{ready: true, turns: 3}, want: brain.LiveReady, turns: 3},
+		{name: "in a turn", s: &liveSession{ready: true, busy: true, turns: 4}, want: brain.LiveBusy, turns: 4},
+		{name: "on its way out", s: &liveSession{ready: true, stopped: true}, want: brain.LiveDown},
+		{name: "failed lately", f: &liveFailure{n: 1, until: time.Now().Add(time.Hour), err: "claude did not answer the check"}, want: brain.LiveFailed, err: "claude did not answer the check"},
+		{name: "failed long ago", f: &liveFailure{n: 1, until: time.Now().Add(-time.Second), err: "old"}, want: brain.LiveDown},
+		{name: "ruled out", s: &liveSession{ready: true}, blocked: "no", want: brain.LiveUnavailable},
+	} {
+		set(c.s, c.f)
+		v := h.view("main", manifest.LiveSessionOwnerDM, c.blocked)
+		switch {
+		case v == nil:
+			t.Errorf("%s: no view", c.name)
+		case v.State != c.want || v.Turns != c.turns || v.Error != c.err:
+			t.Errorf("%s: %+v, want state %s, %d turns, error %q", c.name, v, c.want, c.turns, c.err)
+		case (v.Started != nil) != (c.s != nil && !c.s.stopped && c.blocked == ""):
+			t.Errorf("%s: started %v", c.name, v.Started)
+		case (v.RetryAt != nil) != (c.want == brain.LiveFailed):
+			t.Errorf("%s: retry_at %v", c.name, v.RetryAt)
+		case c.blocked != "" && v.Reason != c.blocked:
+			t.Errorf("%s: reason %q", c.name, v.Reason)
+		}
+	}
+	for _, mode := range []string{"", manifest.LiveSessionOff} {
+		if v := h.view("main", mode, ""); v != nil {
+			t.Errorf("live_session %q: %+v, want none", mode, v)
+		}
+	}
+	if v := (*liveHost)(nil).view("main", manifest.LiveSessionOwnerDM, ""); v == nil || v.State != brain.LiveDown {
+		t.Errorf("without a host: %+v", v)
+	}
+
+	for _, c := range []struct {
+		provider              string
+		dangerously, inherits bool
+		want                  string
+	}{
+		{"claude", true, false, ""},
+		{"codex", true, false, "Codex"},
+		{"claude", false, false, "dangerously_skip_permissions"},
+		{"claude", true, true, "inherit_claude_user_config"},
+	} {
+		got := liveBlocker(c.provider, c.dangerously, c.inherits)
+		if (got == "") != (c.want == "") || !strings.Contains(got, c.want) {
+			t.Errorf("liveBlocker(%s, %v, %v) = %q, want one naming %q", c.provider, c.dangerously, c.inherits, got, c.want)
+		}
+	}
+}
+
+// TestLiveSessionOnTheBrainPage: the dashboard's brain and status answers
+// say how the brain's session is, from none to ready and through its
+// turns; a brain without the setting has nothing to say.
+func TestLiveSessionOnTheBrainPage(t *testing.T) {
+	t.Parallel()
+	h, _ := liveHarness(t, manifest.LiveSessionOwnerDM, nil)
+	live := func() *brain.LiveView {
+		t.Helper()
+		w := h.Do(http.MethodGet, "/api/brains/main", nil)
+		var v struct {
+			Runtime *brain.Runtime `json:"runtime"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || v.Runtime == nil {
+			t.Fatalf("GET /api/brains/main: %d %s", w.Code, w.Body)
+		}
+		return v.Runtime.Live
+	}
+	if v := live(); v == nil || v.State != brain.LiveDown {
+		t.Fatalf("before any message: %+v", v)
+	}
+	h.Answer(inbound{JID: harnessDM, Text: "one"})
+	h.waitLive("main")
+	if v := live(); v == nil || v.State != brain.LiveReady || v.Turns != 0 || v.Started == nil {
+		t.Fatalf("once ready: %+v", v)
+	}
+	h.Answer(inbound{JID: harnessDM, Text: "two"})
+	if v := live(); v == nil || v.State != brain.LiveReady || v.Turns != 1 {
+		t.Errorf("after a turn: %+v", v)
+	}
+
+	w := h.Do(http.MethodGet, "/api/status", nil)
+	var st struct {
+		Brains []brain.Runtime `json:"brains"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil || len(st.Brains) != 1 || st.Brains[0].Live == nil || st.Brains[0].Live.State != brain.LiveReady {
+		t.Errorf("GET /api/status: %d %s", w.Code, w.Body)
+	}
+
+	h.AddBrain(manifest.Manifest{ID: "other", Name: "Other"})
+	w = h.Do(http.MethodGet, "/api/brains/other", nil)
+	if strings.Contains(w.Body.String(), `"live":`) {
+		t.Errorf("a brain without a session: %s", w.Body)
 	}
 }
 
