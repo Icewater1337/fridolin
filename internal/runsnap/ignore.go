@@ -25,8 +25,8 @@ import (
 // Bounds on what one .gitignore may hold: a brain writes these files,
 // and the bridge reads them outside its sandbox.
 const (
-	maxIgnoreBytes   = 64 << 10
-	maxIgnoreRules   = 1000
+	maxIgnoreBytes   = 32 << 10
+	maxIgnoreRules   = 500
 	maxIgnoreStars   = 4
 	gitignoreName    = ".gitignore"
 	maxIgnoreSegment = 64
@@ -123,22 +123,27 @@ func (ig ignoreRules) ignored(rel string, dir bool) bool {
 }
 
 // matchSegments matches a whole path against a pattern, "**" standing for
-// any number of segments.
+// any number of segments. It fills a table from the ends of both, so a
+// pattern with many "**" costs its length times the path's, never more:
+// a brain writes these patterns.
 func matchSegments(pat, segs []string) bool {
-	if len(pat) == 0 {
-		return len(segs) == 0
-	}
-	if pat[0] == "**" {
-		for i := 0; i <= len(segs); i++ {
-			if matchSegments(pat[1:], segs[i:]) {
-				return true
+	n := len(segs)
+	// next[j] reports whether the rest of the pattern after the segment
+	// being looked at matches segs[j:].
+	next := make([]bool, n+1)
+	next[n] = true
+	for i := len(pat) - 1; i >= 0; i-- {
+		cur := make([]bool, n+1)
+		for j := n; j >= 0; j-- {
+			switch {
+			case pat[i] == "**":
+				cur[j] = next[j] || (j < n && cur[j+1])
+			case j < n && next[j+1]:
+				ok, err := path.Match(pat[i], segs[j])
+				cur[j] = err == nil && ok
 			}
 		}
-		return false
+		next = cur
 	}
-	if len(segs) == 0 {
-		return false
-	}
-	ok, err := path.Match(pat[0], segs[0])
-	return err == nil && ok && matchSegments(pat[1:], segs[1:])
+	return next[0]
 }

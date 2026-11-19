@@ -41,3 +41,34 @@ func TestIgnoreRules(t *testing.T) {
 		t.Error("no rules ignored something")
 	}
 }
+
+// FuzzIgnore: a .gitignore is a file a brain writes and the bridge reads
+// outside its sandbox. Whatever it holds, parsing it stays within its
+// bounds, and matching a path against it does not panic.
+func FuzzIgnore(f *testing.F) {
+	f.Add("*.log\n!keep.log\n/top/\nbuild/\n", "a/b/x.log")
+	f.Add("**/**/**/**/a\n[z-a]\n\\!x\n", "a/a/a/a/a")
+	f.Add("a/**/b/**/c/**/d\n", "a/x/b/y/c/z/d")
+	f.Fuzz(func(t *testing.T, data, rel string) {
+		rules := parseIgnore([]byte(data))
+		if len(rules) > maxIgnoreRules {
+			t.Fatalf("%d rules", len(rules))
+		}
+		for _, r := range rules {
+			stars := 0
+			for _, s := range r.segs {
+				if s == "**" {
+					stars++
+				}
+			}
+			// One "**" more than the bound: the one an unanchored rule
+			// starts with.
+			if len(r.segs) == 0 || stars > maxIgnoreStars+1 || len(r.segs) > maxIgnoreSegment+1 {
+				t.Fatalf("a rule out of bounds: %+v", r)
+			}
+		}
+		ig := ignoreRules{"": rules, "a": rules}
+		_ = ig.ignored(rel, false)
+		_ = ig.ignored(rel, true)
+	})
+}
