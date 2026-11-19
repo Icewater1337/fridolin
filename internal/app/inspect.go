@@ -123,6 +123,7 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 	for _, s := range specs {
 		m := s.Manifest
 		fmt.Fprintf(w, "  brain %-14s → %s (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
+		fmt.Fprintf(w, "    web: %s\n", webTools(settingsFor(cfg, s), s.Dir))
 	}
 	for _, is := range issues {
 		fmt.Fprintf(w, "  ! %s %s: %s\n", is.Kind, is.Path, is.Detail)

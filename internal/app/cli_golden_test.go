@@ -149,21 +149,36 @@ func TestGoldenCheck(t *testing.T) {
 			{Path: "~/missing", Approved: &manifest.Manifest{Version: 1, ID: "missing", Name: "Missing", PromptFile: manifest.DefaultPromptFile}},
 		}
 	}
+	// The web tools each brain has (#405): a global list that blocks both,
+	// which one brain clears and another narrows.
+	web := func(string) []config.BrainRef {
+		return []config.BrainRef{
+			brainFolder(t, "~/main", manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, DisallowedTools: &[]string{}}),
+			brainFolder(t, "~/family", manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}}),
+			brainFolder(t, "~/careful", manifest.Manifest{ID: "careful", Name: "Careful", DisallowedTools: &[]string{"WebFetch"}}),
+		}
+	}
 	tests := []struct {
 		name, config string
 		args         []string
+		brains       func(home string) []config.BrainRef
 	}{
-		{"summary", "", nil},
+		{"summary", "", nil, nil},
 		{"route", "", []string{
 			"--route", harnessDM, "--route", "15559876543@s.whatsapp.net",
 			"--route", harnessGroup, "--route", "120363000000000001@g.us",
-		}},
-		{"anyone-may-dm", `"allow_any_dm": true, "allowed_numbers": []`, nil},
-		{"does-not-load", `"queue": {"mode": "sometimes"}`, nil},
+		}, nil},
+		{"anyone-may-dm", `"allow_any_dm": true, "allowed_numbers": []`, nil, nil},
+		{"does-not-load", `"queue": {"mode": "sometimes"}`, nil, nil},
+		{"web", `"dangerously_skip_permissions": true, "disallowed_tools": ["WebFetch", "WebSearch"]`, nil, web},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			root, cfg := cliFixture(t, tc.config, brains)
+			folders := brains
+			if tc.brains != nil {
+				folders = tc.brains
+			}
+			root, cfg := cliFixture(t, tc.config, folders)
 			out, code := runBridgeCLI(t, root, append([]string{"check", "--config", cfg}, tc.args...)...)
 			s := newScrubber(root)
 			assertGolden(t, "cli/check-"+tc.name+".golden", []byte(s.text(out)+"exit "+strconv.Itoa(code)+"\n"))

@@ -433,6 +433,31 @@ gets it from a `permissions.allow` rule (`"WebFetch"`) in its folder's
 `.claude/settings.json`. A tool on the `disallowed_tools` list stays off
 either way.
 
+So a brain's web tools follow what it can reach. With
+`dangerously_skip_permissions` it has a shell, and the
+[sandbox](#what-the-sandbox-does-not-cover) leaves the network open: it
+gets WebSearch and WebFetch with nobody to approve them, and blocking
+them there keeps out what web pages could tell it, not a way out of the
+machine. Without it, WebSearch alone, which picks no address. To turn
+the web off for one brain, list `WebFetch` and `WebSearch` in its
+brain.json's `disallowed_tools`; to turn it off for every brain without
+a list of its own, list them here.
+
+A brain without a `disallowed_tools` of its own takes this list: one
+meant for the brains in your groups takes the web from the brain in
+your DM too. `fridolin check` says under each brain which web tools it
+has, and why it has not one:
+
+```
+  brain personal       → /Users/you/Personal (dms=true default=false groups=[])
+    web: WebSearch, WebFetch
+  brain family         → /Users/you/family (dms=false default=false groups=[120363000000000000@g.us])
+    web: none; not WebSearch, WebFetch (blocked by config.json's disallowed_tools; the brain's own "disallowed_tools" in brain.json, [] for none, replaces that list)
+```
+
+In [Codex mode](#agent_provider) the line names Codex's web search,
+which either name in the list turns off.
+
 ### `dangerously_skip_permissions`
 
 In Claude mode, passes `--dangerously-skip-permissions`, so Claude uses
