@@ -29,6 +29,9 @@ type RunSpec struct {
 	// what the run may do through the bridge's tools depends on its chat
 	// and source (a delegated task's run gets no delegate tool).
 	Message chat.Inbound
+	// Slot is the run slot the run goes in, nil without one: a task the
+	// run delegates and waits for goes in it too (Inbound.Slot).
+	Slot *Slot
 }
 
 // RunRefused is a run the bridge's policy did not start (a lockdown, a

@@ -337,7 +337,7 @@ func TestStopBuildRunLeavesALaterRunAlone(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("other chat")); err != nil {
 		t.Fatal(err)
 	}
-	br.StopLane(brain.LaneChat) // the build run ends; the other chat's starts
+	br.StopLane(brain.LaneChat, false) // the build run ends; the other chat's starts
 	testutil.WaitFor(t, 5*time.Second, "other run", func() bool {
 		r := br.Snapshot().Running
 		return r != nil && r.Chat != jid

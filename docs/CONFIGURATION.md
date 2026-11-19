@@ -504,12 +504,15 @@ observe-only run, see [`observe`](BRAINS.md)), and among them the brain
 that asked first, so a brain that just had a run asks again behind the
 others. A request that finds every run taken by observe-only runs stops
 one of them, as it would in its own brain: the chatter is already in the
-history. Scheduled agents' runs, which can take hours, hold at most one
-run fewer than the limit, all brains' together, so that with a limit of
-2 or more one run is always left for the chats; an agent's run otherwise
-gets its turn in the order it asked, so the chats do not hold it back
-either. A change applies at once; with a lower limit, runs going on
-finish and the next waits.
+history. It stops one only when that gets it the run: the runs of those
+stopped already go to the requests that asked before it. Scheduled
+agents' runs, which can take hours, hold at most one run fewer than the
+limit, all brains' together, so that with a limit of 2 or more one run
+is always left for the chats; an agent's run otherwise gets its turn in
+the order it asked, so the chats do not hold it back either. A task a
+run delegates to another brain goes in that run, which waits for it,
+and takes none of its own. A change applies at once; with a lower
+limit, runs going on finish and the next waits.
 
 ### `inherit_claude_user_config`
 
