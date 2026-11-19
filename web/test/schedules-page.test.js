@@ -6,7 +6,7 @@ import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import schedulesPage from '../assets/pages/schedules.js';
 import {
-  fieldsOf, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, presetOf, scheduleOf, stateOf, taskKind, varsText, whenOf, zoneNote,
+  fieldsOf, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, presetOf, scheduleOf, stateOf, taskKind, triggerText, varsText, whenOf, zoneNote,
 } from '../assets/lib/schedules.js';
 
 test('zoneNote says the zone times of day are in, and warns about an unset one in UTC', () => {
@@ -77,7 +77,10 @@ function bridge(state) {
     if (path.startsWith('/api/schedules/preview')) return { when: decodeURIComponent(path.split('when=')[1]), next: ['2026-10-24T06:00:00Z', '2026-10-25T06:00:00Z', '2026-10-26T06:00:00Z'] };
     if (path.startsWith('/api/schedules/main/brief/runs/') && path.endsWith('/log')) return { id: 'x', log: '[06:00:01] 🔧 Tool: Bash\n[06:00:09] ■ ok after 8s\n', cut: false, running: false };
     if (path.startsWith('/api/schedules/main/brief/runs')) {
-      return [{ id: '20261022T060000-abcdef', trigger: 'schedule', started: '2026-10-22T06:00:00Z', duration_ms: 8000, status: 'ok', sent: true, sent_to: DM, cost_usd: 0.0123 }];
+      return [
+        { id: '20261022T060500-123456', trigger: 'restart-retry', retry_of: '20261022T060000-abcdef', started: '2026-10-22T06:05:00Z', duration_ms: 6000, status: 'ok', sent: true, sent_to: DM },
+        { id: '20261022T060000-abcdef', trigger: 'schedule', started: '2026-10-22T06:00:00Z', duration_ms: 8000, status: 'interrupted', error: 'the bridge stopped while it ran', cost_usd: 0.0123 },
+      ];
     }
     const putPath = /^\/api\/schedules\/([a-z]+)\/([a-z-]+)$/.exec(path);
     if (putPath && method === 'PUT') { state.put = { brain: putPath[1], body: JSON.parse(init.body) }; return { status: 200, body: { status: 'saved' } }; }
@@ -183,6 +186,9 @@ test('an agent shows everything about it, its runs and log', async (t) => {
   assert.match(text, /\.brain\/schedules\/brief\.json/);
   assert.match(text, /greeting=Hi/);
   assert.match(text, /5 min/);
+  assert.match(text, /retried after restart/, 'a retry after a restart says so');
+  assert.match(text, /the bridge stopped while it ran/);
+  assert.match(text, /Cut short by a restartruns once more, checking first what it did/);
   assert.ok(link(root, 'Edit'), 'it can be edited');
   assert.ok(link(root, 'Duplicate'));
   button(root, 'Run now').click();
@@ -287,6 +293,18 @@ test('the wizard edits an agent and writes what changed', async (t) => {
   button(root, 'Save changes').click();
   await settle();
   assert.deepEqual(state.put.body, { name: 'brief', when: 'daily 06:30', template: 'morning-briefing', report: 'worth' });
+  // A run a restart cut short: it may wait for its next time instead.
+  root.querySelectorAll('.stepper button').find((b) => b.textContent.includes('Permissions')).click();
+  await settle();
+  const retry = root.querySelectorAll('.agent-wizard select').find((s) => s.textContent.includes('Wait for its next time'));
+  retry.value = 'no';
+  retry.dispatchEvent(new Event('change'));
+  root.querySelectorAll('.stepper button').find((b) => b.textContent.includes('Review')).click();
+  await settle();
+  assert.match(root.querySelector('.agent-json').textContent, /"retry_interrupted": false/);
+  button(root, 'Save changes').click();
+  await settle();
+  assert.equal(state.put.body.retry_interrupted, false);
 });
 
 test('the wizard duplicates an agent under another name', async (t) => {
@@ -312,9 +330,15 @@ test('the schedule helpers', () => {
   assert.throws(() => scheduleOf({ ...base, name: 'Bad Name' }), /name/);
   assert.deepEqual(scheduleOf({ ...base, vars: { repos: 'a/b', empty: ' ' } }).vars, { repos: 'a/b' });
   // fieldsOf is scheduleOf's inverse.
-  for (const s of [{ name: 'a', when: 'daily 07:00', prompt: 'p', risk: 'read', effort: 'max', timeout_minutes: 120, jitter_minutes: 0 }, { name: 'b', when: 'every 2h', command: { node: 'n', argv: ['x', 'y'], dir: '/d' }, enabled: false }]) {
+  for (const s of [{ name: 'a', when: 'daily 07:00', prompt: 'p', risk: 'read', effort: 'max', timeout_minutes: 120, jitter_minutes: 0, retry_interrupted: false }, { name: 'b', when: 'every 2h', command: { node: 'n', argv: ['x', 'y'], dir: '/d' }, enabled: false }]) {
     assert.deepEqual(scheduleOf(fieldsOf(s)), s);
   }
+  // A command has no retry after a restart to switch off.
+  assert.equal(scheduleOf({ ...base, kind: 'command', node: 'n', argv: 'x', retryInterrupted: false }).retry_interrupted, undefined);
+  assert.equal(fileJSON({ retry_interrupted: false, jitter_minutes: 0, preapproved: ['p'] }), '{\n  "jitter_minutes": 0,\n  "retry_interrupted": false,\n  "preapproved": [\n    "p"\n  ]\n}\n');
+  assert.equal(triggerText({ trigger: 'restart-retry' }), 'retried after restart');
+  assert.equal(triggerText({ trigger: 'manual', by: 'cli' }), 'by hand (cli)');
+  assert.equal(triggerText({ trigger: 'missed' }), 'missed');
   // The file as Go writes it: its fields in order, maps sorted.
   assert.equal(fileJSON({ github: { permissions: { issues: 'write', contents: 'read' }, repos: ['a/b'] }, when: 'daily 07:00', name: 'x' }),
     '{\n  "name": "x",\n  "when": "daily 07:00",\n  "github": {\n    "repos": [\n      "a/b"\n    ],\n    "permissions": {\n      "contents": "read",\n      "issues": "write"\n    }\n  }\n}\n');

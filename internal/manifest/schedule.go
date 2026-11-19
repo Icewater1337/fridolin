@@ -73,6 +73,10 @@ type Schedule struct {
 	// JitterMinutes spreads the runs over that many minutes after their
 	// time, the same offset each time; unset is schedules.jitter_minutes.
 	JitterMinutes *int `json:"jitter_minutes,omitempty"`
+	// RetryInterrupted false keeps a brain run that a stop or restart of
+	// the bridge cut short from running once more as the bridge is back
+	// (RetriesInterrupted). Unset is true.
+	RetryInterrupted *bool `json:"retry_interrupted,omitempty"`
 	// Preapproved are steps the owner approved with the schedule, which
 	// its runs take without asking (filing an issue, say).
 	Preapproved []string `json:"preapproved,omitempty"`
@@ -186,6 +190,13 @@ func ValidateGitHubGrant(g chat.GitHubGrant) error {
 // IsEnabled reports whether s runs on its schedule.
 func (s Schedule) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
 
+// RetriesInterrupted reports whether a brain run of s that a stop or
+// restart of the bridge cut short runs once more as the bridge is back
+// (docs/BRAINS.md, "Scheduled agents"). A program on a node never does.
+func (s Schedule) RetriesInterrupted() bool {
+	return s.Command == nil && (s.RetryInterrupted == nil || *s.RetryInterrupted)
+}
+
 // ReportMode is s.Report with its default.
 func (s Schedule) ReportMode() string {
 	if s.Report == "" {
@@ -298,8 +309,8 @@ func (s Schedule) Validate() error {
 				return fmt.Errorf("%s: command arguments must be single lines", at)
 			}
 		}
-		if s.Risk != "" || s.Effort != "" || s.DisallowedTools != nil || s.GitHub != nil || len(s.Preapproved) > 0 || len(s.Vars) > 0 {
-			return fmt.Errorf("%s: risk, effort, disallowed_tools, github, preapproved and vars are for brain runs, not a command", at)
+		if s.Risk != "" || s.Effort != "" || s.DisallowedTools != nil || s.GitHub != nil || len(s.Preapproved) > 0 || len(s.Vars) > 0 || s.RetryInterrupted != nil {
+			return fmt.Errorf("%s: risk, effort, disallowed_tools, github, preapproved, vars and retry_interrupted are for brain runs, not a command", at)
 		}
 		return nil
 	}

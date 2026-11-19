@@ -10,6 +10,19 @@ for compatibility.
 
 ### Added
 
+- **A scheduled agent's run that a restart cut short runs once more.**
+  An update or crash in the middle of a scheduled agent's brain run no
+  longer loses it until its next time, often a day or a week later. A
+  run cut short before it sent anything runs once more when the bridge
+  is back ("retried after restart" on the Schedules page), told to check
+  first what the cut run already did and not to repeat it. Only once,
+  and only while the approved agent is unchanged and runs on its
+  schedule. `"retry_interrupted": false` in an agent's file (or *Cut
+  short by a restart* in the wizard) keeps the old behaviour, for an
+  agent whose side effects cannot be checked afterwards. A run cut short
+  counts as no failure in system_status's `consecutive_failures`. The
+  runs of a stopping bridge now end as *interrupted*, not *stopped*.
+  [docs/BRAINS.md](docs/BRAINS.md#scheduled-agents)
 - **Fridolin types while it works and reads what it took.** While a
   brain works on a message, its chat shows "typing…", and once a brain
   took a message it is marked read (blue ticks), a voice note played

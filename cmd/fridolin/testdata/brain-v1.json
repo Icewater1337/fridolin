@@ -85,6 +85,7 @@
       "timeout_minutes": 45,
       "missed": "skip",
       "jitter_minutes": 10,
+      "retry_interrupted": false,
       "preapproved": [
         "file GitHub issues on example/repo"
       ],
