@@ -393,6 +393,10 @@ func dataDirExcludes(data string, dbs map[string]string) []string {
 		// (internal/gitident): never to the cloud, so never in a
 		// snapshot, whose copies go to B2, Drive and the node targets.
 		config.Layout{Root: data}.LocalSecrets(),
+		// The copies of the files brains send, which wait an hour at
+		// most: a brain whose folder never goes to the cloud may send
+		// one.
+		config.Layout{Root: data}.OutboxFiles(),
 	)
 }
 

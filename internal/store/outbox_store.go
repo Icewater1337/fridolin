@@ -32,8 +32,9 @@ func migrateV3(tx *sql.Tx) error {
 	return err
 }
 
-// OutboxPart is one message of a reply: a text, or a poll.
+// OutboxPart is one message of a reply: a text, a poll, or a file.
 type OutboxPart struct {
+	// Text is a text's, or a file's caption.
 	Text     string   `json:"text,omitempty"`
 	Question string   `json:"question,omitempty"`
 	Options  []string `json:"options,omitempty"`
@@ -41,10 +42,31 @@ type OutboxPart struct {
 	// Ref names what the bridge sends the poll for (an approval); its
 	// votes go there (SavePollRef).
 	Ref string `json:"ref,omitempty"`
+	// File is a file the part sends, with Text as its caption. A bridge
+	// from before files reads such a part as its caption alone.
+	File *OutboxFile `json:"file,omitempty"`
+}
+
+// OutboxFile is a file a reply sends (a brain's reply_file): the bridge's
+// own copy of it, which stays until the reply went out or was given up
+// on.
+type OutboxFile struct {
+	// Blob names the copy among the outbox's files (outbound.Shelf).
+	Blob string `json:"blob"`
+	// Name is the file's name, which a document shows.
+	Name string `json:"name"`
+	Mime string `json:"mime"`
+	// Kind is chat.FileImage, chat.FileDocument or chat.FileVoice.
+	Kind string `json:"kind"`
+	// Seconds is how long a voice note plays.
+	Seconds uint32 `json:"seconds,omitempty"`
 }
 
 // IsPoll reports whether this part carries a poll rather than text.
 func (p OutboxPart) IsPoll() bool { return p.Question != "" }
+
+// IsFile reports whether this part carries a file.
+func (p OutboxPart) IsFile() bool { return p.File != nil }
 
 // OutboxRow is a reply waiting in the outbox.
 type OutboxRow struct {

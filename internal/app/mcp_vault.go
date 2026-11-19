@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
@@ -237,7 +238,9 @@ func (b *App) openRunFile(id, arg, from string) (*os.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		f, err := root.Open(rel)
+		// Without blocking: a FIFO the run made there must not hang the
+		// call until something writes to it.
+		f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		_ = root.Close()
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", arg, err)

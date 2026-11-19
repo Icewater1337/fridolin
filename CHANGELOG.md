@@ -21,7 +21,30 @@ for compatibility.
   in the inbox?" can now run every few minutes almost for free. The gate
   is approved with the agent; the Schedules page shows it and the gated
   runs. [docs/BRAINS.md](docs/BRAINS.md#gates)
-
+- **Brains send files into their chat.** A run that answers someone in
+  a WhatsApp chat has a new tool, `reply_file(path, caption, as)`: it
+  sends a file of the brain's folder, media inbox or temp folder into
+  that chat as an image (JPEG or PNG, with a preview), a document or a
+  voice note, at most `max_media_mb`. Audio such as `elevenlabs_speak`'s
+  MP3 becomes a voice note with ffmpeg when it is installed, and goes as
+  a document when it is not. The bridge keeps a copy in
+  `<data_dir>/outbox-files/` and sends it through the outbox like any
+  reply, with its retries and its hour; no snapshot or core export
+  takes the copy. A write action: refused in a lockdown and for a run
+  whose risk level is `read`, and a caption that looks like a secret
+  needs your approval, as for the other outbound tools. Going back to
+  an older version while a file waits in the outbox sends its caption,
+  not the file. [docs/BRAINS.md](docs/BRAINS.md#sending-files)
+- **A brain's page shows its live session.** For a brain with
+  `"live_session": "owner_dm"`, *Current run* now says whether the session
+  is ready (since when, and its turns), in a turn, starting, not running,
+  or did not come up, with why and when the bridge tries again; and when
+  the bridge's settings rule a session out (Codex,
+  `dangerously_skip_permissions` off, `inherit_claude_user_config` on), it
+  says so instead of every message quietly running `claude -p`. The same
+  is in `/api/status` and `/api/brains/{id}` (`runtime.live`), and
+  `fridolin check` says of each such brain whether a session can start.
+  [docs/BRAINS.md](docs/BRAINS.md#live-session)
 - **A scheduled agent's run that a restart cut short runs once more.**
   An update or crash in the middle of a scheduled agent's brain run no
   longer loses it until its next time, often a day or a week later. A

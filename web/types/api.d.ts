@@ -225,6 +225,28 @@ export interface BrainRuntime {
   last: RunInfo | null;
   backup: BrainBackup;
   manifest: BrainManifest;
+  /** Its live session, for a brain whose brain.json asks for one. */
+  live?: LiveView;
+}
+
+/**
+ * The state of a brain's live session (brain.LiveView): unavailable (the
+ * bridge's settings rule one out: reason), down (the owner's next direct
+ * message starts one), starting, ready, busy (in a turn) or failed (the last
+ * did not come up: error; none starts before retry_at).
+ */
+export type LiveState = 'unavailable' | 'down' | 'starting' | 'ready' | 'busy' | 'failed';
+
+/** A brain's live session (brain.LiveView). */
+export interface LiveView {
+  state: LiveState;
+  reason?: string;
+  /** For starting, ready and busy. */
+  started?: string;
+  turns?: number;
+  /** For failed. */
+  error?: string;
+  retry_at?: string;
 }
 
 /** When an intent with a time fires (trigger.Schedule). */
@@ -2414,6 +2436,10 @@ export interface DevMessage {
   poll?: string[];
   /** A poll's message id, which a vote names. */
   id?: string;
+  /** A file's name; text is then its caption. */
+  file?: string;
+  /** How the chat shows the file: image, document or voice. */
+  kind?: 'image' | 'document' | 'voice';
 }
 
 export interface LogLine {

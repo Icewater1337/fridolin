@@ -166,7 +166,10 @@ func excluded(rel string, dir bool) bool {
 		return dir || rel != EncryptionState
 	}
 	if dir {
-		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "live-tokens", "media", "vault", "migration"}, base) {
+		// outbox-files holds the copies of files brains send, for an
+		// hour at most: like media, of a brain whose folder may never go
+		// to the cloud.
+		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "live-tokens", "media", "vault", "migration", "outbox-files"}, base) {
 			return true
 		}
 		// A brain's TMPDIR and caches (brains/<id>/tmp, brains/<id>/cache).
