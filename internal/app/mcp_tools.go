@@ -96,6 +96,7 @@ func (b *App) newMCPTools() *tools.Set[mcpCaller] {
 	b.registerLiveTools(r)
 	b.registerErrandTools(r)
 	b.registerOpsTools(r)
+	b.registerReplyFileTool(r)
 	return r
 }
 
@@ -143,9 +144,7 @@ func (b *App) mcpCall(ctx context.Context, token, run string, req httpapi.MCPCal
 // (tools.Set.Call). Its arguments stay out of the log: they may hold what
 // is not the log's.
 func (b *App) auditToolCall(c mcpCaller, name, outcome string) {
-	e := audit.Entry{Kind: audit.ToolCall, Brain: c.run.Brain, Run: c.run.ID, Chat: c.run.Chat, Thread: c.run.Chat, Detail: name, Outcome: outcome}
-	if p := c.run.Policy; p != nil {
-		e.Thread, e.Skill, e.Risk = p.Thread, p.Skill, string(p.Risk)
-	}
+	e := runEntry(c.run, audit.ToolCall)
+	e.Detail, e.Outcome = name, outcome
 	b.audit.Append(e)
 }

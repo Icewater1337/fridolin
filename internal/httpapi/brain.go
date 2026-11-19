@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/apperr"
+	"github.com/Icewater1337/fridolin/internal/audit"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/google"
@@ -22,6 +23,7 @@ type BrainCalendarService interface {
 	CalendarList(context.Context, *google.Token) ([]google.CalendarEntry, error)
 	EventsOf(context.Context, *google.Token, []string, time.Time, time.Time, string, int) (*google.CalendarListing, error)
 	InsertEvent(context.Context, *google.Token, string, map[string]any, string) (google.CalendarEvent, error)
+	EventGuests(context.Context, *google.Token, string, string) (int, error)
 	DeleteEvent(context.Context, *google.Token, string, string) error
 	BusyTimes(context.Context, *google.Token, []string, time.Time, time.Time, string) ([]google.BusySlot, error)
 	Note(string, error)
@@ -32,7 +34,10 @@ type BrainAPI struct {
 	ReadPoll      func(context.Context, string) (string, any, error)
 	RecentPolls   func(context.Context, string, int, func(string) bool) (any, int, error)
 	Google        func() BrainCalendarService
-	Memory        BrainMemoryService
+	// CalendarWrites holds the calendar's writes (create, delete) to the
+	// policy the bridge's tools that write are held to.
+	CalendarWrites CalendarWriteGuard
+	Memory         BrainMemoryService
 	// MCPTools and MCPCall serve a run's MCP server (fridolin mcp --run):
 	// the tools the run's token may use, and a call of one. run is the
 	// run id the server was started with, which must be the token's.
@@ -323,8 +328,98 @@ func (a *BrainAPI) brainCalendarEvents(ctx context.Context, r *http.Request, cal
 // brainSendUpdatesValues are what the Calendar API takes as sendUpdates.
 var brainSendUpdatesValues = []string{"all", "externalOnly", "none"}
 
+// CalendarWriteGuard is the policy a brain's calendar writes go through,
+// as the bridge's tools that write do (docs/BRAINS.md, "Skills, risk and
+// approvals"). tok is the run's token, which brainCall checked.
+type CalendarWriteGuard interface {
+	// Allow checks that the run may write: no lockdown, and a risk level
+	// that allows writing. Its error says, for the run, why not.
+	Allow(tok string) error
+	// UseApproval checks that id names an approved request_approval the
+	// run may take, not used yet, and uses it up. Its error says, for the
+	// run, why not.
+	UseApproval(ctx context.Context, tok, id string) error
+	// Record writes a write's audit line.
+	Record(tok string, w CalendarWrite)
+}
+
+// CalendarWrite is one calendar write as its audit line has it: never
+// the event's title, description or attendees.
+type CalendarWrite struct {
+	// Action is create or delete.
+	Action   string
+	Calendar string
+	// Event is the event's id, "" for a create that did not happen.
+	Event string
+	// Guests is how many attendees it reaches: a new event's, or the
+	// other attendees of a deleted one.
+	Guests int
+	// SendUpdates is, for a new event with attendees, whether Google
+	// emails them (send_updates).
+	SendUpdates string
+	// Approval is the approval_id that let it reach them, "" for none.
+	Approval string
+	// Outcome is ok, or why it was refused or failed.
+	Outcome string
+}
+
+// calendarWrite is a write of the run tok stands for, on its way through
+// the guard, until done or refused records it.
+type calendarWrite struct {
+	a   *BrainAPI
+	tok string
+	w   CalendarWrite
+}
+
+func (a *BrainAPI) calendarWrite(r *http.Request, action, calendar string) *calendarWrite {
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return &calendarWrite{a: a, tok: tok, w: CalendarWrite{Action: action, Calendar: calendar}}
+}
+
+// allow is the guard's Allow.
+func (c *calendarWrite) allow() error {
+	if err := c.a.CalendarWrites.Allow(c.tok); err != nil {
+		return c.refused(err.Error())
+	}
+	return nil
+}
+
+// approve takes the approval_id id of a write that reaches other people;
+// ask says, for the run, how to ask for one.
+func (c *calendarWrite) approve(ctx context.Context, id, ask string) error {
+	if id == "" {
+		return c.refused(ask)
+	}
+	if err := c.a.CalendarWrites.UseApproval(ctx, c.tok, id); err != nil {
+		return c.refused(err.Error() + ". Do not take the step.")
+	}
+	c.w.Approval = id
+	return nil
+}
+
+// refused records msg as why the write was refused, and is the call's
+// answer.
+func (c *calendarWrite) refused(msg string) error {
+	c.w.Outcome = "refused: " + msg
+	c.a.CalendarWrites.Record(c.tok, c.w)
+	return &callError{status: http.StatusForbidden, msg: msg}
+}
+
+// done records how the write went, err for failed, and returns err.
+func (c *calendarWrite) done(err error) error {
+	c.w.Outcome = "ok"
+	if err != nil {
+		_, msg := google.CallProblem(err)
+		c.w.Outcome = "failed: " + msg
+	}
+	c.a.CalendarWrites.Record(c.tok, c.w)
+	return err
+}
+
 // brainCalendarCreate answers POST /brain/calendar/events: a NewEvent,
-// into its calendar, else the brain's default one.
+// into its calendar, else the brain's default one. An event Google emails
+// its attendees about (send_updates other than none) sends something to
+// other people, so it needs the owner's approval, as every such step does.
 func (a *BrainAPI) brainCalendarCreate(ctx context.Context, r *http.Request, cals google.Calendars, token func() (*google.Token, error)) (any, error) {
 	var ev google.NewEvent
 	if err := decodeSingleJSON(r.Body, &ev); err != nil {
@@ -344,30 +439,89 @@ func (a *BrainAPI) brainCalendarCreate(ctx context.Context, r *http.Request, cal
 	if err != nil {
 		return nil, err
 	}
-	tok, err := token()
-	if err != nil {
+	w := a.calendarWrite(r, "create", calendars[0])
+	if err := w.allow(); err != nil {
 		return nil, err
 	}
-	created, err := a.Google().InsertEvent(ctx, tok, calendars[0], body, ev.SendUpdates)
+	n := countGuests(ev.Attendees)
+	if n > 0 {
+		w.w.Guests, w.w.SendUpdates = n, ev.SendUpdates
+	}
+	if n > 0 && ev.SendUpdates != "none" {
+		ask := fmt.Sprintf("Google emails this event's attendees an invitation (send_updates %s), which sends something to other people: that needs the owner's yes first. "+
+			"Call request_approval with what you will send to whom, and once it answers approved, create the event again with its approval_id "+
+			"(fridolin calendar create … --approval-id ID). If nobody is to be emailed, create it with --send-updates none instead.", ev.SendUpdates)
+		if err := w.approve(ctx, ev.ApprovalID, ask); err != nil {
+			return nil, err
+		}
+	} else if kind := audit.SecretIn(ev.Title + "\n" + ev.Description + "\n" + ev.Location); n > 0 && kind != "" {
+		// Not emailed, but in the attendees' calendars all the same: a
+		// secret-like value goes to them only with the owner's yes, as
+		// from the tools that send text off the machine.
+		ask := fmt.Sprintf("this event's text looks like a secret (%s), and its attendees see the event: do not send it. "+
+			"If the owner wants exactly this sent, ask them with request_approval, saying what goes to whom without the value itself, "+
+			"and create the event again with the approval_id it answers approved with (fridolin calendar create … --approval-id ID).", kind)
+		if err := w.approve(ctx, ev.ApprovalID, ask); err != nil {
+			return nil, err
+		}
+	}
+	tok, err := token()
 	if err != nil {
+		return nil, w.done(err)
+	}
+	created, err := a.Google().InsertEvent(ctx, tok, calendars[0], body, ev.SendUpdates)
+	w.w.Event = created.ID
+	if err := w.done(err); err != nil {
 		return nil, err
 	}
 	return CalendarCreatedResponse{Created: created}, nil
 }
 
+// countGuests is how many attendees a new event names.
+func countGuests(attendees []string) int {
+	n := 0
+	for _, a := range attendees {
+		if strings.TrimSpace(a) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // brainCalendarDelete answers DELETE /brain/calendar/events/{id}: in
-// ?calendar=, else the brain's default calendar.
+// ?calendar=, else the brain's default calendar. An event with other
+// attendees is in their calendars too, so deleting it needs the owner's
+// approval (?approval_id=): the bridge asks Google for the event first.
 func (a *BrainAPI) brainCalendarDelete(ctx context.Context, r *http.Request, cals google.Calendars, token func() (*google.Token, error)) (any, error) {
 	id := r.PathValue("id")
-	calendars, err := cals.Pick(r.URL.Query().Get("calendar"), false)
+	q := r.URL.Query()
+	calendars, err := cals.Pick(q.Get("calendar"), false)
 	if err != nil {
+		return nil, err
+	}
+	w := a.calendarWrite(r, "delete", calendars[0])
+	w.w.Event = id
+	if err := w.allow(); err != nil {
 		return nil, err
 	}
 	tok, err := token()
 	if err != nil {
-		return nil, err
+		return nil, w.done(err)
 	}
-	if err := a.Google().DeleteEvent(ctx, tok, calendars[0], id); err != nil {
+	guests, err := a.Google().EventGuests(ctx, tok, calendars[0], id)
+	if err != nil {
+		return nil, w.done(err)
+	}
+	if guests > 0 {
+		w.w.Guests = guests
+		ask := "this event has other attendees, and deleting it takes it out of their calendars too: that needs the owner's yes first. " +
+			"Call request_approval with what you will delete, and once it answers approved, delete it again with its approval_id " +
+			"(fridolin calendar delete --event-id … --approval-id ID)."
+		if err := w.approve(ctx, q.Get("approval_id"), ask); err != nil {
+			return nil, err
+		}
+	}
+	if err := w.done(a.Google().DeleteEvent(ctx, tok, calendars[0], id)); err != nil {
 		return nil, err
 	}
 	return CalendarDeletedResponse{Deleted: id}, nil

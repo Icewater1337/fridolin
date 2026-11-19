@@ -74,7 +74,7 @@ func (b *App) registerConnectionTools(r *tools.Set[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name: "elevenlabs_speak", Available: may(connections.ElevenLabs),
 		Describe: func(mcpCaller) mcp.Tool {
-			return mcp.Tool{Description: "Read a text aloud with ElevenLabs, through Fridolin's key, into an audio file in your temp folder. It answers {\"path\", \"content_type\", \"characters\"}. The file stays on this machine: the bridge cannot send audio to WhatsApp yet.",
+			return mcp.Tool{Description: "Read a text aloud with ElevenLabs, through Fridolin's key, into an audio file in your temp folder. It answers {\"path\", \"content_type\", \"characters\"}. Send it into the chat you answer as a voice note with reply_file (as: voice).",
 				InputSchema: tools.Schema(map[string]any{
 					"text":        tools.Str("What to read, at most 10,000 characters."),
 					"voice":       tools.Str("A voice id from elevenlabs_voices; the default voice when left out."),

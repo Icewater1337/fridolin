@@ -38,6 +38,7 @@ type listedAgent struct {
 	Schedule   manifest.Schedule        `json:"schedule"`
 	Program    *programView             `json:"program"`
 	Review     *manifest.ScheduleReview `json:"review"`
+	Risky      []string                 `json:"risky"`
 }
 
 // schedulesList is GET /api/schedules as a test reads it.

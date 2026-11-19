@@ -76,6 +76,17 @@ export interface ScheduleCommand {
   dir?: string;
 }
 
+/** A program that runs before a scheduled agent's brain run and decides whether it wakes (manifest.ScheduleGate). */
+export interface ScheduleGate {
+  argv: string[];
+  /** In the brain folder, relative to it; with node, absolute on the node. */
+  dir?: string;
+  /** 0 or left out is 30. */
+  timeout_seconds?: number;
+  /** The node it runs on; left out, the brain's sandbox. */
+  node?: string;
+}
+
 /** A scheduled agent as brain.json writes it (manifest.Schedule). */
 export interface Schedule {
   name: string;
@@ -88,6 +99,7 @@ export interface Schedule {
   prompt_file?: string;
   template?: string;
   command?: ScheduleCommand;
+  gate?: ScheduleGate;
   vars?: Record<string, string>;
   /** always, worth (the default) or silent. */
   report?: string;
@@ -103,6 +115,8 @@ export interface Schedule {
   /** run (the default) or skip. */
   missed?: string;
   jitter_minutes?: number;
+  /** false: a run a restart cut short waits for its next time; unset is true. */
+  retry_interrupted?: boolean;
   preapproved?: string[];
   github?: GitHubGrant;
 }
@@ -211,6 +225,28 @@ export interface BrainRuntime {
   last: RunInfo | null;
   backup: BrainBackup;
   manifest: BrainManifest;
+  /** Its live session, for a brain whose brain.json asks for one. */
+  live?: LiveView;
+}
+
+/**
+ * The state of a brain's live session (brain.LiveView): unavailable (the
+ * bridge's settings rule one out: reason), down (the owner's next direct
+ * message starts one), starting, ready, busy (in a turn) or failed (the last
+ * did not come up: error; none starts before retry_at).
+ */
+export type LiveState = 'unavailable' | 'down' | 'starting' | 'ready' | 'busy' | 'failed';
+
+/** A brain's live session (brain.LiveView). */
+export interface LiveView {
+  state: LiveState;
+  reason?: string;
+  /** For starting, ready and busy. */
+  started?: string;
+  turns?: number;
+  /** For failed. */
+  error?: string;
+  retry_at?: string;
 }
 
 /** When an intent with a time fires (trigger.Schedule). */
@@ -1707,7 +1743,7 @@ export interface ScheduleRun {
   started: string;
   ended?: string;
   duration_ms?: number;
-  /** running, ok, nothing, failed, stopped, dropped, refused, skipped or interrupted. */
+  /** running, ok, nothing, gated, failed, stopped, dropped, refused, skipped or interrupted. */
   status: string;
   result?: string;
   error?: string;
@@ -1719,6 +1755,10 @@ export interface ScheduleRun {
   exit_code?: number;
   node?: string;
   log_bytes?: number;
+  /** The revision of the approved schedule it started under. */
+  rev?: string;
+  /** For a restart-retry run, the run a restart cut short that it retries. */
+  retry_of?: string;
 }
 
 /** A scheduled agent as the Schedules page lists it. */
@@ -2396,6 +2436,10 @@ export interface DevMessage {
   poll?: string[];
   /** A poll's message id, which a vote names. */
   id?: string;
+  /** A file's name; text is then its caption. */
+  file?: string;
+  /** How the chat shows the file: image, document or voice. */
+  kind?: 'image' | 'document' | 'voice';
 }
 
 export interface LogLine {

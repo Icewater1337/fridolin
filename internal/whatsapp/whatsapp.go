@@ -61,6 +61,7 @@ type Client struct {
 	media      Downloader             // nil: the client; tests set a fake
 	lister     GroupLister            // nil: the client; tests set a fake
 	presence   Presencer              // nil: the client; tests set a fake
+	files      FileSender             // nil: the client; tests set a fake
 	notify     func(jid, text string) // sendNotice; tests record instead
 
 	// ctx ends when the client disconnects for good. Attachment downloads,
@@ -144,6 +145,7 @@ func New(opts Options) (*Client, error) {
 		media:      opts.Downloader,
 		lister:     opts.Groups,
 		presence:   opts.Presence,
+		files:      opts.Files,
 		ctx:        ctx,
 		cancel:     cancel,
 		state:      chat.LinkState{Mode: "connecting", Since: time.Now()},

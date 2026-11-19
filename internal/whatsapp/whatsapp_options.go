@@ -90,6 +90,7 @@ type Options struct {
 	Downloader Downloader
 	Groups     GroupLister
 	Presence   Presencer
+	Files      FileSender
 	Notify     func(jid, text string)
 }
 
