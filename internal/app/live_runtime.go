@@ -423,7 +423,7 @@ func (h *liveHost) watch(s *liveSession) {
 }
 
 // check asks s to answer a message of its own, which shows that channels
-// work for it. The wait is liveReady.
+// work for it. The wait is liveReady, and liveCheck for the answer when set.
 func (h *liveHost) check(s *liveSession) error {
 	limit := time.NewTimer(h.b.waits.liveReady)
 	defer limit.Stop()
@@ -453,13 +453,22 @@ func (h *liveHost) check(s *liveSession) error {
 	if err := s.hub.Deliver(claudecli.LiveEvent{Content: liveProbe, Meta: map[string]string{"kind": "check", "turn": "0"}}); err != nil {
 		return err
 	}
+	var checkLimit <-chan time.Time // nil, which never fires, unless liveCheck is set
+	if w := h.b.waits.liveCheck; w > 0 {
+		t := time.NewTimer(w)
+		defer t.Stop()
+		checkLimit = t.C
+	}
+	unanswered := errors.New("claude did not answer the check: channels may be off for this account or organisation, or the login was not accepted")
 	select {
 	case <-answer:
 		return nil
 	case <-s.proc.Done():
 		return errors.New("claude exited before it answered the check")
 	case <-limit.C:
-		return errors.New("claude did not answer the check: channels may be off for this account or organisation, or the login was not accepted")
+		return unanswered
+	case <-checkLimit:
+		return unanswered
 	case <-h.ctx.Done():
 		return h.ctx.Err()
 	}

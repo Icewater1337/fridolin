@@ -80,9 +80,10 @@ func errCode(m map[string]any) int {
 }
 
 type fakeHandler struct {
-	block chan struct{} // "slow" waits for it, or for its context
-	mu    sync.Mutex
-	ended []string
+	block     chan struct{} // "slow" waits for it, or for its context
+	cancelled chan struct{} // "slow" sends on it, if it has room, once it recorded its cancel
+	mu        sync.Mutex
+	ended     []string
 }
 
 func (f *fakeHandler) ListTools(context.Context) ([]Tool, error) {
@@ -106,6 +107,10 @@ func (f *fakeHandler) CallTool(ctx context.Context, name string, args json.RawMe
 			f.mu.Lock()
 			f.ended = append(f.ended, "cancelled")
 			f.mu.Unlock()
+			select {
+			case f.cancelled <- struct{}{}:
+			default:
+			}
 			return nil, ctx.Err()
 		}
 		return TextResult("slow done"), nil
@@ -214,7 +219,7 @@ func TestServerSpeaksTheProtocol(t *testing.T) {
 // TestServerRunsCallsConcurrently: a slow call does not hold up a ping,
 // and notifications/cancelled cancels it without an answer.
 func TestServerRunsCallsConcurrently(t *testing.T) {
-	h := &fakeHandler{block: make(chan struct{})}
+	h := &fakeHandler{block: make(chan struct{}), cancelled: make(chan struct{}, 1)}
 	s := newSession(t, h)
 	s.send(`{"jsonrpc":"2.0","id":"slow","method":"tools/call","params":{"name":"slow"}}`)
 	s.send(`{"jsonrpc":"2.0","id":"slow","method":"tools/call","params":{"name":"slow"}}`)
@@ -227,6 +232,13 @@ func TestServerRunsCallsConcurrently(t *testing.T) {
 	}
 	s.send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"slow","reason":"user"}}`)
 	s.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"slow"}}`)
+	// Unblock only once the cancelled call has seen its cancel: with both
+	// ready, its select could take the block and end without a record.
+	select {
+	case <-h.cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled call did not see its cancel")
+	}
 	close(h.block)
 	if m := s.recv(); m["id"] != float64(2) || m["result"] == nil {
 		t.Fatalf("after the cancel: %v (the cancelled call must not answer)", m)

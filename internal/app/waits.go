@@ -72,6 +72,12 @@ type waits struct {
 	// brain's sessions are left alone after the first that did not come up
 	// (doubling to three times).
 	liveReady, liveIdle, liveBackoff, liveSettle time.Duration
+	// liveCheck, when set, also limits the wait for the answer to a
+	// session's check, counted from when the check is sent; liveReady
+	// still bounds the whole start. 0 (the bridge's own) leaves it to
+	// liveReady alone. A test sets it to fail the check quickly while the
+	// CLI still gets liveReady to connect.
+	liveCheck time.Duration
 	// liveSettle is how long a session's channel server is left to register
 	// with the CLI before the first message is passed to it.
 	// liveTurns and liveAge are how many turns and how long a session

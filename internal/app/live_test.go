@@ -208,9 +208,10 @@ func TestLiveSessionOnlyForTheOwnersDMs(t *testing.T) {
 func TestLiveSessionFallsBackWhenChannelsAreOff(t *testing.T) {
 	t.Parallel()
 	setenv(t, "FRIDOLIN_FAKE_LIVE_DEAF", "1")
+	// The CLI keeps liveReady to connect, which a busy runner can take
+	// longer than this test should wait for the answer (#727).
+	optionsOf(t).waits.liveCheck = 300 * time.Millisecond
 	h, log := liveHarness(t, manifest.LiveSessionOwnerDM, nil)
-	optionsOf(t).waits.liveReady = 300 * time.Millisecond
-	h.b.waits.liveReady = 300 * time.Millisecond
 
 	if got := h.Answer(inbound{JID: harnessDM, Text: "one"}); !strings.HasPrefix(got, "echo:") {
 		t.Fatalf("first: %q", got)
