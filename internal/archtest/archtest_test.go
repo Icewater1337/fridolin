@@ -59,7 +59,7 @@ var imports = map[string][]string{
 	"internal/fsx":          nil,
 	"internal/google":       {"internal/manifest", "internal/fsx", "internal/apperr", "internal/jsonx", "internal/testutil"},
 	"internal/history":      {"internal/fsx"},
-	"internal/httpapi":      {"internal/files", "internal/wiki", "internal/intent", "internal/site", "internal/claudecli", "internal/outbound", "internal/registry", "internal/plaud", "internal/brain", "internal/google", "internal/manifest", "internal/apperr", "internal/backup", "internal/config", "internal/activity", "internal/chat", "internal/fsx", "internal/logx", "internal/nodeproto", "internal/nodes"},
+	"internal/httpapi":      {"internal/audit", "internal/files", "internal/wiki", "internal/intent", "internal/site", "internal/claudecli", "internal/outbound", "internal/registry", "internal/plaud", "internal/brain", "internal/google", "internal/manifest", "internal/apperr", "internal/backup", "internal/config", "internal/activity", "internal/chat", "internal/fsx", "internal/logx", "internal/nodeproto", "internal/nodes"},
 	"internal/jsonx":        nil,
 	"internal/logx":         nil,
 	"internal/manifest":     {"internal/chat", "internal/fsx", "internal/jsonx", "internal/trigger"},

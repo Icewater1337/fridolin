@@ -246,6 +246,40 @@ rather than call a day free when Google cannot read one of the calendars.
 Times are in `--timezone`, else `CALENDAR_TZ`, else the system's timezone.
 Every command prints JSON, and an error as `{"error": …}`.
 
+### What a brain's calendar writes need
+
+`create` and `delete` write, and the bridge holds them to the policy its
+own tools that write are held to
+([BRAINS.md](BRAINS.md#skills-risk-and-approvals)):
+
+- a run whose risk level is `read` (a skill of `read`), and every run in a
+  lockdown, creates and deletes nothing; it still lists and finds free
+  time;
+- an event Google emails its attendees about, `create --attendees …`
+  without `--send-updates none`, sends an invitation to other people, and
+  deleting an event with other attendees takes it out of their calendars
+  too: both need your yes first. The brain asks with `request_approval`
+  and passes the `approval_id` it answers approved with as
+  `--approval-id`, which lets that one write through. To tell, the bridge
+  asks Google for the event before it deletes it. An event in your
+  calendar alone, or one created with `--send-updates none`, needs no
+  approval, unless its title, description or location looks like a
+  secret and it has attendees, who see it all the same (the check of the
+  tools that send text off the machine, BRAINS.md, "Secrets stay home");
+- each write is a `calendar_write` line in the audit log: the run, the
+  event's id, the action, the calendar, how many attendees it reaches,
+  the approval and how it went (`ok`, `refused: …`, `failed: …`). Never
+  the event's title, description or attendees.
+
+A refusal is an error the brain reads, which says what to do. The API
+behind it: `POST /brain/calendar/events` takes `approval_id` in the event,
+and `DELETE /brain/calendar/events/{id}` takes `?approval_id=`; a refusal
+is `403`.
+
+A brain cannot yet be held to reading its calendar at Google too (a
+read-only sign-in): its sign-in asks for `calendar.events`, and the risk
+level and the lockdown are what keep a run from writing.
+
 Nothing in the brain signs in. When a brain's sign-in is revoked or
 expires, or its token cannot be used, every command answers with an error
 asking you to connect again on the brain's Calendar page; a Google outage

@@ -236,6 +236,20 @@ for compatibility.
 
 ### Changed
 
+- **A brain's calendar writes follow the policy.** `fridolin calendar
+  create` and `delete` are now refused in a run whose risk level is
+  `read` and in a lockdown, as the bridge's own tools that write are. An
+  invitation Google emails (`create --attendees …` without
+  `--send-updates none`) and deleting an event with other attendees need
+  your yes first: the brain asks with `request_approval` and passes the
+  id as `--approval-id` (in the API, `approval_id` in the event and
+  `?approval_id=` on the delete), and so does an event with attendees
+  whose text looks like a secret. Before a delete the bridge asks Google
+  for the event, to see its attendees. Each write is a `calendar_write`
+  line in the audit log, without the event's title or attendees. A
+  brain's own script that created events with attendees through
+  `/brain/calendar/events` now gets `403` until it passes an approval or
+  `"send_updates": "none"`. [docs/CALENDAR.md](docs/CALENDAR.md#what-a-brains-calendar-writes-need)
 - **A box needs a signed-in `gh` to start.** `box.sh` and `box.ps1` went on
   without checking the images' build provenance when `gh` was missing or
   not signed in, and when they did check, took an image built from any
