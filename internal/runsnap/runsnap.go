@@ -65,6 +65,9 @@ type Store struct {
 	dir string
 	obj objects
 	now func() time.Time
+	// sameFile says whether two paths of a folder are one file; tests
+	// stand in a case-insensitive filesystem.
+	sameFile func(root *os.Root, a, b string) bool
 
 	// gc is held shared by every walk and exclusively by Prune, which
 	// must not take an object a walk just stored.
@@ -78,7 +81,7 @@ type Store struct {
 
 // Open returns the store in dir, which it creates as it first writes.
 func Open(dir string) *Store {
-	return &Store{dir: dir, obj: objects{dir: filepath.Join(dir, "objects")}, now: time.Now,
+	return &Store{dir: dir, obj: objects{dir: filepath.Join(dir, "objects")}, now: time.Now, sameFile: sameFile,
 		brains: map[string]*sync.Mutex{}, running: map[string]*Run{}, index: map[string]map[string]state{}}
 }
 
