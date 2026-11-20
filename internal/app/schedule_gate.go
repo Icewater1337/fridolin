@@ -170,6 +170,17 @@ func (a *agents) localGate(br *brainruntime.Brain, agent string, g manifest.Sche
 	platform.IsolateProcessGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	err := cmd.Run()
+	if cmd.Process != nil {
+		// What the gate left behind (a daemon, an ssh ControlPersist) stops
+		// with it, on success too: CommandContext kills the group only when
+		// ctx ends before Run returns.
+		_ = platform.KillProcessGroup(cmd.Process.Pid)
+	}
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		// It exited 0, but a child kept its stdout open past WaitDelay: its
+		// answer is the output read so far.
+		err = nil
+	}
 	res := gateOutcome{over: out.Exceeded(), timedOut: errors.Is(ctx.Err(), context.DeadlineExceeded)}
 	res.stdout, res.stderr = out.Text()
 	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
