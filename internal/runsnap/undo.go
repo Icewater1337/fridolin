@@ -139,13 +139,25 @@ func (s *Store) Undo(run string, opt UndoOptions) (*UndoResult, error) {
 		dirs[r.Name] = r.Dir
 	}
 	stamp := s.now().UTC().Format("20060102-150405")
-	for _, c := range rec.Changes {
-		root, ok := roots[c.Root]
+	rootOf := func(name string) *os.Root {
+		root, ok := roots[name]
 		if !ok {
-			if dir, known := dirs[c.Root]; known {
+			if dir, known := dirs[name]; known {
 				root, _ = os.OpenRoot(dir)
 			}
-			roots[c.Root] = root
+			roots[name] = root
+		}
+		return root
+	}
+	renamed := s.renames(rec.Changes, rootOf)
+	steps := make([]Step, len(rec.Changes))
+	for i, c := range rec.Changes {
+		root := rootOf(c.Root)
+		if j, ok := renamed[i]; ok {
+			if c.Op == OpDeleted {
+				steps[i], steps[j] = s.undoRename(root, c, rec.Changes[j], opt.DryRun, stamp)
+			}
+			continue
 		}
 		step := s.plan(root, c)
 		if !opt.DryRun && (step.Action == ActRestore || step.Action == ActTrash) {
@@ -155,8 +167,9 @@ func (s *Store) Undo(run string, opt UndoOptions) (*UndoResult, error) {
 				step.Done = true
 			}
 		}
-		out.Steps = append(out.Steps, step)
+		steps[i] = step
 	}
+	out.Steps = append(out.Steps, steps...)
 	if !opt.DryRun {
 		rec.Undone = &Undone{At: s.now().UTC(), By: opt.By}
 		out.Undone = rec.Undone
@@ -165,6 +178,109 @@ func (s *Store) Undo(run string, opt UndoOptions) (*UndoResult, error) {
 		}
 	}
 	return out, nil
+}
+
+// renames pairs, both ways by index, each change that deleted a path with
+// one that created a path that is the same file now: a rename the
+// filesystem does not tell apart, by case on a case-insensitive one, or by
+// Unicode normalisation on APFS. Undone apart, the old name would find the
+// file "there again" and the new one would trash it.
+func (s *Store) renames(changes []Change, rootOf func(string) *os.Root) map[int]int {
+	out := map[int]int{}
+	for i, d := range changes {
+		if d.Op != OpDeleted {
+			continue
+		}
+		root := rootOf(d.Root)
+		if root == nil {
+			continue
+		}
+		for j, c := range changes {
+			if _, taken := out[j]; taken || c.Op != OpCreated || c.Root != d.Root {
+				continue
+			}
+			if s.sameFile(root, d.Path, c.Path) {
+				out[i], out[j] = j, i
+				break
+			}
+		}
+	}
+	return out
+}
+
+// sameFile says whether the paths a and b of root name the same file.
+func sameFile(root *os.Root, a, b string) bool {
+	fa, err := root.Lstat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := root.Lstat(b)
+	return err == nil && os.SameFile(fa, fb)
+}
+
+// undoRename undoes a rename of the file the change del deleted to the one
+// cre created: the file goes back to its old name, with its earlier
+// contents if the run changed them too, while it is what the run left.
+func (s *Store) undoRename(root *os.Root, del, cre Change, dryRun bool, stamp string) (Step, Step) {
+	d, c := Step{Change: del}, Step{Change: cre}
+	conflict := func(why string) (Step, Step) {
+		d.Action, d.Why = ActConflict, why
+		c.Action, c.Why = ActConflict, why
+		return d, c
+	}
+	cur, mode, exists, err := current(root, cre.Path)
+	switch {
+	case err != nil:
+		return conflict(err.Error())
+	case !exists || cre.After == nil || cur != cre.After.Hash:
+		return conflict("it changed since the run")
+	}
+	rewrite := cur != del.Before.Hash || mode != del.Before.Mode
+	if rewrite && !s.obj.has(del.Before.Hash) {
+		return conflict("its earlier contents are no longer stored")
+	}
+	d.Action = ActRestore
+	c.Action, c.Why = ActNone, "it is renamed back to "+del.Path
+	if dryRun {
+		return d, c
+	}
+	if err := s.renameBack(root, cre.Path, del.Path, stamp); err != nil {
+		d.Error, c.Error = err.Error(), err.Error()
+		return d, c
+	}
+	c.Done = true
+	if rewrite {
+		if err := s.take(root, &d, "", stamp); err != nil {
+			d.Error = err.Error()
+			return d, c
+		}
+	}
+	d.Done = true
+	return d, c
+}
+
+// renameBack renames from to to in root through a free temporary name, as
+// a rename that only changes case needs on a case-insensitive filesystem.
+func (s *Store) renameBack(root *os.Root, from, to, stamp string) error {
+	for n := 1; n <= 100; n++ {
+		tmp := path.Join(path.Dir(to), ".fridolin-undo-"+stamp+"-"+strconv.Itoa(n))
+		if _, err := root.Lstat(tmp); err == nil {
+			continue
+		}
+		if err := root.Rename(from, tmp); err != nil {
+			return err
+		}
+		// Once moved aside, the old name must be free: another file
+		// there is not the run's to replace.
+		if _, err := root.Lstat(to); err == nil {
+			return errors.Join(errors.New("another file is there now"), root.Rename(tmp, from))
+		}
+		if err := root.Rename(tmp, to); err != nil {
+			return errors.Join(err, root.Rename(tmp, from))
+		}
+		return nil
+	}
+	return errors.New("no free temporary name to rename it back through")
 }
 
 // plan decides what undoing c does to the file as it is now in root (nil

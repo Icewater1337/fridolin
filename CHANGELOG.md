@@ -364,6 +364,12 @@ for compatibility.
 
 ### Fixed
 
+- **`reply_file` sends a file as a photo only when it is one.** A text
+  file named `report.jpg` or random bytes named `x.png` took their type
+  from the name and went out as a broken image; now only content that is
+  really JPEG or PNG shows as a photo, anything else goes as a document,
+  and `as: image` on it is refused with a word to send it as a document.
+
 - **A task a scheduled agent delegates no longer takes the chats' run.**
   It ran in a run of its own, outside the agents' share of
   `max_concurrent_runs`, so with the default of 2 an agent and its task

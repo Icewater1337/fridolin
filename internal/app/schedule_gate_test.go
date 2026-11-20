@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/sched"
 )
 
@@ -134,6 +136,45 @@ func TestScheduledAgentGates(t *testing.T) {
 	if r = runNow("inbox", 5); r.Status != sched.StatusRefused || len(runs()) != 1 {
 		t.Errorf("in a lockdown: %+v", r)
 	}
+}
+
+// TestAGateThatLeavesAProcessBehind: a gate that exits 0 with an answer
+// but leaves a process holding its stdout (a daemon, an ssh
+// ControlPersist) wakes the brain within a few seconds instead of failing
+// with WaitDelay's error, and what it left behind is stopped (#734).
+func TestAGateThatLeavesAProcessBehind(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the gate runs /bin/sh")
+	}
+	runs := fakeRuns(t)
+	h := newHarness(t, "")
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
+		{Name: "daemon", When: "every 15m", Prompt: "Look.", Report: manifest.ReportSilent, Gate: &manifest.ScheduleGate{
+			Argv: []string{"/bin/sh", "-c", `sleep 30 & echo $! > sleep.pid; echo '{"wake": true}'`}, TimeoutSeconds: 20}},
+	}})
+	start := time.Now()
+	if w := h.Do("POST", "/api/schedules/main/daemon/run", nil); w.Code != http.StatusOK {
+		t.Fatalf("run: %d %s", w.Code, w.Body.String())
+	}
+	if r := h.waitRunEnded("main", "daemon", 1); r.Status != sched.StatusOK {
+		t.Fatalf("a gate that left a process behind: %+v", r)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("the run took %v", took)
+	}
+	if len(runs()) != 1 {
+		t.Errorf("the brain runs: %+v", runs())
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "sleep.pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.WaitFor("the gate's sleep to be stopped", func() bool { return !platform.ProcessAlive(pid) })
 }
 
 // TestGateVerdict: what a gate's program did, as the run takes it.

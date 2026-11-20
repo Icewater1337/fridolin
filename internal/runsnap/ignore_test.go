@@ -1,6 +1,10 @@
 package runsnap
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 func TestIgnoreRules(t *testing.T) {
 	t.Parallel()
@@ -39,6 +43,47 @@ func TestIgnoreRules(t *testing.T) {
 	}
 	if (ignoreRules{}).ignored("x", false) {
 		t.Error("no rules ignored something")
+	}
+}
+
+// TestIgnoreLikeGit: what git check-ignore (git 2.x, --no-index) says
+// for each .gitignore and path; "build" asked as a folder.
+func TestIgnoreLikeGit(t *testing.T) {
+	t.Parallel()
+	paths := []struct {
+		rel string
+		dir bool
+	}{
+		{"main.c", false}, {"x.o", false}, {"abc", false}, {"xbc", false},
+		{"build", true}, {"build/keep.txt", false}, {"build/x.txt", false},
+		{"build/sub", true}, {"build/sub/keep.txt", false}, {"!x", false}, {"[x", false},
+	}
+	for _, tc := range []struct {
+		gitignore string
+		ignored   []string
+	}{
+		{"*.[!o]\n", []string{"main.c"}},
+		{"[!a]bc\n", []string{"xbc"}},
+		{"build/**\n!build/keep.txt\n", []string{"build/x.txt", "build/sub", "build/sub/keep.txt"}},
+		{"build/\n", []string{"build", "build/keep.txt", "build/x.txt", "build/sub", "build/sub/keep.txt"}},
+		{"build\n", []string{"build", "build/keep.txt", "build/x.txt", "build/sub", "build/sub/keep.txt"}},
+		{"[[!]x\n", []string{"!x", "[x"}}, // "!" inside a class stays literal
+	} {
+		ig := ignoreRules{"": parseIgnore([]byte(tc.gitignore))}
+		for _, p := range paths {
+			// As the walk does: nothing below an ignored folder is looked at.
+			got := false
+			segs := strings.Split(p.rel, "/")
+			for i := 1; i <= len(segs) && !got; i++ {
+				got = ig.ignored(strings.Join(segs[:i], "/"), i < len(segs) || p.dir)
+			}
+			if want := slices.Contains(tc.ignored, p.rel); got != want {
+				t.Errorf("%q: %s ignored = %v, git says %v", tc.gitignore, p.rel, got, want)
+			}
+		}
+	}
+	if r := parseIgnore([]byte("[!x]\n")); len(r) != 1 || r[0].segs[1] != "[^x]" {
+		t.Errorf("[!x] parsed as %+v", r)
 	}
 }
 
