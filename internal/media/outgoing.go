@@ -26,12 +26,13 @@ const SniffLen = 512
 // SniffType is the MIME type, without parameters, of the file named name
 // whose first bytes are head: what its content says, or what its name
 // says where the content says only that it is some zip, text or bytes (an
-// Office document is a zip, a CSV text).
+// Office document is a zip, a CSV text). Only the content makes a file
+// JPEG or PNG, which WhatsApp shows as a photo: a name never does.
 func SniffType(name string, head []byte) string {
 	t := bareType(http.DetectContentType(head))
 	switch t {
 	case "application/octet-stream", "application/zip", "text/plain":
-		if byName := bareType(mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))); byName != "" {
+		if byName := bareType(mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))); byName != "" && byName != "image/jpeg" && byName != "image/png" {
 			return byName
 		}
 	case "application/ogg":

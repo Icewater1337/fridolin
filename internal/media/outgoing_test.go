@@ -52,6 +52,9 @@ func TestSniffType(t *testing.T) {
 		{"chart.png", png, "image/png"},
 		{"chart.pdf", png, "image/png"}, // the content wins over the name
 		{"photo.jpg", jpeg, "image/jpeg"},
+		{"report.jpg", []byte("hello\n"), "text/plain"},                    // only content makes a photo
+		{"x.png", []byte{0x13, 0x37, 0, 0xfe}, "application/octet-stream"}, // only content makes a photo
+		{"drawing.svg", []byte("<svg/>"), "image/svg+xml"},                 // a document's type may come from its name
 		{"report.pdf", []byte("%PDF-1.7\n"), "application/pdf"},
 		{"data.json", []byte(`{"a": 1}`), "application/json"},
 		{"notes.txt", []byte("hello"), "text/plain"},
