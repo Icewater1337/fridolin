@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -147,6 +148,41 @@ func TestReplyFileSendsIntoTheRunsChat(t *testing.T) {
 	testutil.WaitFor(t, 5*time.Second, "the copies to go", func() bool { return len(shelved(t, tb)) == 0 })
 }
 
+// Whether a file shows as a photo is up to its content, not its name: a
+// text file named report.jpg and random bytes named x.png go as documents,
+// and as an image they are refused; a real JPEG and PNG still go as images.
+func TestReplyFilePhotoIsWhatTheContentSays(t *testing.T) {
+	t.Parallel()
+	tb, br := newMainBridge(t, "")
+	var jpg bytes.Buffer
+	if err := jpeg.Encode(&jpg, image.NewRGBA(image.Rect(0, 0, 20, 10)), nil); err != nil {
+		t.Fatal(err)
+	}
+	text := writeBrainFile(t, br, "report.jpg", []byte("hello\n"))
+	noise := writeBrainFile(t, br, "x.png", []byte{0x13, 0x37, 0x00, 0xfe, 0x42, 0x99, 0x01, 0x7f})
+	for _, c := range []struct {
+		path, as, mime string
+	}{
+		{text, chat.FileDocument, "text/plain"},
+		{noise, chat.FileDocument, "application/octet-stream"},
+		{writeBrainFile(t, br, "photo.jpg", jpg.Bytes()), chat.FileImage, "image/jpeg"},
+		{writeBrainFile(t, br, "chart.png", testPNG(t)), chat.FileImage, "image/png"},
+	} {
+		got, isErr := replyFile(t, tb, br, dmRun(), map[string]any{"path": c.path})
+		if isErr || !strings.Contains(got, `"as": "`+c.as+`"`) || !strings.Contains(got, `"mime": "`+c.mime+`"`) {
+			t.Errorf("%s: %s, want it as %s, %s", filepath.Base(c.path), got, c.as, c.mime)
+		}
+	}
+	for _, p := range []string{text, noise} {
+		got, isErr := replyFile(t, tb, br, dmRun(), map[string]any{"path": p, "as": "image"})
+		if !isErr || !strings.Contains(got, "only a JPEG or PNG shows as an image") || !strings.Contains(got, "send it as a document") {
+			t.Errorf("%s as an image: %s, want it refused", filepath.Base(p), got)
+		}
+	}
+	testutil.WaitFor(t, 10*time.Second, "the files", func() bool { return len(sentFiles(tb, testDMChat)) == 4 })
+	testutil.WaitFor(t, 5*time.Second, "the copies to go", func() bool { return len(shelved(t, tb)) == 0 })
+}
+
 // A voice note goes as it is when it is Ogg Opus, with its length; other
 // audio is made one with ffmpeg; without ffmpeg it goes as a document,
 // which the answer says. A failed conversion sends nothing.
@@ -193,10 +229,12 @@ func TestReplyFileVoiceNotes(t *testing.T) {
 	if want := []string{"voice note.ogg", "document speech.mp3", "voice speech.mp3"}; !slices.Equal(kinds, want) {
 		t.Errorf("sent %q, want %q", kinds, want)
 	}
-	rows, err := tb.store.PendingOutbox(context.Background())
-	if err != nil || len(rows) != 0 {
-		t.Errorf("outbox = %+v, %v", rows, err)
-	}
+	// The outbox takes a reply out only after its last part went out, so
+	// the row may still be there for a moment after the send shows.
+	testutil.WaitFor(t, 10*time.Second, "an empty outbox", func() bool {
+		rows, err := tb.store.PendingOutbox(context.Background())
+		return err == nil && len(rows) == 0
+	})
 
 	ffmpeg = bad
 	got, isErr = replyFile(t, tb, br, dmRun(), map[string]any{"path": speech, "as": "voice"})

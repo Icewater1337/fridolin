@@ -10,6 +10,8 @@ package audit
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -189,7 +191,7 @@ const (
 	// flagPattern is a secret flag on a command line with its value.
 	flagPattern = `--?(?:password|passwd|token|secret|api-key|apikey|auth)[= ](\S+)`
 	// authPattern is an Authorization header's credentials.
-	authPattern = `(?:bearer|basic)\s+(\S+)`
+	authPattern = `\b(?:bearer|basic)\s+(\S+)`
 )
 
 // tokenRe matches what looks like a credential: a long run of letters,
@@ -203,7 +205,12 @@ var (
 	prefixRe = regexp.MustCompile(`(?i)` + keyPattern + `|` + flagPattern + `|` + authPattern)
 	keyRe    = regexp.MustCompile(`(?i)` + keyPattern)
 	flagRe   = regexp.MustCompile(`(?i)` + flagPattern)
-	authRe   = regexp.MustCompile(`(?i)` + authPattern)
+	// authRe is authPattern with the header's name, if any, and the scheme
+	// as groups, for SecretIn to judge the value by them (authValue).
+	authRe = regexp.MustCompile(`(?i)(authorization\s*:\s*)?\b(bearer|basic)\s+(\S+)`)
+	// bearerRe is a bearer token's shape (RFC 6750's token68), long enough
+	// not to be a word or a number.
+	bearerRe = regexp.MustCompile(`^[A-Za-z0-9._~+/-]{16,}=*$`)
 )
 
 // The kinds of secret SecretIn tells apart.
@@ -229,6 +236,9 @@ func SecretIn(s string) string {
 		kind string
 	}{{keyRe, SecretKey}, {authRe, SecretAuth}, {flagRe, SecretFlag}, {secretRe, SecretKeyValue}} {
 		for _, m := range p.re.FindAllStringSubmatch(s, -1) {
+			if p.re == authRe && !authValue(m[1] != "", m[2], m[3]) {
+				continue
+			}
 			if secretValue(m[len(m)-1]) {
 				return p.kind
 			}
@@ -262,6 +272,27 @@ func secretValue(v string) bool {
 	}
 	n := utf8.RuneCountInString(v)
 	return digit && n >= 4 || upper && lower && n >= 8
+}
+
+// authValue reports whether v, the value after the scheme bearer or
+// basic, has a credential's shape. In an Authorization header any value
+// counts (secretValue still judges it). Without the header, the words
+// are everyday English ("the basic 60-minute cleaning"), so bearer needs
+// a token of 16 or more token characters, and basic base64 that decodes
+// to user:pass.
+func authValue(header bool, scheme, v string) bool {
+	if header {
+		return true
+	}
+	v = strings.Trim(v, "\"'`()[]{}<>,;:.!?")
+	if strings.EqualFold(scheme, "bearer") {
+		return bearerRe.MatchString(v)
+	}
+	b, err := base64.StdEncoding.DecodeString(v)
+	if err != nil {
+		b, err = base64.RawStdEncoding.DecodeString(v)
+	}
+	return err == nil && bytes.IndexByte(b, ':') >= 0
 }
 
 // Scrub shortens s for a line and masks what looks like a secret in it.

@@ -258,3 +258,120 @@ func TestUndoOfARunWhoseFolderIsGone(t *testing.T) {
 		}
 	}
 }
+
+// renamedRun is a store with run r1 of brain home, which renamed
+// Notes.md to notes.md and, with edit, changed its contents too.
+func renamedRun(t *testing.T, edit bool) (s *Store, dir string) {
+	t.Helper()
+	dir = t.TempDir()
+	write(t, dir, map[string]string{"Notes.md": "before", "keep.md": "keep"})
+	s = Open(t.TempDir())
+	s.SetClock(func() time.Time { return time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC) })
+	run := s.Begin(RunInfo{ID: "r1", Brain: "home"}, brainRoot(dir), Limits{})
+	if err := os.Rename(filepath.Join(dir, "Notes.md"), filepath.Join(dir, "notes.md")); err != nil {
+		t.Fatal(err)
+	}
+	if edit {
+		write(t, dir, map[string]string{"notes.md": "after the run"})
+	}
+	if _, err := run.End(); err != nil {
+		t.Fatal(err)
+	}
+	return s, dir
+}
+
+// names are the names of dir's entries, its trash left out.
+func names(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		if e.Name() != ".fridolin-trash" {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// TestUndoOfARenameTheFilesystemDoesNotTellApart is fridolin#732: on a
+// case-insensitive filesystem Notes.md and notes.md are one file, and an
+// undo that took them apart left the folder without it. The test stands in
+// such a filesystem with the store's same-file check.
+func TestUndoOfARenameTheFilesystemDoesNotTellApart(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name  string
+		edit  bool
+		since string // what the file is edited to after the run, if at all
+	}{
+		{name: "renamed", edit: false},
+		{name: "renamed and edited", edit: true},
+		{name: "changed since", edit: true, since: "the owner's later edit"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			s, dir := renamedRun(t, c.edit)
+			s.sameFile = func(_ *os.Root, a, b string) bool { return strings.EqualFold(a, b) }
+			if c.since != "" {
+				write(t, dir, map[string]string{"notes.md": c.since})
+			}
+			plan, err := s.Undo("r1", UndoOptions{DryRun: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"restore Notes.md", "none notes.md"}
+			if c.since != "" {
+				want = []string{"conflict Notes.md", "conflict notes.md"}
+			}
+			if got := actions(plan); !slices.Equal(got, want) {
+				t.Fatalf("plan = %v, want %v", got, want)
+			}
+			res, err := s.Undo("r1", UndoOptions{Trash: ".fridolin-trash"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Failed()) != 0 || res.Count(ActTrash, false) != 0 {
+				t.Fatalf("result = %+v", res)
+			}
+			if c.since != "" {
+				if got := names(t, dir); !slices.Equal(got, []string{"keep.md", "notes.md"}) || read(t, dir, "notes.md") != c.since {
+					t.Fatalf("a conflict changed the folder: %v", got)
+				}
+				return
+			}
+			if res.Count(ActRestore, true) != 1 {
+				t.Fatalf("result = %+v", res)
+			}
+			if got := names(t, dir); !slices.Equal(got, []string{"Notes.md", "keep.md"}) || read(t, dir, "Notes.md") != "before" {
+				t.Fatalf("the folder is %v, Notes.md %q", got, read(t, dir, "Notes.md"))
+			}
+		})
+	}
+}
+
+// TestUndoOfACaseOnlyRename is fridolin#732 on a real case-insensitive
+// filesystem (macOS's default), where there is one.
+func TestUndoOfACaseOnlyRename(t *testing.T) {
+	t.Parallel()
+	probe := t.TempDir()
+	write(t, probe, map[string]string{"a": ""})
+	if _, err := os.Lstat(filepath.Join(probe, "A")); err != nil {
+		t.Skip("the temporary folder's filesystem is case-sensitive")
+	}
+	for _, edit := range []bool{false, true} {
+		s, dir := renamedRun(t, edit)
+		res, err := s.Undo("r1", UndoOptions{Trash: ".fridolin-trash"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := actions(res); !slices.Equal(got, []string{"restore Notes.md", "none notes.md"}) || len(res.Failed()) != 0 {
+			t.Fatalf("edit %v: %v, %+v", edit, got, res.Failed())
+		}
+		if got := names(t, dir); !slices.Equal(got, []string{"Notes.md", "keep.md"}) || read(t, dir, "Notes.md") != "before" {
+			t.Fatalf("edit %v: the folder is %v, Notes.md %q", edit, got, read(t, dir, "Notes.md"))
+		}
+	}
+}

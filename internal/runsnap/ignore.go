@@ -17,10 +17,13 @@ import (
 // lines and "#" comments are skipped, "!" negates, a trailing "/"
 // matches folders only, a "/" at the start or inside anchors the pattern
 // at the .gitignore's folder (otherwise it matches a name at any depth),
-// "*", "?" and "[…]" match within a name and "**" a whole segment that
-// stands for any number of them. The last rule that matches wins, those
-// of a deeper .gitignore over a shallower one, and nothing inside an
-// ignored folder is looked at, so "!" cannot bring it back.
+// "*", "?" and "[…]" ("[!…]" negated) match within a name and "**" a
+// whole segment that stands for any number of them, at least one when it
+// ends the pattern ("build/**" is what lies inside build, not build
+// itself, so "!build/keep.txt" can bring keep.txt back). The last rule
+// that matches wins, those of a deeper .gitignore over a shallower one,
+// and nothing inside an ignored folder is looked at, so "!" cannot bring
+// it back.
 
 // Bounds on what one .gitignore may hold: a brain writes these files,
 // and the bridge reads them outside its sandbox.
@@ -78,7 +81,7 @@ func parseIgnore(data []byte) []ignoreRule {
 			}
 			if s == "**" {
 				stars++
-			} else if _, err := path.Match(s, ""); err != nil {
+			} else if s = gitClass(s); !validGlob(s) {
 				bad = true
 			}
 			r.segs = append(r.segs, s)
@@ -136,6 +139,9 @@ func matchSegments(pat, segs []string) bool {
 		cur := make([]bool, n+1)
 		for j := n; j >= 0; j-- {
 			switch {
+			case pat[i] == "**" && i == len(pat)-1:
+				// A trailing "**" matches at least one segment, as in git.
+				cur[j] = j < n
 			case pat[i] == "**":
 				cur[j] = next[j] || (j < n && cur[j+1])
 			case j < n && next[j+1]:
@@ -146,4 +152,33 @@ func matchSegments(pat, segs []string) bool {
 		next = cur
 	}
 	return next[0]
+}
+
+// validGlob reports whether path.Match accepts the pattern.
+func validGlob(s string) bool {
+	_, err := path.Match(s, "")
+	return err == nil
+}
+
+// gitClass rewrites a "!" that opens a "[…]" class to the "^" path.Match
+// negates with: git negates with either.
+func gitClass(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		switch b[i] {
+		case '\\':
+			i++
+		case '[':
+			if i+1 < len(b) && b[i+1] == '!' {
+				b[i+1] = '^'
+			}
+			// Skip to the class's end, so a "[" inside it stays literal.
+			for i++; i < len(b) && b[i] != ']'; i++ {
+				if b[i] == '\\' {
+					i++
+				}
+			}
+		}
+	}
+	return string(b)
 }
