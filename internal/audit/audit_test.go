@@ -95,6 +95,10 @@ func TestSecretIn(t *testing.T) {
 		// Credentials in a header or on a command line.
 		{"Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.e30.Zm9vYmFy", SecretAuth},
 		{"Authorization: Basic dXNlcjpwYXNz", SecretAuth},
+		{"authorization:bearer abcdef123456", SecretAuth},
+		{"basic dXNlcjpwYXNz", SecretAuth},
+		{"curl -H 'Basic dXNlcjpwYXNzd29yZA'", SecretAuth},
+		{"Bearer " + rnd36[:20] + "Ab3XyZ9qRt7mNp4kLs2w", SecretAuth},
 		{"mysql --password=hunter2hunter -u root", SecretFlag},
 		{"deploy --token 7f3a9c1e5b2d", SecretFlag},
 		// A secret named with its value.
@@ -115,6 +119,12 @@ func TestSecretIn(t *testing.T) {
 		{"Add a field token: string to the config, and a --token flag.", ""},
 		{"a basic setup, by the bearer of good news", ""},
 		{"Basic Auth is enough", ""},
+		// #733: everyday basic and bearer, not a credential.
+		{"Could you book the basic 60-minute cleaning?", ""},
+		{"We take the Basic 2024 package", ""},
+		{"nonbasic 2024", ""},
+		{"the bearer 2nd-class ticket", ""},
+		{"Bearer <your-access-token>", ""},
 		{"set password: <your password> and token=$GITHUB_TOKEN", ""},
 		{"api_key: [redacted], secret: ****, pin: 12", ""},
 		{"api_key: {{API_KEY}}, token: %TOKEN%", ""},
