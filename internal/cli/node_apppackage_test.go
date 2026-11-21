@@ -207,6 +207,9 @@ func TestEditsInsideAnAppPackage(t *testing.T) {
 		{"workstation", func(out, errOut *bytes.Buffer) int {
 			return nodeWorkstation([]string{"off"}, workstationFlags{}, dir, inside, out, errOut)
 		}},
+		{"full-access", func(out, errOut *bytes.Buffer) int {
+			return nodeFullAccess([]string{"off"}, dir, inside, out, errOut)
+		}},
 	} {
 		var out, errOut bytes.Buffer
 		if code := c.run(&out, &errOut); code != 1 || !strings.Contains(errOut.String(), "fridolin node "+c.name+": this process runs inside the app package") {

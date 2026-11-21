@@ -76,6 +76,9 @@ func (c Capabilities) Plain() []string {
 	if c.Terminal != nil {
 		out = append(out, "open a terminal in "+folders(c.Terminal.Roots)+" — anything you could type there")
 	}
+	if c.FullAccess {
+		out = append(out, "give the brains you trust with it full access: any command, and terminals without the sandbox")
+	}
 	return out
 }
 

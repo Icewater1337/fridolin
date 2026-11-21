@@ -10,6 +10,18 @@ for compatibility.
 
 ### Added
 
+- **Full access on a node for a trusted brain.** A node whose owner runs
+  `fridolin node full-access on` there, and approves it, lets the brains
+  that the core's new `nodes.full_access_brains` names (empty by default)
+  run any command through `node_exec`, whatever the allowlist says, and
+  open terminals without the sandbox. Both keys or neither: every other
+  brain and node keeps the allowlist and the sandbox. Each full-access
+  command and terminal line is audited, marked `[full access]`, and one
+  that looks destructive or touches secrets (sudo, `rm -r`, `~/.ssh`,
+  `~/.fridolin`, …) waits for the owner's approval poll unless
+  `nodes.full_access_skip_approval`. `node_terminal_send` takes
+  `approval_id` and `wait_seconds` for that.
+  [docs/NODES.md](docs/NODES.md#full-access)
 - **`fridolin check` says which web tools each brain has.** Under each
   brain a `web:` line names WebSearch and WebFetch (or Codex's web
   search) and, for one it has not, why: `disallowed_tools` in config.json
@@ -363,6 +375,12 @@ for compatibility.
   [docs/PLAUD.md](docs/PLAUD.md#without-plauds-cloud-the-phone-app)
 
 ### Fixed
+
+- **A node finds Claude Code in `~/.local/bin`.** The node service's PATH
+  leaves out the folder Claude Code's native installer uses, so
+  `node_agent_run` said neither claude nor codex was installed. The node
+  now also looks in `~/.local/bin`, `~/.claude/local` and
+  `~/.npm-global/bin`; restart the node service so it looks again.
 
 - **`reply_file` sends a file as a photo only when it is one.** A text
   file named `report.jpg` or random bytes named `x.png` took their type

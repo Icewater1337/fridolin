@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	"github.com/Icewater1337/fridolin/internal/skill"
@@ -114,11 +116,13 @@ func (b *App) registerTerminalTools(r *tools.Set[mcpCaller]) {
 		Available: b.terminalTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Type into a terminal. A command needs its Enter: end it with a newline (the default adds one). Then read its output with node_terminal_read.",
+				Description: "Type into a terminal. A command needs its Enter: end it with a newline (the default adds one). Then read its output with node_terminal_read. In a full-access terminal, a command line that looks destructive or touches secrets puts an approval poll in the owner's chat first, as node_exec does.",
 				InputSchema: tools.Schema(map[string]any{
-					"terminal": termProp(),
-					"text":     tools.Str("What to type."),
-					"enter":    map[string]any{"type": "boolean", "description": "Press Enter after text (default true)."},
+					"terminal":     termProp(),
+					"text":         tools.Str("What to type."),
+					"enter":        map[string]any{"type": "boolean", "description": "Press Enter after text (default true)."},
+					"approval_id":  tools.Str("In a full-access terminal, for a command line that asked the owner: the approval_id, once it answered approved. Send the same text again with it."),
+					"wait_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxApprovalWait / time.Second), "description": "In a full-access terminal, for a command line that asks the owner: how long to wait for the answer."},
 				}, "terminal", "text"),
 			}
 		},

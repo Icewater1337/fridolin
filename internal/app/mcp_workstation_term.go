@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/nodes"
+	"github.com/Icewater1337/fridolin/internal/store"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 func (b *App) callTerminalOpen(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
@@ -16,12 +21,17 @@ func (b *App) callTerminalOpen(ctx context.Context, c mcpCaller, raw json.RawMes
 	if bad != nil {
 		return bad, nil
 	}
-	t, info, err := b.work.openTerminal(ctx, c.run.Brain, c.run.ID, a.Node, a.Folder, 120, 40)
+	trusted := func(v nodes.View) bool { return b.fullAccess(c, v, nodeproto.MethodTerminalOpen) }
+	t, info, err := b.work.openTerminal(ctx, c.run.Brain, c.run.ID, a.Node, a.Folder, 120, 40, trusted)
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
-	return mcp.TextResult(fmt.Sprintf("Opened terminal #%d on %s in %s (%s, sandbox %s). Type with node_terminal_send, read with node_terminal_read, and close it when done.",
-		t.N, b.work.nodeName(t.Node), t.Folder, info.Shell, info.Sandbox)), nil
+	full := ""
+	if t.Full {
+		full = ", full access: any command, the owner asked first for one that looks destructive or touches secrets"
+	}
+	return mcp.TextResult(fmt.Sprintf("Opened terminal #%d on %s in %s (%s, sandbox %s%s). Type with node_terminal_send, read with node_terminal_read, and close it when done.",
+		t.N, b.work.nodeName(t.Node), t.Folder, info.Shell, info.Sandbox, full)), nil
 }
 
 func (b *App) callTerminalSend(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
@@ -40,10 +50,58 @@ func (b *App) callTerminalSend(ctx context.Context, c mcpCaller, raw json.RawMes
 	if len(text) > nodeproto.MaxTerminalInput {
 		return mcp.ErrorResult(fmt.Sprintf("text is longer than %d bytes", nodeproto.MaxTerminalInput)), nil
 	}
+	var approval store.Approval
+	if t.Full {
+		var res *mcp.CallResult
+		if approval, res, err = b.guardTerminal(ctx, c, t, text, a); res != nil || err != nil {
+			return res, err
+		}
+	}
 	if _, err := b.work.send(ctx, t, c.run.Brain, text); err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
+	if approval.ID != "" {
+		return mcp.TextResult(fmt.Sprintf("The owner approved it (%s). Typed into terminal #%d; read its output with node_terminal_read.", approval.ID, t.N)), nil
+	}
 	return mcp.TextResult(fmt.Sprintf("Typed into terminal #%d; read its output with node_terminal_read.", t.N)), nil
+}
+
+// guardTerminal asks the owner before text goes into full-access terminal
+// t when the command line it ends, with what was typed before it, looks
+// destructive or touches secrets (fullAccessRisk). A zero approval and no
+// result: it need not ask.
+func (b *App) guardTerminal(ctx context.Context, c mcpCaller, t *workTerm, text string, a workArgs) (store.Approval, *mcp.CallResult, error) {
+	v, err := b.workNode(t.Node)
+	if err != nil {
+		return store.Approval{}, mcp.ErrorResult(err.Error()), nil
+	}
+	// The lines text ends, as the shell gets them; nothing runs before
+	// its Enter.
+	b.work.mu.Lock()
+	ahead := workTerm{line: slices.Clone(t.line), escape: t.escape}
+	b.work.mu.Unlock()
+	lines := ahead.feed(text)
+	why := b.fullAccessRisk(v, strings.Join(lines, "\n"))
+	if why == "" {
+		return store.Approval{}, nil, nil
+	}
+	shown := audit.Scrub(strings.Join(lines, "; "))
+	action := fmt.Sprintf("Type `%s` into terminal #%d on %s", shown, t.N, v.Name)
+	if len(action) > maxExecAction {
+		action = fmt.Sprintf("Type a long command line into terminal #%d on %s: Show me the draft has all of it", t.N, textx.Truncate(v.Name, 40))
+	}
+	details := fmt.Sprintf("Terminal #%d on %s (node %s), full access, in %s:\n%s\nFull access asks you first: %s.", t.N, v.Name, v.ID, t.Folder, shown, why)
+	wait := 0
+	if a.WaitSeconds != nil {
+		wait = *a.WaitSeconds
+	}
+	return b.askFirst(ctx, c, action, details, a.ApprovalID, wait, askAgain{
+		tool: "node_terminal_send", same: "the same terminal and text",
+		audit: func(ap store.Approval, outcome string) {
+			b.audit.Append(audit.Entry{Kind: audit.NodeCommand, Brain: c.run.Brain, Run: c.run.ID, By: ap.DecidedBy, ID: fmt.Sprintf("terminal#%d", t.N),
+				Detail: v.Name + " [full access]: " + shown, Outcome: "approval " + ap.ID + ": " + outcome})
+		},
+	})
 }
 
 func (b *App) callTerminalRead(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {

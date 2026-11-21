@@ -750,8 +750,13 @@ func (s *Service) Call(ctx context.Context, id, method string, params, out any) 
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
 		}
-		if err := eff.PermitsExec(p.Argv); err != nil {
-			return nodeproto.Errorf(nodeproto.CodeDenied, "node %s: %v", id, err)
+		switch {
+		case p.Full && !eff.FullExec(nodeproto.MethodExec):
+			return nodeproto.Errorf(nodeproto.CodeDenied, "node %s: full access is not approved", id)
+		case !p.Full:
+			if err := eff.PermitsExec(p.Argv); err != nil {
+				return nodeproto.Errorf(nodeproto.CodeDenied, "node %s: %v", id, err)
+			}
 		}
 		timeout = time.Duration(eff.Exec.Timeout())*time.Second + 15*time.Second
 	}

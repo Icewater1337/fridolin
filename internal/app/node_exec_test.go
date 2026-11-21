@@ -23,6 +23,13 @@ import (
 // approves it, and returns its id.
 func (h *harness) execNode(name, addr string, rules []nodeproto.ExecRule) string {
 	h.t.Helper()
+	return h.joinExecNode(name, addr, nodeproto.Capabilities{Exec: &nodeproto.ExecCap{Allow: rules}, Host: true})
+}
+
+// joinExecNode joins a node named name that offers caps, with exec, as
+// execNode does.
+func (h *harness) joinExecNode(name, addr string, caps nodeproto.Capabilities) string {
+	h.t.Helper()
 	t := h.t
 	w := h.Do("POST", "/api/nodes/join-code", map[string]any{})
 	var jc struct{ Code string }
@@ -30,7 +37,6 @@ func (h *harness) execNode(name, addr string, rules []nodeproto.ExecRule) string
 		t.Fatalf("join-code: %d %s", w.Code, w.Body.String())
 	}
 	dir := t.TempDir()
-	caps := nodeproto.Capabilities{Exec: &nodeproto.ExecCap{Allow: rules}, Host: true}
 	j, err := nodeagent.Join(context.Background(), nodeagent.JoinOptions{Dir: dir, Core: addr, Code: jc.Code, Name: name, Capabilities: caps, AndroidBuild: noAndroidBuild, Version: "test", Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
@@ -322,14 +328,14 @@ func TestNodeExecThroughNodes(t *testing.T) {
 func TestNodeExecApprovalText(t *testing.T) {
 	t.Parallel()
 	v := nodes.View{Node: &nodes.Node{ID: "n1", Name: "mac-mini"}}
-	action, details := execApproval(v, []string{"brew", "upgrade", "--greedy"}, "")
+	action, details := execApproval(v, []string{"brew", "upgrade", "--greedy"}, "", "The rule on mac-mini that allows it asks you each time.")
 	if action != "Run `brew upgrade --greedy` on mac-mini" {
 		t.Errorf("action %q", action)
 	}
 	if details != "On mac-mini (node n1): brew upgrade --greedy\nargv: [\"brew\",\"upgrade\",\"--greedy\"]\nThe rule on mac-mini that allows it asks you each time." {
 		t.Errorf("details %q", details)
 	}
-	action, details = execApproval(v, []string{"/Users/you/bin/backup.sh", "two words", "it's", ""}, "/Users/you/Backups")
+	action, details = execApproval(v, []string{"/Users/you/bin/backup.sh", "two words", "it's", ""}, "/Users/you/Backups", "")
 	if action != "Run `/Users/you/bin/backup.sh 'two words' 'it'\\''s' ''` in /Users/you/Backups on mac-mini" || !strings.Contains(details, "\nin: /Users/you/Backups\n") {
 		t.Errorf("quoted, in a folder: %q\n%s", action, details)
 	}
@@ -337,7 +343,7 @@ func TestNodeExecApprovalText(t *testing.T) {
 	for range 20 {
 		long = append(long, "--exclude=/Users/you/Library/Caches")
 	}
-	action, details = execApproval(v, long, "")
+	action, details = execApproval(v, long, "", "")
 	if len(action) > maxExecAction || action != "Run a long backup.sh command (20 arguments) on mac-mini: Show me the draft has all of it" {
 		t.Errorf("a long command: %q", action)
 	}

@@ -408,6 +408,10 @@ type ExecParams struct {
 	Dir string `json:"dir,omitempty"`
 	// TimeoutSeconds shortens the node's timeout, 0 for the node's.
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// Full runs argv whatever the allowlist says, for a brain the core
+	// trusts with full access; the node refuses it unless full-access and
+	// exec are approved (Capabilities.FullExec).
+	Full bool `json:"full,omitempty"`
 }
 
 // ExecResult is how a command ended.

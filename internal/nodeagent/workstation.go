@@ -5,7 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -69,7 +72,32 @@ func newSessionID() string {
 }
 
 // lookAgent finds a provider's CLI; tests replace it.
-var lookAgent = platform.LookTool
+var lookAgent = func(name string) (string, error) {
+	home, _ := homeDir()
+	return lookAgentIn(name, home, platform.LookTool)
+}
+
+// agentHomeDirs are where the providers' own installers put their CLI
+// below the home folder, which a service's PATH leaves out: Claude Code's
+// native installer (~/.local/bin), its older local install, and npm's
+// user prefix.
+var agentHomeDirs = []string{".local/bin", ".claude/local", ".npm-global/bin"}
+
+// lookAgentIn finds name with look (the PATH and the package managers'
+// folders), else in agentHomeDirs below home.
+func lookAgentIn(name, home string, look func(string) (string, error)) (string, error) {
+	p, err := look(name)
+	if err == nil || home == "" || runtime.GOOS == "windows" {
+		return p, err
+	}
+	for _, d := range agentHomeDirs {
+		c := filepath.Join(home, filepath.FromSlash(d), name)
+		if st, serr := os.Stat(c); serr == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
+			return c, nil
+		}
+	}
+	return "", err
+}
 
 // probeWork finds, once, the sandbox and the agent CLIs of this machine.
 func (a *Agent) probeWork() (string, []string) {

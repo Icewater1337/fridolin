@@ -8,26 +8,32 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
 // openTerminal opens a terminal for by (a brain, or "dashboard"); node
 // and folder as place takes them, or for the dashboard a node's id and an
 // absolute folder.
-func (w *workRuntime) openTerminal(ctx context.Context, by, run, want, folder string, cols, rows int) (*workTerm, nodeproto.TerminalInfo, error) {
+// trusted asks for full access where v has it approved (App.fullAccess).
+func (w *workRuntime) openTerminal(ctx context.Context, by, run, want, folder string, cols, rows int, trusted func(nodes.View) bool) (*workTerm, nodeproto.TerminalInfo, error) {
 	v, folder, err := w.place("terminal", want, folder)
 	if err != nil {
 		return nil, nodeproto.TerminalInfo{}, err
 	}
-	info, err := w.b.nodes.TerminalOpen(ctx, v.ID, nodeproto.TerminalOpenParams{Folder: folder, Cols: cols, Rows: rows})
+	full := trusted != nil && trusted(v)
+	info, err := w.b.nodes.TerminalOpen(ctx, v.ID, nodeproto.TerminalOpenParams{Folder: folder, Cols: cols, Rows: rows, Full: full})
 	detail := fmt.Sprintf("terminal open on %s in %s", v.Name, folder)
+	if full {
+		detail += " [full access]"
+	}
 	if err != nil {
 		w.auditSession(audit.Entry{By: by, Run: run, Detail: detail, Outcome: "failed: " + err.Error()})
 		return nil, info, err
 	}
 	w.mu.Lock()
 	w.next++
-	t := &workTerm{N: w.next, Node: v.ID, ID: info.ID, Folder: info.Folder, By: by, Started: time.Now()}
+	t := &workTerm{N: w.next, Node: v.ID, ID: info.ID, Folder: info.Folder, By: by, Started: time.Now(), Full: full}
 	w.terms[t.N] = t
 	w.mu.Unlock()
 	w.auditSession(audit.Entry{By: by, Run: run, ID: fmt.Sprintf("terminal#%d", t.N), Detail: detail + ", " + info.Shell + ", sandbox " + info.Sandbox, Outcome: "started"})
@@ -54,12 +60,17 @@ func (w *workRuntime) send(ctx context.Context, t *workTerm, by, data string) (n
 	lines := t.feed(data)
 	w.mu.Unlock()
 	for _, l := range lines {
-		w.b.audit.Append(audit.Entry{Kind: audit.NodeCommand, By: by, ID: fmt.Sprintf("terminal#%d", t.N), Detail: w.nodeName(t.Node) + ": " + l})
+		node := w.nodeName(t.Node)
+		if t.Full {
+			node += " [full access]"
+		}
+		w.b.audit.Append(audit.Entry{Kind: audit.NodeCommand, By: by, ID: fmt.Sprintf("terminal#%d", t.N), Detail: node + ": " + audit.Scrub(l)})
 	}
 	return w.b.nodes.TerminalSend(ctx, t.Node, nodeproto.TerminalSendParams{ID: t.ID, Data: data})
 }
 
-// feed takes typed bytes and returns the command lines they end: Enter
+// feed takes typed bytes and returns the command lines they end, as typed
+// (send scrubs them for the audit log): Enter
 // ends one, a backspace takes back a character, escape sequences (arrow
 // keys) and other control characters are left out. What a shell's own
 // history or completion fills in is not seen; the audit line is what was
@@ -77,7 +88,7 @@ func (t *workTerm) feed(data string) []string {
 			t.escape = true
 		case r == '\r' || r == '\n':
 			if len(t.line) > 0 {
-				out = append(out, audit.Scrub(string(t.line)))
+				out = append(out, string(t.line))
 			}
 			t.line = t.line[:0]
 		case r == 0x7f || r == 0x08:

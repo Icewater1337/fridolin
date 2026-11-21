@@ -38,6 +38,13 @@ type Capabilities struct {
 	// of its own: the owner's vote on the first move to the machine is
 	// that (nodes.Node.CoreHostConfirmedAt).
 	CoreHost *CoreHostCap `json:"core_host,omitempty"`
+	// FullAccess (full-access) lets the brains the core trusts with it
+	// (config nodes.full_access_brains) run any command here, the exec
+	// allowlist aside, and open terminals without the sandbox. The node
+	// offers it only once its owner turns it on there (`fridolin node
+	// full-access on`), and it needs the owner's approval like any other.
+	// It widens exec and terminal, so it serves only with them approved.
+	FullAccess bool `json:"full_access,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -351,6 +358,13 @@ func (c Capabilities) ExecNeedsApproval(argv []string) bool {
 	return asks
 }
 
+// FullExec reports whether a call that asks for full access (ExecParams.Full,
+// TerminalOpenParams.Full) may have it: full-access approved, and the
+// family it widens (exec, or terminal) approved as well.
+func (c Capabilities) FullExec(method string) bool {
+	return c.FullAccess && c.Allows(method)
+}
+
 // Allows reports whether the capabilities grant method at all; exec
 // arguments and paths are checked by PermitsExec and on the node.
 func (c Capabilities) Allows(method string) bool {
@@ -398,7 +412,7 @@ func (c Capabilities) Allows(method string) bool {
 // Empty reports whether nothing that needs the owner's approval is
 // offered: core-host does not (see Capabilities.CoreHost).
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0 && len(c.Exec.AcceptFromCore) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.FrideHost == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0 && len(c.Exec.AcceptFromCore) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.FrideHost == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil && !c.FullAccess
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -412,7 +426,7 @@ func (c Capabilities) Empty() bool {
 // approval's own. core-host is always covered: it is no approval of
 // commands, and Empty leaves it out (see Capabilities.CoreHost).
 func Covers(approved, declared Capabilities) bool {
-	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.Fride != nil && approved.Fride == nil {
+	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.FullAccess && !approved.FullAccess || declared.Fride != nil && approved.Fride == nil {
 		return false
 	}
 	if declared.FrideHost != nil && approved.FrideHost == nil {
@@ -478,6 +492,7 @@ func Intersect(declared, approved Capabilities) Capabilities {
 	var out Capabilities
 	out.Host = declared.Host && approved.Host
 	out.Notify = declared.Notify && approved.Notify
+	out.FullAccess = declared.FullAccess && approved.FullAccess
 	out.Backup = intersectBackup(declared.Backup, approved.Backup)
 	if declared.Update != nil && approved.Update != nil {
 		out.Update = &UpdateCap{Box: declared.Update.Box}
@@ -617,6 +632,9 @@ func (c Capabilities) Summary() string {
 	}
 	if c.CoreHost != nil {
 		parts = append(parts, c.CoreHost.summary())
+	}
+	if c.FullAccess {
+		parts = append(parts, "full-access")
 	}
 	if len(parts) == 0 {
 		return "nothing"

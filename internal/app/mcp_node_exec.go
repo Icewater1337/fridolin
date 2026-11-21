@@ -70,9 +70,13 @@ func (b *App) registerNodeExecTools(r *tools.Set[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_exec",
 		Available: b.execTools,
-		Describe: func(mcpCaller) mcp.Tool {
+		Describe: func(c mcpCaller) mcp.Tool {
+			full := ""
+			if b.cfgs.Get().Live.Nodes.FullAccess(c.run.Brain) {
+				full = "On a node that grants you full access (node_list: full-access), any command runs, a shell (sh -c '…') included, whatever the allowlist says; one that looks destructive or touches secrets (sudo, rm -r, ~/.ssh and the like) asks the owner first, the same way. "
+			}
 			return mcp.Tool{
-				Description: "Run one command on one of the owner's machines (a node), as that node's exec allowlist allows it: a program and its arguments, no shell, so no pipes, redirects, globs, variables or &&. For quick things: a status, opening an app, a backup script. node_exec_rules lists what each node allows. " +
+				Description: "Run one command on one of the owner's machines (a node), as that node's exec allowlist allows it: a program and its arguments, no shell, so no pipes, redirects, globs, variables or &&. For quick things: a status, opening an app, a backup script. node_exec_rules lists what each node allows. " + full +
 					"A command whose rule asks the owner each time puts an approval poll in their chat itself and waits for the answer (wait_seconds): never ask them for that yes yourself, in the chat or with request_approval. Unanswered, it answers pending with an approval_id: wait with check_approval, and once that answers approved, call node_exec again with the same node, argv and dir and the approval_id. " +
 					"Returns the exit code, stdout and stderr (cut at the node's limit), whether it timed out, and how long it took.",
 				InputSchema: tools.Schema(map[string]any{
@@ -312,7 +316,7 @@ const maxExecAction = 200
 // execApproval is the action and the details of the approval that asks
 // the owner to run argv in dir on node v: what the owner says yes to, and
 // what an approval_id must have been asked for.
-func execApproval(v nodes.View, argv []string, dir string) (action, details string) {
+func execApproval(v nodes.View, argv []string, dir, why string) (action, details string) {
 	line := commandLine(argv)
 	in := ""
 	if dir != "" {
@@ -331,7 +335,7 @@ func execApproval(v nodes.View, argv []string, dir string) (action, details stri
 	if dir != "" {
 		details += "\nin: " + dir
 	}
-	details += "\nThe rule on " + v.Name + " that allows it asks you each time."
+	details += "\n" + why
 	return action, details
 }
 
@@ -356,61 +360,38 @@ func (b *App) callNodeExec(ctx context.Context, c mcpCaller, raw json.RawMessage
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
-	if err := v.Effective.PermitsExec(args.Argv); err != nil {
+	full := b.fullAccess(c, v, nodeproto.MethodExec)
+	var why string
+	switch {
+	case full:
+		why = b.fullAccessRisk(v, strings.Join(args.Argv, " "))
+	case v.Effective.PermitsExec(args.Argv) != nil:
+		err := v.Effective.PermitsExec(args.Argv)
 		return mcp.ErrorResult(fmt.Sprintf("%s does not run this: %v. %s\n\n%s", v.Name, err, execRulesNote, execRulesText(v))), nil
+	case v.Effective.ExecNeedsApproval(args.Argv):
+		why = "The rule on " + v.Name + " that allows it asks you each time."
 	}
-	if !v.Effective.ExecNeedsApproval(args.Argv) {
-		return b.runNodeExec(ctx, c, v, args, store.Approval{}), nil
+	if why == "" {
+		return b.runNodeExec(ctx, c, v, args, full, store.Approval{}), nil
 	}
-	action, details := execApproval(v, args.Argv, args.Dir)
-	if id := strings.TrimSpace(args.ApprovalID); id != "" {
-		a, err := b.takeExecApproval(ctx, c, id, action, details)
-		if err != nil {
-			b.auditExec(c, v, args.Argv, a, "refused: "+err.Error(), 0)
-			return mcp.ErrorResult(err.Error() + ". Do not run it another way."), nil
-		}
-		return b.runNodeExec(ctx, c, v, args, a), nil
+	if full {
+		why = "Full access asks you first: " + why + "."
 	}
-	if !c.canAsk() {
-		return mcp.ErrorResult("this command asks the owner each time, and this run cannot ask anyone: do not run it; say so in your reply"), nil
+	action, details := execApproval(v, args.Argv, args.Dir, why)
+	a, res, err := b.askFirst(ctx, c, action, details, args.ApprovalID, args.WaitSeconds, askAgain{
+		tool: "node_exec", same: "the same node, argv and dir",
+		audit: func(a store.Approval, outcome string) { b.auditExec(c, v, args.Argv, full, a, outcome, 0) },
+	})
+	if res != nil || err != nil {
+		return res, err
 	}
-	n, err := b.store.CountPending(ctx, approvalKind, string(skill.RiskIrreversible))
-	if err != nil {
-		return nil, err
-	}
-	if max := b.cfgs.Get().Live.Policy.MaxPendingIrreversible; n >= max {
-		return mcp.ErrorResult(fmt.Sprintf("%d irreversible actions wait for approval already, the most policy.max_pending_irreversible allows: wait for those to be answered. Do not run the command.", n)), nil
-	}
-	a, err := b.ask(ctx, c, store.Approval{Kind: approvalKind, Action: action, Details: details, Risk: string(skill.RiskIrreversible)})
-	if err != nil {
-		return mcp.ErrorResult(err.Error()), nil
-	}
-	wait := approvalArgs{WaitSeconds: args.WaitSeconds}.wait()
-	got, res := b.awaitDecision(ctx, a, wait)
-	if res != nil {
-		b.auditExec(c, v, args.Argv, a, "pending", 0)
-		res.Content[0].Text += fmt.Sprintf(" To run it once approved, call node_exec again with the same node, argv and dir and approval_id %s.", a.ID)
-		return res, nil
-	}
-	if got.Status != store.ApprovalApproved {
-		b.auditExec(c, v, args.Argv, got, got.Status, 0)
-		return answerResult(got), nil
-	}
-	ok, err := b.store.UseApproval(ctx, got.ID)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		b.auditExec(c, v, args.Argv, got, "refused: the approval was used already", 0)
-		return mcp.ErrorResult(fmt.Sprintf("approval %s was used already: call node_exec without approval_id to ask again", got.ID)), nil
-	}
-	return b.runNodeExec(ctx, c, v, args, got), nil
+	return b.runNodeExec(ctx, c, v, args, full, a), nil
 }
 
 // takeExecApproval takes approval id for one run of the command whose
 // approval has action and details: an approved approval of c's brain,
 // asked for exactly that, not used before.
-func (b *App) takeExecApproval(ctx context.Context, c mcpCaller, id, action, details string) (store.Approval, error) {
+func (b *App) takeExecApproval(ctx context.Context, c mcpCaller, id, action, details, tool string) (store.Approval, error) {
 	a, err := b.store.ApprovalByID(ctx, id)
 	switch {
 	case errors.Is(err, sql.ErrNoRows) || err == nil && (a.Brain != c.run.Brain || a.Kind != approvalKind):
@@ -418,7 +399,7 @@ func (b *App) takeExecApproval(ctx context.Context, c mcpCaller, id, action, det
 	case err != nil:
 		return store.Approval{ID: id}, err
 	case a.Action != action || a.Details != details:
-		return a, fmt.Errorf("approval %s is for %q, not for this command on this node: call node_exec without approval_id, and it asks the owner for this one", id, a.Action)
+		return a, fmt.Errorf("approval %s is for %q, not for this command on this node: call %s without approval_id, and it asks the owner for this one", id, a.Action, tool)
 	case a.Status == store.ApprovalPending:
 		return a, fmt.Errorf("approval %s is still pending: wait for it with check_approval", id)
 	case a.Status != store.ApprovalApproved:
@@ -429,30 +410,30 @@ func (b *App) takeExecApproval(ctx context.Context, c mcpCaller, id, action, det
 		return a, err
 	}
 	if !ok {
-		return a, fmt.Errorf("approval %s was used already: call node_exec without approval_id to ask again", id)
+		return a, fmt.Errorf("approval %s was used already: call %s without approval_id to ask again", id, tool)
 	}
 	return a, nil
 }
 
 // runNodeExec runs the command on v; approval is the owner's yes for a
 // command that asks, zero for one that does not.
-func (b *App) runNodeExec(ctx context.Context, c mcpCaller, v nodes.View, args nodeExecArgs, approval store.Approval) *mcp.CallResult {
+func (b *App) runNodeExec(ctx context.Context, c mcpCaller, v nodes.View, args nodeExecArgs, full bool, approval store.Approval) *mcp.CallResult {
 	if b.locked() {
 		// A yes that came during a lockdown is no yes.
-		b.auditExec(c, v, args.Argv, approval, "refused: lockdown", 0)
+		b.auditExec(c, v, args.Argv, full, approval, "refused: lockdown", 0)
 		return mcp.ErrorResult("the bridge is in lockdown: only reading goes ahead. Do not try another way; say so in your reply.")
 	}
 	start := time.Now()
-	res, err := b.nodes.Exec(ctx, v.ID, nodeproto.ExecParams{Argv: args.Argv, Dir: args.Dir, TimeoutSeconds: args.TimeoutSeconds})
+	res, err := b.nodes.Exec(ctx, v.ID, nodeproto.ExecParams{Argv: args.Argv, Dir: args.Dir, TimeoutSeconds: args.TimeoutSeconds, Full: full})
 	if err != nil {
-		b.auditExec(c, v, args.Argv, approval, "failed: "+err.Error(), time.Since(start).Milliseconds())
+		b.auditExec(c, v, args.Argv, full, approval, "failed: "+err.Error(), time.Since(start).Milliseconds())
 		return mcp.ErrorResult(fmt.Sprintf("%s: %v", v.Name, err))
 	}
 	outcome := fmt.Sprintf("exit %d", res.ExitCode)
 	if res.TimedOut {
 		outcome = "timed out"
 	}
-	b.auditExec(c, v, args.Argv, approval, outcome, res.DurationMS)
+	b.auditExec(c, v, args.Argv, full, approval, outcome, res.DurationMS)
 	out := map[string]any{"node": v.Name, "exit_code": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr, "timed_out": res.TimedOut, "duration_ms": res.DurationMS}
 	if res.Truncated {
 		out["truncated"] = "the node cut the output at its max_output_bytes"
@@ -464,9 +445,13 @@ func (b *App) runNodeExec(ctx context.Context, c mcpCaller, v nodes.View, args n
 }
 
 // auditExec writes a node_exec line: the node and the command line (Scrub
-// masks what looks like a secret), and for a command that asks, the
-// approval and who gave it.
-func (b *App) auditExec(c mcpCaller, v nodes.View, argv []string, approval store.Approval, outcome string, ms int64) {
+// masks what looks like a secret), marked when it ran with full access,
+// and for a command that asks, the approval and who gave it.
+func (b *App) auditExec(c mcpCaller, v nodes.View, argv []string, full bool, approval store.Approval, outcome string, ms int64) {
+	detail := v.Name + ": " + commandLine(argv)
+	if full {
+		detail = v.Name + " [full access]: " + commandLine(argv)
+	}
 	b.audit.Append(audit.Entry{Kind: audit.NodeExec, Brain: c.run.Brain, Run: c.run.ID, Chat: c.run.Chat, Thread: c.run.Chat,
-		ID: approval.ID, By: approval.DecidedBy, Detail: v.Name + ": " + commandLine(argv), Outcome: outcome, DurationMS: ms})
+		ID: approval.ID, By: approval.DecidedBy, Detail: detail, Outcome: outcome, DurationMS: ms})
 }

@@ -525,6 +525,10 @@ export interface NodesConfig {
   listen?: string;
   /** By node id or name, the git identities that node's FrIDE gets; a node not named gets all. */
   git_identities?: Record<string, GitIdentityID[]>;
+  /** The brains trusted with full access on the nodes that offer it. */
+  full_access_brains?: string[];
+  /** Full access runs risky commands without asking the owner first. */
+  full_access_skip_approval?: boolean;
 }
 
 export interface PolicyConfig {
@@ -814,6 +818,8 @@ export interface NodeCapabilities {
   agent?: WorkstationCap;
   terminal?: WorkstationCap;
   core_host?: CoreHostCap;
+  /** Any command, terminals without the sandbox, for the brains the core trusts with it. */
+  full_access?: boolean;
 }
 
 /** The machine may take over the core (nodeproto.CoreHostCap; docs/NODES.md, "core-host"). */

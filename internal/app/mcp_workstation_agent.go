@@ -23,6 +23,7 @@ type workArgs struct {
 	Text         string `json:"text"`
 	Enter        *bool  `json:"enter"`
 	WaitSeconds  *int   `json:"wait_seconds"`
+	ApprovalID   string `json:"approval_id"`
 }
 
 func readWorkArgs(raw json.RawMessage) (workArgs, *mcp.CallResult) {
