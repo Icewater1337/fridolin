@@ -154,8 +154,15 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 func (a *Agent) exec(ctx context.Context, eff nodeproto.Capabilities, p nodeproto.ExecParams) (any, *nodeproto.Error) {
-	if err := eff.PermitsExec(p.Argv); err != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "%v", err)
+	switch {
+	case len(p.Argv) == 0 || p.Argv[0] == "":
+		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "argv is empty")
+	case p.Full && !eff.FullExec(nodeproto.MethodExec):
+		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "full access is not approved on this node")
+	case !p.Full:
+		if err := eff.PermitsExec(p.Argv); err != nil {
+			return nil, nodeproto.Errorf(nodeproto.CodeDenied, "%v", err)
+		}
 	}
 	if p.Dir != "" && !filepath.IsAbs(p.Dir) {
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "dir %q is not absolute", p.Dir)

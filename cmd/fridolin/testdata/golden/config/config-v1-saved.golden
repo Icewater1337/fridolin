@@ -197,7 +197,11 @@
       "mini": [
         "github"
       ]
-    }
+    },
+    "full_access_brains": [
+      "personal"
+    ],
+    "full_access_skip_approval": true
   },
   "policy": {
     "max_runs_per_hour": 30,

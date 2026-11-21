@@ -40,7 +40,7 @@ func (w *workRuntime) dashboardCall(ctx context.Context, node, method string, pa
 		if w.b.locked() {
 			return true, errLockedNode
 		}
-		_, info, err := w.openTerminal(ctx, "dashboard", "", node, p.Folder, p.Cols, p.Rows)
+		_, info, err := w.openTerminal(ctx, "dashboard", "", node, p.Folder, p.Cols, p.Rows, nil)
 		if err != nil {
 			if _, ok := err.(*nodeproto.Error); !ok {
 				err = nodeproto.Errorf(nodeproto.CodeDenied, "%v", err)

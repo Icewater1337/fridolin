@@ -48,6 +48,11 @@ Usage:
                        let the core run Claude Code or Codex sessions and a terminal
                        in these folders (docs/NODES.md, Workstation); restart the
                        service after, then approve it on the core
+  fridolin node full-access on | off
+                       let the brains the core trusts with full access
+                       (nodes.full_access_brains) run any command here and open
+                       terminals without the sandbox; needs exec or terminal, a
+                       restart of the service, and the owner's approval on the core
   fridolin node core-host show | on | off | trust ID --key KEY | untrust ID
                        this machine as a core host, which the core may move to and
                        which holds host secrets; fridolin node core-host help for more
@@ -177,6 +182,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		return nodeBackup(pos, backupRoots, dir, thisAppPackage(), stdout, stderr)
 	case "workstation":
 		return nodeWorkstation(pos, ws, dir, thisAppPackage(), stdout, stderr)
+	case "full-access":
+		return nodeFullAccess(pos, dir, thisAppPackage(), stdout, stderr)
 	case "core-host":
 		return nodeCoreHost(pos, ch, dir, thisAppPackage(), stdout, stderr)
 	case "secrets":
@@ -655,6 +662,38 @@ func nodeWorkstation(pos []string, o workstationFlags, dir string, pkg appPackag
 	fmt.Fprintf(stdout, "This node offers: %s\nRestart the agent (fridolin node stop, then fridolin node start) so the core hears it", cfg.Capabilities.Summary())
 	if pos[0] == "on" {
 		fmt.Fprint(stdout, "; then approve it on the core: fridolin nodes approve <id> --commands")
+	}
+	fmt.Fprintln(stdout, ".")
+	return 0
+}
+
+// nodeFullAccess turns full-access on or off in node.json.
+func nodeFullAccess(pos []string, dir string, pkg appPackage, stdout, stderr io.Writer) int {
+	if len(pos) != 1 || pos[0] != "on" && pos[0] != "off" {
+		fmt.Fprintln(stderr, "fridolin node full-access takes on or off")
+		return 2
+	}
+	cfg, err := nodeagent.LoadConfig(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fridolin node full-access: %v\n", err)
+		return 1
+	}
+	cfg.Capabilities.FullAccess = pos[0] == "on"
+	if cfg.Capabilities.FullAccess && cfg.Capabilities.Exec == nil && cfg.Capabilities.Terminal == nil {
+		fmt.Fprintln(stderr, "fridolin node full-access: it widens exec and the terminal, and this node offers neither (fridolin node workstation on, or join with exec rules)")
+		return 2
+	}
+	if err := pkg.writeError(dir); err != nil {
+		fmt.Fprintf(stderr, "fridolin node full-access: %v\n", err)
+		return 1
+	}
+	if err := nodeagent.SaveConfig(dir, cfg); err != nil {
+		fmt.Fprintf(stderr, "fridolin node full-access: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "This node offers: %s\nRestart the agent (fridolin node stop, then fridolin node start) so the core hears it", cfg.Capabilities.Summary())
+	if cfg.Capabilities.FullAccess {
+		fmt.Fprint(stdout, "; then approve it on the core (fridolin nodes approve <id> --commands) and list the trusted brains in its nodes.full_access_brains")
 	}
 	fmt.Fprintln(stdout, ".")
 	return 0

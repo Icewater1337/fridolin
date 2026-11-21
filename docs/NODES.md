@@ -2642,7 +2642,13 @@ yes in a lockdown is a no.
 
 The node reports which it uses (`sandbox` on the Nodes page and in each
 session); a terminal runs in the same sandbox, or as an ordinary shell of
-the node's user on Windows.
+the node's user on Windows, or without one for a brain trusted with
+[full access](#full-access).
+
+The node finds `claude` and `codex` in its PATH, in `/opt/homebrew/bin`,
+`/usr/local/bin`, `/usr/bin` and `/bin`, and, outside Windows, in
+`~/.local/bin` (Claude Code's native installer), `~/.claude/local` and
+`~/.npm-global/bin`, which a service's PATH leaves out.
 
 **Credentials.** A session uses the node's own Claude or Codex login: the
 node owner's machine, logged in as they are. The core sends its own
@@ -2674,6 +2680,50 @@ session, answering one and typing, and stops every session and terminal
 that runs (the owner hears how many); reading goes on. Housekeeping stops
 sessions and terminals that run on a node and that the core has no record
 of, such as those a restart of the core forgot (`node-session` findings).
+
+### Full access
+
+The owner's own brain may be trusted with a node as fully as the owner:
+any command through `node_exec`, whatever the allowlist says, a shell and
+sudo included, and terminals without the sandbox (so `open -a Parsec`
+reaches LaunchServices, and the shell reads the owner's files). It takes
+two keys, and lacking either, everything stays as above:
+
+1. **The node offers it.** On the node, then approve it on the core:
+
+   ```bash
+   fridolin node full-access on      # needs exec or terminal; off takes it back
+   fridolin node stop && fridolin node start
+   fridolin nodes approve <id> --commands   # on the core, or !approve
+   ```
+
+   In `node.json` it is `"full_access": true` among the capabilities. The
+   node serves it only while `exec` (for `node_exec`) or `terminal` (for
+   terminals) is approved too, and refuses a call that asks for it
+   otherwise, whatever the core says.
+2. **The core trusts the brain.** `nodes.full_access_brains` in the core's
+   config.json lists the brains, by id, that get it: `["personal"]`. It is
+   empty by default. It lives in config.json, not in `brain.json`, which a
+   brain can write itself. Only the core brain has node tools at all.
+
+**The safeguard.** Unless `nodes.full_access_skip_approval` is true, a
+full-access command that looks destructive or touches secrets waits for
+the owner's yes in an approval poll, exactly as a rule with `approve`
+does (`approval_id`, `check_approval`, one run per yes): sudo, su, doas;
+`rm` with `-r` or `-f`, or of a path outside the node's granted folders;
+`find -delete`; `dd`, `mkfs`, `diskutil erase…`; `security` (the
+keychain); and anything naming a hidden file or folder of secrets
+(`~/.app-secrets`), `~/.personal-calendar`, `~/.ssh`, `~/.gitconfig`, `~/.git-credentials`,
+`~/.*-token`, `~/.*-api-key`, `~/.config/gh`, `~/.fridolin` (with
+`bridge.db`) or the keychains. In a terminal it checks each command line
+as its Enter completes it, and types nothing until the yes. It is a
+tripwire against a brain talked into harm by what it reads, not a
+sandbox: a command that hides what it does (a variable, base64, a script)
+passes it.
+
+**Audit.** Every full-access command is a `node_exec` line, and every
+line typed into a full-access terminal a `node_command` line, both marked
+`[full access]`; a full-access terminal's `node_session` line says so too.
 
 ## core-host
 

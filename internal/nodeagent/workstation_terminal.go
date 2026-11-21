@@ -67,6 +67,9 @@ func (a *Agent) terminalOpen(eff nodeproto.Capabilities, p nodeproto.TerminalOpe
 	if err := nodeproto.CheckSize(p.Cols, p.Rows); err != nil {
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
 	}
+	if p.Full && !eff.FullExec(nodeproto.MethodTerminalOpen) {
+		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "full access is not approved on this node")
+	}
 	folder, perr := a.confinedWorkFolder(eff, "terminal", p.Folder)
 	if perr != nil {
 		return nil, perr
@@ -98,6 +101,11 @@ func (a *Agent) terminalOpen(eff nodeproto.Capabilities, p nodeproto.TerminalOpe
 		shell = defaultShell()
 	}
 	sb, _ := a.probeWork()
+	if p.Full {
+		// A trusted brain's terminal: the owner turned full-access on
+		// here and approved it (checked above), so no sandbox.
+		sb = nodeproto.SandboxNone
+	}
 	plan := newSandboxPlan(folder, tmp, a.Dir, "")
 	// The shell comes from the node's own settings or its user's login
 	// shell, never from the request; what is typed reaches it only

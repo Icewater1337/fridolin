@@ -647,6 +647,8 @@ var securitySettings = []struct {
 	{"nodes.enabled", func(c *Settings) any { return fmt.Sprint(c.Nodes.Enabled) }},
 	{"nodes.listen", func(c *Settings) any { return c.Nodes.Listen }},
 	{"nodes.git_identities", func(c *Settings) any { return GitIdentityPairs(c.Nodes.GitIdentities) }},
+	{"nodes.full_access_brains", func(c *Settings) any { return c.Nodes.FullAccessBrains }},
+	{"nodes.full_access_skip_approval", func(c *Settings) any { return fmt.Sprint(c.Nodes.FullAccessSkipApproval) }},
 	{"http_listen", func(c *Settings) any { return c.HTTPListen }},
 	{"data_dir", func(c *Settings) any { return c.DataDir }},
 	{"db_path", func(c *Settings) any { return c.DBPath }},

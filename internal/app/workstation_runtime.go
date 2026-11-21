@@ -64,6 +64,9 @@ type workTerm struct {
 	// By is the brain that opened it, or "dashboard".
 	By      string
 	Started time.Time
+	// Full says it runs without the sandbox, for a brain trusted with full
+	// access (full_access.go).
+	Full bool
 	// line is what was typed since the last Enter, for the audit log.
 	line   []rune
 	escape bool

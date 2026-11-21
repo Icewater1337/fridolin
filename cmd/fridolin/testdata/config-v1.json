@@ -189,7 +189,9 @@
     "listen": "127.0.0.1:9766",
     "git_identities": {
       "mini": ["github"]
-    }
+    },
+    "full_access_brains": ["personal"],
+    "full_access_skip_approval": true
   },
   "policy": {
     "max_runs_per_hour": 30,

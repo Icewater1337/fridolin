@@ -278,7 +278,9 @@
             "maxItems": 2,
             "items": {"type": "string", "enum": ["github", "gitlab"]}
           }
-        }
+        },
+        "full_access_brains": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"}, "description": "The brains, by id, trusted with full access on the nodes that offer it (fridolin node full-access on, approved by the owner): any command through node_exec and terminals without the sandbox. Empty (default) trusts none."},
+        "full_access_skip_approval": {"type": "boolean", "description": "Turn off the approval poll before a trusted brain's full-access command that looks destructive or touches secrets (sudo, rm -r, protected paths such as ~/.ssh). Default false: it asks."}
       }
     },
     "policy": {

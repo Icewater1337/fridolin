@@ -1718,6 +1718,8 @@ Each of `vault.targets` (the Vault page's *Add target…* writes them; up to
 | `enabled` | `false` | accept connections from nodes |
 | `listen` | `":8766"` | the node port, `host:port`; an empty host is every interface, otherwise an IP address or a host name |
 | `git_identities` | `{}` | which git identities each node's FrIDE gets, by node id or name: `{"mini": ["github"]}` gives the mini GitHub but not GitLab, `[]` none. A node it does not name gets all: `github` and `gitlab` ([NODES.md](NODES.md#git-identities-for-fride)) |
+| `full_access_brains` | `[]` | the brains, by id, trusted with full access on the nodes that offer it and have it approved: `node_exec` runs any command there (a shell, sudo) whatever the allowlist says, and their terminals run without the sandbox. Empty trusts none ([NODES.md](NODES.md#full-access)) |
+| `full_access_skip_approval` | `false` | turn off the approval poll that full access asks before a command that looks destructive or touches secrets (sudo, `rm -r`, a delete outside the granted folders, `~/.ssh`, `~/.fridolin` and the other protected paths). Off: it asks |
 
 `nodes.enabled` and `nodes.listen` wait for a restart: the bridge opens the
 node port as it starts, on the address it had then. The registry of nodes,

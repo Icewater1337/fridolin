@@ -303,6 +303,10 @@ type TerminalOpenParams struct {
 	Folder string `json:"folder"`
 	Cols   int    `json:"cols,omitempty"`
 	Rows   int    `json:"rows,omitempty"`
+	// Full opens the shell without the sandbox, for a brain the core
+	// trusts with full access; the node refuses it unless full-access and
+	// terminal are approved (Capabilities.FullExec).
+	Full bool `json:"full,omitempty"`
 }
 
 // TerminalRef names a terminal.

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // The sections below are the settings of the containerized core, its
@@ -306,7 +308,25 @@ type NodesConfig struct {
 	// node's FrIDE gets (GitIdentityIDs); a node it does not name gets
 	// all (docs/NODES.md, "Git identities for FrIDE").
 	GitIdentities map[string][]string `json:"git_identities,omitempty"`
+	// FullAccessBrains are the brains, by id, trusted with full access on
+	// the nodes that offer it (nodeproto.Capabilities.FullAccess): any
+	// command through node_exec, terminals without the sandbox. Empty, the
+	// default, trusts none.
+	FullAccessBrains []string `json:"full_access_brains,omitempty"`
+	// FullAccessSkipApproval turns off the approval poll that full access
+	// asks before a command that looks destructive or touches secrets
+	// (sudo, rm -r, a protected path). Off, the default: it asks.
+	FullAccessSkipApproval bool `json:"full_access_skip_approval,omitempty"`
 }
+
+// FullAccess reports whether brain is trusted with full access.
+func (c NodesConfig) FullAccess(brain string) bool {
+	return brain != "" && slices.Contains(c.FullAccessBrains, brain)
+}
+
+// AsksBeforeRisky reports whether full access asks before a command that
+// looks destructive or touches secrets: unless FullAccessSkipApproval.
+func (c NodesConfig) AsksBeforeRisky() bool { return !c.FullAccessSkipApproval }
 
 // GitIdentityIDs are the git identities Fridolin hands the nodes' FrIDEs.
 var GitIdentityIDs = []string{"github", "gitlab"}
@@ -521,6 +541,11 @@ func (c *File) validateFleet() error {
 	}
 	if err := checkNodeGitIdentities(c.Nodes.GitIdentities); err != nil {
 		return err
+	}
+	for _, id := range c.Nodes.FullAccessBrains {
+		if !manifest.ValidID(id) {
+			return fmt.Errorf("nodes.full_access_brains: %q is not a brain id", id)
+		}
 	}
 	if err := c.Housekeeping.validate(); err != nil {
 		return err
