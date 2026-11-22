@@ -28,6 +28,8 @@ const (
 	// `plaud login` (see withDesktop).
 	desktopChild
 	codexChild
+	// antigravityChild is an Antigravity CLI (agy) run and what it runs.
+	antigravityChild
 )
 
 // childEnvVar names one variable of the bridge's environment that a program
@@ -109,6 +111,13 @@ var childEnvAllowlist = []childEnvVar{
 	{"CALENDAR_TZ", codexChild},
 	{"TRANSCRIBE_MODEL", codexChild},
 	{"TRANSCRIBE_LANGUAGE", codexChild},
+	// GEMINI_API_KEY logs agy in without a Google account, with
+	// modelProvider "gemini", which the bridge then sets for the run.
+	{"GEMINI_API_KEY", antigravityChild},
+	{"GOOGLE_GEMINI_BASE_URL", antigravityChild},
+	{"CALENDAR_TZ", antigravityChild},
+	{"TRANSCRIBE_MODEL", antigravityChild},
+	{"TRANSCRIBE_LANGUAGE", antigravityChild},
 }
 
 // childEnv is the environment for a program of scope: the variables of the
@@ -180,6 +189,8 @@ const brainStatesDirName = "brains"
 type brainState struct {
 	dir                       string // <data_dir>/brains/<id>, which holds the rest
 	claude, codex, tmp, cache string
+	// antigravity is the HOME of its agy runs (see antigravity_runtime.go).
+	antigravity string
 }
 
 // brainStateOf is the state of brain id in the data dir dataDir.
@@ -191,11 +202,15 @@ func brainStateOf(dataDir, id string) brainState {
 		codex:  filepath.Join(dir, "codex"),
 		tmp:    filepath.Join(dir, "tmp"),
 		cache:  filepath.Join(dir, "cache"),
+
+		antigravity: filepath.Join(dir, "antigravity"),
 	}
 }
 
 // folders are the folders of the state, which the sandbox pins.
-func (s brainState) folders() []string { return []string{s.claude, s.codex, s.tmp, s.cache} }
+func (s brainState) folders() []string {
+	return []string{s.claude, s.codex, s.tmp, s.cache, s.antigravity}
+}
 
 // prepareBrainState creates brain id's media inbox in mediaDir (when set)
 // and its state in dataDir, which its sandbox profile pins and so must

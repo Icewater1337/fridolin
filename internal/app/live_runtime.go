@@ -183,13 +183,15 @@ func (h *liveHost) view(brainID, mode, blocked string) *brain.LiveView {
 }
 
 // liveBlocker is why the bridge's settings rule a live session out, ""
-// when they do not: a session runs Claude Code (not Codex), without
-// asking for permissions, which a session has nobody to answer, and in
-// the brain's own Claude state, not the user's.
-func liveBlocker(provider string, dangerously, inheritUser bool) string {
+// when they do not: a session runs Claude Code (not Codex or Antigravity),
+// without asking for permissions, which a session has nobody to answer,
+// and in the brain's own Claude state, not the user's.
+func liveBlocker(provider manifest.Provider, dangerously, inheritUser bool) string {
 	switch {
-	case provider == "codex":
+	case provider == manifest.ProviderCodex:
 		return "the bridge runs Codex (Settings → AI mode); a live session needs Claude Code"
+	case provider == manifest.ProviderAntigravity:
+		return "the brain runs on Antigravity (Gemini); a live session needs Claude Code"
 	case !dangerously:
 		return "it needs dangerously_skip_permissions: a session has nobody to answer a permission prompt"
 	case inheritUser:

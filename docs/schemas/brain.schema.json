@@ -22,6 +22,7 @@
     },
     "model": {"type": "string"},
     "effort": {"enum": ["", "low", "medium", "high", "xhigh", "max"]},
+    "provider": {"enum": ["", "claude", "codex", "antigravity"], "description": "The agent CLI of this brain's runs, in place of config.json's agent_provider; empty inherits it. model and effort are Claude's: Codex and Antigravity take codex_* and antigravity_* from config.json."},
     "disallowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Left out, the brain gets the global list; [] allows every tool."},
     "prompt_file": {"type": "string", "not": {"pattern": "^(/|\\.\\.)"}, "description": "Relative to the brain's folder, and inside it. Default brain-prompt.md."},
     "reply_chat": {"type": "string"},

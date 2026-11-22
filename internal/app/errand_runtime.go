@@ -1073,7 +1073,7 @@ func (b *App) errandClaude(ctx context.Context, e store.Errand, cfg *config.Sett
 		extra = append(extra, "--model", model)
 	}
 	args := claudecli.ArgList(true, excludeInstructionsAbove(dir, cfg.Home), extra...)
-	bin, err := resolveAgentBinary("claude", cfg.ClaudePath)
+	bin, err := resolveAgentBinary(manifest.ProviderClaude, cfg.ClaudePath, "")
 	if err != nil {
 		return "", err
 	}

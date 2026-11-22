@@ -12,6 +12,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
@@ -36,12 +37,12 @@ func TestResolveAgentBinary(t *testing.T) {
 	// looks it up.
 	claude := agentOnPATH(t, "claude")
 	for _, tc := range []struct{ provider, path string }{{"claude", "claude"}, {"claude", ""}, {"", claude}} {
-		got, err := resolveAgentBinary(tc.provider, tc.path)
+		got, err := resolveAgentBinary(manifest.Provider(tc.provider), tc.path, "")
 		if err != nil || got != claude {
 			t.Errorf("resolveAgentBinary(%q, %q) = %q, %v; want %s", tc.provider, tc.path, got, err, claude)
 		}
 	}
-	_, err := resolveAgentBinary("codex", "codex")
+	_, err := resolveAgentBinary(manifest.ProviderCodex, "codex", "")
 	if err == nil {
 		t.Fatal("a codex that is not on PATH resolved")
 	}
@@ -50,8 +51,26 @@ func TestResolveAgentBinary(t *testing.T) {
 			t.Errorf("error %q, want %q in it", err, want)
 		}
 	}
-	if _, err := resolveAgentBinary("claude", filepath.Join(t.TempDir(), "claude")); err == nil || !strings.Contains(err.Error(), "claude_path") {
+	if _, err := resolveAgentBinary(manifest.ProviderClaude, filepath.Join(t.TempDir(), "claude"), ""); err == nil || !strings.Contains(err.Error(), "claude_path") {
 		t.Errorf("a missing absolute claude_path: %v", err)
+	}
+	// agy's installer puts it in ~/.local/bin, which a service's PATH
+	// often lacks.
+	home := t.TempDir()
+	agy := filepath.Join(home, ".local", "bin", "agy")
+	if err := os.MkdirAll(filepath.Dir(agy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agy, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"agy", ""} {
+		if got, err := resolveAgentBinary(manifest.ProviderAntigravity, path, home); err != nil || got != agy {
+			t.Errorf("antigravity_path %q = %q, %v; want %s", path, got, err, agy)
+		}
+	}
+	if _, err := resolveAgentBinary(manifest.ProviderAntigravity, "agy", t.TempDir()); err == nil || !strings.Contains(err.Error(), "antigravity_path") {
+		t.Errorf("agy found nowhere: %v", err)
 	}
 }
 
@@ -62,9 +81,9 @@ func TestResolveAgentBinary(t *testing.T) {
 func TestRunnerHandsBwrapTheAgentsAbsolutePath(t *testing.T) {
 	// Serial: puts the agent CLI on the process's PATH, where the bridge
 	// looks it up.
-	for _, provider := range []string{"claude", "codex"} {
+	for provider, bin := range map[string]string{"claude": "claude", "codex": "codex", "antigravity": "agy"} {
 		t.Run(provider, func(t *testing.T) {
-			agent := agentOnPATH(t, provider)
+			agent := agentOnPATH(t, bin)
 			data := t.TempDir()
 			folder := filepath.Join(data, "brains-folders", "personal")
 			if err := os.MkdirAll(folder, 0o755); err != nil {
@@ -82,7 +101,7 @@ func TestRunnerHandsBwrapTheAgentsAbsolutePath(t *testing.T) {
 			refused := errors.New("not started in a test")
 			res := r.Run(context.Background(), brain.RunSpec{
 				ID: "personal", Dir: folder, Prompt: "hi", BeforeStart: func() {},
-				Settings: &brain.Settings{Provider: provider, ClaudePath: "claude", CodexPath: "codex", DataDir: data, MediaDir: filepath.Join(data, "media")},
+				Settings: &brain.Settings{Provider: manifest.Provider(provider), ClaudePath: "claude", CodexPath: "codex", AntigravityPath: "agy", DataDir: data, MediaDir: filepath.Join(data, "media")},
 			}, claudecli.Callbacks{
 				Start: func(_ context.Context, s claudecli.Spawn) (*claudecli.Process, error) {
 					spawned = s

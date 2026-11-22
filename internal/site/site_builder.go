@@ -123,6 +123,24 @@ func (m *SiteManager) BuilderArgs(brainID string) []string {
 // Its instructions come from the embedded, reviewed skills; no personal
 // Claude plugins or user MCP configuration is carried into Codex.
 func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, error) {
+	cmd, env, prompt, err := m.BuilderServer(brainID)
+	if cmd == nil || err != nil {
+		return nil, nil, "", err
+	}
+	args := []string{
+		"-c", "mcp_servers.fridolin-site.command=" + strconv.Quote(cmd[0]),
+		"-c", `mcp_servers.fridolin-site.args=["mcp-site"]`,
+		"-c", `mcp_servers.fridolin-site.env_vars=["FRIDOLIN_BUILDER_URL","FRIDOLIN_BUILDER_TOKEN"]`,
+	}
+	return args, env, prompt, nil
+}
+
+// BuilderServer is, for a brain that builds the site, the command line of
+// the site tools' MCP server, the variables it needs, which travel in the
+// run's environment rather than argv, and the builder's instructions,
+// from the embedded, reviewed skills. Codex and Antigravity runs take it;
+// nil for any other brain.
+func (m *SiteManager) BuilderServer(brainID string) ([]string, []string, string, error) {
 	if !m.IsBuilder(brainID) {
 		return nil, nil, "", nil
 	}
@@ -136,11 +154,6 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 	if err != nil {
 		return nil, nil, "", err
 	}
-	args := []string{
-		"-c", "mcp_servers.fridolin-site.command=" + strconv.Quote(exe),
-		"-c", `mcp_servers.fridolin-site.args=["mcp-site"]`,
-		"-c", `mcp_servers.fridolin-site.env_vars=["FRIDOLIN_BUILDER_URL","FRIDOLIN_BUILDER_TOKEN"]`,
-	}
 	env := []string{"FRIDOLIN_BUILDER_URL=" + m.hooks.BridgeURL(), "FRIDOLIN_BUILDER_TOKEN=" + m.builderToken(brainID)}
 	var prompt strings.Builder
 	for _, skill := range []string{"fridolin-site-platform", "site-builder", "site-modules"} {
@@ -151,7 +164,7 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 		prompt.Write(data)
 		prompt.WriteString("\n\n")
 	}
-	return args, env, prompt.String(), nil
+	return []string{exe, "mcp-site"}, env, prompt.String(), nil
 }
 
 // ensureBuilder writes the plugin and MCP config and, the first time, the

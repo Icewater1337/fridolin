@@ -113,7 +113,7 @@ func sandboxPolicyOf(cfg *config.Settings) sandboxConfig {
 		ExtraDeny:   append([]string(nil), cfg.Sandbox.DenyPaths...),
 		ExtraAllow:  append([]string(nil), cfg.Sandbox.AllowPaths...),
 		BrainsRoot:  containerBrainsRoot(cfg.Boot),
-	}, claudePath: cfg.ClaudePath, codexPath: cfg.CodexPath, rclonePath: cfg.Backup.RclonePath, plaudCLIPath: cfg.Plaud.CLIPath, viewer: cfg.Viewer}
+	}, claudePath: cfg.ClaudePath, codexPath: cfg.CodexPath, antigravityPath: cfg.AntigravityPath, rclonePath: cfg.Backup.RclonePath, plaudCLIPath: cfg.Plaud.CLIPath, viewer: cfg.Viewer}
 	if p.MediaDir == "" && p.DataDir != "" {
 		p.MediaDir = filepath.Join(p.DataDir, "media")
 	}
@@ -228,6 +228,9 @@ func (p sandboxConfig) bridgeProgramsOf(home string) sandbox.Programs {
 		found = append(found, c)
 	}
 	if c, err := exec.LookPath(cmp.Or(p.codexPath, "codex")); err == nil {
+		found = append(found, c)
+	}
+	if c, err := exec.LookPath(agyPath(p.antigravityPath, home)); err == nil {
 		found = append(found, c)
 	}
 	if r, err := findRclone(p.rclonePath); err == nil {
@@ -567,8 +570,8 @@ type sandboxConfig struct {
 	sandbox.Settings
 	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
 	// bridge itself runs outside the sandbox; see bridgeProgramsOf.
-	claudePath, codexPath, rclonePath, plaudCLIPath string
-	viewer                                          bool
+	claudePath, codexPath, antigravityPath, rclonePath, plaudCLIPath string
+	viewer                                                           bool
 
 	// brainDirs are the configured brain folders, as configured and by
 	// their real paths: the bridge runs nothing from a folder of its PATH

@@ -80,6 +80,7 @@ restart.
 | `routing.answer_files` | In this brain's groups, a file someone sends (photo, document, voice note, video) addresses the bridge, which answers it. Default `true`; `false` makes it chatter: the brain reads its caption without answering, and the file is not downloaded. The trigger, an @-mention or a reply to the bridge still address it. |
 | `routing.answer_forwards` | The same for a forwarded message. Default `true`. |
 | `model`, `effort` | Override the global `brain_model` / `brain_effort` in Claude mode. Codex uses the separate global `codex_model` / `codex_effort`. |
+| `provider` | The agent CLI of this brain's runs: `claude` (Claude Code), `codex` or `antigravity` (Google's `agy`, Gemini models). Left out, the brain takes config's [`agent_provider`](CONFIGURATION.md#agent_provider). The brain's page sets it under **Settings → AI provider**. A brain on Antigravity signs in on its own ([CONFIGURATION.md](CONFIGURATION.md#antigravity_path-antigravity_model-antigravity_effort)); a brain that changes it in its own `brain.json` waits for your approval like any other change there. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. `["WebFetch", "WebSearch"]` takes the web from this brain; `fridolin check` says which web tools each brain has, and why it has not one ([`disallowed_tools`](CONFIGURATION.md#disallowed_tools)). |
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them, and `!reset` starts the chat afresh for this brain too. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
@@ -130,7 +131,7 @@ a Claude Code *channel*.
   under *Current run*: ready (since when, and how many turns it took), in a
   turn, starting, not running (your next direct message starts it), did not
   come up (why, and when the bridge tries again), or unavailable, when the
-  bridge's settings rule a session out (Codex, `dangerously_skip_permissions`
+  bridge's settings rule a session out (Codex or Antigravity, `dangerously_skip_permissions`
   off, `inherit_claude_user_config` on). `/api/status` and `/api/brains/{id}`
   carry it as the brain's `runtime.live`, and `fridolin check` says of each
   brain that asks for a session whether those settings let one start.
@@ -1152,7 +1153,7 @@ Personal/
 | `chat` | the chat results go to, a JID; default the brain's `reply_chat` |
 | `risk` | the run's risk budget, `read`, `write` or `irreversible`; left out, what the task's skill triggers say, else `write` ([Skills, risk and approvals](#skills-risk-and-approvals)) |
 | `disallowed_tools` | its own blocked tools; left out, the brain's |
-| `effort` | its runs' reasoning effort, `low`, `medium`, `high`, `xhigh` or `max`, in place of the brain's (`brain.json`'s `effort`, else [`brain_effort`](CONFIGURATION.md)), so an agent can think harder than the brain's chats without making them slower; the runs FrIDE's news starts for the agent use it too. Left out, the brain's. In Codex mode it is ignored, as a brain's `effort` is: `codex_effort` applies |
+| `effort` | its runs' reasoning effort, `low`, `medium`, `high`, `xhigh` or `max`, in place of the brain's (`brain.json`'s `effort`, else [`brain_effort`](CONFIGURATION.md)), so an agent can think harder than the brain's chats without making them slower; the runs FrIDE's news starts for the agent use it too. Left out, the brain's. In Codex or Antigravity mode it is ignored, as a brain's `effort` is: `codex_effort` or `antigravity_effort` applies |
 | `timeout_minutes` | stops a run that takes longer, in place of `run_timeout_minutes`: shorter or longer, up to 1440 (24 hours); left out or 0, `run_timeout_minutes`. A long timeout with a high effort can cost a lot of usage when a run goes in circles (for a program, it is the node's exec timeout, which the node's own limit still caps) |
 | `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
 | `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |

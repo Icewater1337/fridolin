@@ -32,7 +32,11 @@ func ChatErrorText(err error, inDM bool) string {
 	text := strings.ToLower(err.Error())
 	var ce *claudecli.Error
 	fromCLI := errors.As(err, &ce)
-	codex := (fromCLI && ce.Provider == "codex") || strings.HasPrefix(text, "codex ")
+	codex := (fromCLI && ce.Provider == claudecli.ProviderCodex) || strings.HasPrefix(text, "codex ")
+	agy := (fromCLI && ce.Provider == claudecli.ProviderAntigravity) || strings.HasPrefix(text, "antigravity ")
+	if agy && strings.Contains(err.Error(), claudecli.AntigravityNotSignedIn) {
+		return outboundmsg.ChatErrAntigravityNotSignedIn
+	}
 	if codex && containsAny(text, "not logged in", "not signed in", "401", "invalid api key", "authentication", "access token", "refresh token") {
 		return outboundmsg.ChatErrCodexNotSignedIn
 	}
@@ -44,6 +48,9 @@ func ChatErrorText(err error, inDM bool) string {
 		if codex {
 			return outboundmsg.ChatErrCodexLimit
 		}
+		if agy {
+			return outboundmsg.ChatErrAntigravityLimit
+		}
 		return outboundmsg.ChatErrLimit
 	case containsAny(text, "timed out", "timeout"):
 		return outboundmsg.ChatErrTimeout
@@ -51,6 +58,9 @@ func ChatErrorText(err error, inDM bool) string {
 	if inDM && fromCLI {
 		if codex {
 			return outboundmsg.ChatErrCodex(ce.Message)
+		}
+		if agy {
+			return outboundmsg.ChatErrAntigravity(ce.Message)
 		}
 		return outboundmsg.ChatErrClaude(ce.Message)
 	}

@@ -178,6 +178,21 @@ test('AI mode defaults to Claude and preserves separate model settings when swit
   assert.equal(bridge.config.agent_provider, 'claude');
 });
 
+test('AI mode offers Antigravity with its own path, model and effort', async (t) => {
+  const { bridge, inputFor, save } = await openPage(t, { config: { claude_path: 'claude' } });
+  assert.equal(inputFor('Antigravity CLI').getAttribute('placeholder'), 'agy');
+  assert.equal(inputFor('Antigravity model').getAttribute('placeholder'), 'agy default');
+  const mode = inputFor('Mode');
+  mode.value = 'antigravity';
+  mode.dispatchEvent(new Event('change'));
+  const model = inputFor('Antigravity model');
+  model.value = 'gemini-test';
+  model.dispatchEvent(new Event('input'));
+  await save();
+  assert.equal(bridge.config.agent_provider, 'antigravity');
+  assert.equal(bridge.config.antigravity_model, 'gemini-test');
+});
+
 // fride.instances: one box per instance. A new one is named once; a
 // saved one keeps its name. What the bridge would refuse is flagged and
 // not saved; what is saved sits beside fride.news.

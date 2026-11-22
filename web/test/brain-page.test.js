@@ -230,12 +230,25 @@ test('approving drift sends the brain.json shown', async (t) => {
 const helps = (els) => [els].flat().flatMap((el) => el.querySelectorAll('.help').map((x) => x.textContent));
 const fieldset = (root, legend) => root.querySelectorAll('fieldset').find((f) => f.querySelector('legend').textContent === legend);
 
+test('a brain can run on another AI provider than the rest', async (t) => {
+  const m = { ...manifest('Work'), provider: 'codex' };
+  const { root, calls } = await openPage(t, { brains: [{ ...view('Work'), manifest: m }] });
+  const provider = fieldset(root, 'Model and tools').querySelectorAll('select')[1];
+  assert.equal(provider.value, 'codex');
+  provider.value = 'antigravity';
+  provider.dispatchEvent(new Event('change', { bubbles: true }));
+  root.querySelector('.brain-form').dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  const saved = calls.find((c) => c.path === '/api/brains/work' && c.method === 'PUT');
+  assert.equal(saved && saved.body.manifest.provider, 'antigravity');
+});
+
 test('the model, effort and backup settings are the wizard’s, and save with the rest', async (t) => {
   const m = { ...manifest('Work'), model: 'sonnet', effort: 'high', backup: { enabled: true, exclude: ['node_modules/'] }, prompt_file: 'brain-prompt.md', reply_chat: '' };
   const { root, calls } = await openPage(t, { brains: [{ ...view('Work'), manifest: m }] });
   const shared = brainSettingsFields();
   const model = fieldset(root, 'Model and tools');
-  assert.deepEqual(helps(model).slice(0, 2), helps(shared.model), 'the model fields are the shared ones');
+  assert.deepEqual(helps(model).slice(0, 3), helps(shared.model), 'the model fields are the shared ones');
   assert.deepEqual(helps(fieldset(root, 'Backup')), helps(shared.backup), 'and so are the backup fields');
   const modelIn = model.querySelector('input');
   assert.equal(modelIn.value, 'sonnet');
@@ -256,7 +269,7 @@ test('the model, effort and backup settings are the wizard’s, and save with th
   await settle();
   const saved = calls.find((c) => c.path === '/api/brains/work' && c.method === 'PUT');
   assert.ok(saved, 'the settings were saved');
-  assert.deepEqual(saved.body.manifest, { ...m, model: 'opus', effort: '', observe: 'history', approvals: 'ask', backup: { enabled: false, exclude: ['node_modules/', '*.log'] } });
+  assert.deepEqual(saved.body.manifest, { ...m, model: 'opus', effort: '', provider: '', observe: 'history', approvals: 'ask', backup: { enabled: false, exclude: ['node_modules/', '*.log'] } });
   const toasts = (k) => document.querySelectorAll(`.toast.${k}`).map((el) => el.textContent);
   assert.deepEqual(toasts('error'), []);
   assert.ok(toasts('ok').includes('Settings saved'), `toasts: ${toasts('ok')}`);

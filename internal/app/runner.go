@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/google"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
@@ -55,14 +56,16 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks claudecli.Callbacks, pol *runPolicy) claudecli.Result {
 	s, prompt := spec.Settings, spec.Prompt
 	deadline := claudecli.TimedOut(s.RunTimeout)
-	if pol != nil && (pol.DisallowedTools != nil || pol.Effort != "" && s.Provider != "codex") {
+	ownEffort := pol != nil && pol.Effort != "" && s.Provider == manifest.ProviderClaude
+	if pol != nil && (pol.DisallowedTools != nil || ownEffort) {
 		// A scheduled agent's own list and effort, for its runs only.
-		// Codex keeps codex_effort, as it does for a brain's effort.
+		// Codex and Antigravity keep their own effort setting, as they do
+		// for a brain's effort.
 		own := *s
 		if pol.DisallowedTools != nil {
 			own.DisallowedTools = *pol.DisallowedTools
 		}
-		if pol.Effort != "" && s.Provider != "codex" {
+		if ownEffort {
 			own.Effort = pol.Effort
 		}
 		s = &own
@@ -78,21 +81,45 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		deadline = claudecli.TimedOut(pol.Timeout)
 	}
 
-	mcpConfig, settings := "", ""
-	if s.Provider != "codex" && !s.InheritUser {
-		mcpConfig = mcpConfigOf(spec.ID, spec.Dir)
-		settings = excludeInstructionsAbove(spec.Dir, r.home)
-	}
-	args := claudeArgs(s, mcpConfig, settings)
-	if s.Provider == "codex" {
+	external := r.sandbox != nil && r.sandbox.Enabled()
+	var args []string
+	switch s.Provider {
+	case manifest.ProviderCodex:
 		if err := claudecli.ValidateCodexTools(s.DisallowedTools); err != nil {
 			return claudecli.Result{Err: err}
 		}
-		args = codexArgs(s, spec.Dir, r.sandbox != nil && r.sandbox.Enabled())
+		args = codexArgs(s, spec.Dir, external)
+	case manifest.ProviderAntigravity:
+		if err := claudecli.ValidateAntigravityTools(s.DisallowedTools); err != nil {
+			return claudecli.Result{Err: err}
+		}
+		// The args come once the run's tools are known (below).
+	case manifest.ProviderClaude:
+		mcpConfig, settings := "", ""
+		if !s.InheritUser {
+			mcpConfig = mcpConfigOf(spec.ID, spec.Dir)
+			settings = excludeInstructionsAbove(spec.Dir, r.home)
+		}
+		args = claudeArgs(s, mcpConfig, settings)
+	}
+	if s.Provider != manifest.ProviderClaude {
+		// Neither has AskUserQuestion.
 		prompt = strings.ReplaceAll(prompt, prompttext.AskUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
 	}
 	var providerEnv []string
-	if s.Provider == "codex" && r.hooks != nil && r.hooks.CodexSetup != nil {
+	agyServers := map[string]any{}
+	if s.Provider == manifest.ProviderAntigravity && r.hooks != nil && r.hooks.SiteSetup != nil {
+		server, env, instructions, err := r.hooks.SiteSetup(spec.ID)
+		if err != nil {
+			return claudecli.Result{Err: err}
+		}
+		if server != nil {
+			agyServers[siteMCPServerName] = antigravityMCPServer(server[0], server[1:], nil)
+			providerEnv = env
+			prompt = instructions + prompt
+		}
+	}
+	if s.Provider == manifest.ProviderCodex && r.hooks != nil && r.hooks.CodexSetup != nil {
 		extra, env, instructions, err := r.hooks.CodexSetup(spec.ID)
 		if err != nil {
 			return claudecli.Result{Err: err}
@@ -101,7 +128,7 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		providerEnv = env
 		prompt = instructions + prompt
 	}
-	if s.Provider != "codex" && r.hooks != nil && r.hooks.ExtraArgs != nil {
+	if s.Provider == manifest.ProviderClaude && r.hooks != nil && r.hooks.ExtraArgs != nil {
 		extra := r.hooks.ExtraArgs(spec.ID)
 		args = withArgsBeforePrint(args, extra)
 	}
@@ -119,11 +146,27 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		// The bridge's own tools, for every run: which of them a run
 		// gets, the bridge decides by the run's token (mcpTools).
 		args = withArgsBeforePrint(args, runMCPArgs(s.Provider, access))
+		if server, env := antigravityRunMCP(access); server != nil && s.Provider == manifest.ProviderAntigravity {
+			agyServers[mcpServerName] = server
+			runEnv = append(slices.Clone(runEnv), env...)
+		}
+	}
+	if s.Provider == manifest.ProviderAntigravity {
+		_, bridgeTools := agyServers[mcpServerName]
+		args = antigravityArgs(s, external, getenv(r.env, "GEMINI_API_KEY") != "", bridgeTools)
+		prompt = claudecli.AntigravityPrompt(prompt)
 	}
 
 	binary, finalArgs, env, err := r.command(spec, s, args, providerEnv, runEnv, "")
 	if err != nil {
 		return claudecli.Result{Err: err}
+	}
+	if s.Provider == manifest.ProviderAntigravity {
+		// Its HOME exists now (prepareBrainState).
+		if err := writeAntigravityHome(antigravityHome(s.DataDir, spec.ID), agyServers); err != nil {
+			log.Printf("brain %s: preparing agy's home: %v", spec.ID, err)
+			return claudecli.Result{Err: err}
+		}
 	}
 
 	// Only once the sandbox is settled: a refused run starts no process.
@@ -143,11 +186,11 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		}
 	}
 	callbacks.GraceExpired = func() {
-		log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", spec.ID, claudecli.AgentName(s.Provider), r.waits.postResultGrace)
+		log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", spec.ID, claudecli.AgentName(string(s.Provider)), r.waits.postResultGrace)
 	}
 	return claudecli.Run(ctx, claudecli.Invocation{
 		Run:      claudecli.Spawn{WaitDelay: r.waits.runWaitDelay, Binary: binary, Args: finalArgs, Dir: spec.Dir, Env: env, Prompt: prompt},
-		Provider: s.Provider, ExitGrace: r.waits.postResultGrace, NoticeAfter: r.waits.workingNotice,
+		Provider: string(s.Provider), ExitGrace: r.waits.postResultGrace, NoticeAfter: r.waits.workingNotice,
 		DeadlineError: deadline,
 	}, callbacks)
 }
@@ -164,13 +207,17 @@ func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, pro
 	// sandbox enforces the read scope at the OS layer regardless. That is also
 	// why a sandbox that cannot be set up refuses the run instead of spawning
 	// without it: the fallback would quietly drop the only barrier left.
-	binary = s.ClaudePath
-	if s.Provider == "codex" {
+	switch s.Provider {
+	case manifest.ProviderCodex:
 		binary = s.CodexPath
+	case manifest.ProviderAntigravity:
+		binary = s.AntigravityPath
+	case manifest.ProviderClaude:
+		binary = s.ClaudePath
 	}
-	// Absolute, as the sandboxes need it: a bare "claude" or "codex" is
+	// Absolute, as the sandboxes need it: a bare "claude", "codex" or "agy" is
 	// looked up on the bridge's PATH here, not left to bubblewrap.
-	resolved, err := resolveAgentBinary(s.Provider, binary)
+	resolved, err := resolveAgentBinary(s.Provider, binary, r.home)
 	if err != nil {
 		log.Printf("brain %s: %v", spec.ID, err)
 		return "", nil, nil, err
@@ -198,7 +245,7 @@ func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, pro
 		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
 	}
 	extraEnv = append(extraEnv, runEnv...)
-	if s.Provider == "codex" || (r.sandbox != nil && r.sandbox.Enabled()) {
+	if s.Provider != manifest.ProviderClaude || (r.sandbox != nil && r.sandbox.Enabled()) {
 		// The brain's own Claude Code config dir, TMPDIR and caches, the
 		// only places outside its folder and inbox the profile lets it
 		// write, made before the profile pins them. With a config dir of
@@ -215,8 +262,14 @@ func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, pro
 			return "", nil, nil, brain.ErrSandboxUnavailable
 		}
 		extraEnv = append(extraEnv, stateEnv...)
-		if s.Provider == "codex" {
+		switch s.Provider {
+		case manifest.ProviderCodex:
 			extraEnv = append(extraEnv, "CODEX_HOME="+brainStateOf(s.DataDir, spec.ID).codex)
+		case manifest.ProviderAntigravity:
+			// agy keeps everything under $HOME/.gemini; its updater
+			// is off as Claude Code's is below (=1 does not turn it off).
+			extraEnv = append(extraEnv, "HOME="+antigravityHome(s.DataDir, spec.ID), "AGY_CLI_DISABLE_AUTO_UPDATE=true")
+		case manifest.ProviderClaude:
 		}
 		// The profile denies writes to the CLI's own install, so its
 		// auto-updater could download a new version on every run and never
@@ -226,8 +279,12 @@ func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, pro
 	// Only the variables on childEnvAllowlist: anyone who may message the
 	// brain can ask it to print its environment.
 	scope := claudeChild
-	if s.Provider == "codex" {
+	switch s.Provider {
+	case manifest.ProviderCodex:
 		scope = codexChild
+	case manifest.ProviderAntigravity:
+		scope = antigravityChild
+	case manifest.ProviderClaude:
 	}
 	env = childEnv(r.env, scope, s.EnvPassthrough, extraEnv...)
 	return binary, finalArgs, env, nil
@@ -237,9 +294,14 @@ func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, pro
 // with the bridge's tools (see brainRunEnv), or none when the run has
 // none. Claude Code takes its --mcp-config file, beside the brain's own
 // .mcp.json; Codex takes the same command line as -c settings, and passes
-// the server the two variables that lead it to the bridge.
-func runMCPArgs(provider string, access runAccess) []string {
-	if provider == "codex" {
+// the server the two variables that lead it to the bridge. Antigravity
+// takes none: its server is in the brain's mcp_config.json.
+func runMCPArgs(provider manifest.Provider, access runAccess) []string {
+	if provider == manifest.ProviderAntigravity {
+		// agy reads its servers from mcp_config.json (writeAntigravityHome).
+		return nil
+	}
+	if provider == manifest.ProviderCodex {
 		if len(access.MCPCommand) == 0 {
 			return nil
 		}

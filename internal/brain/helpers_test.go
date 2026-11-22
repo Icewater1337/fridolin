@@ -135,7 +135,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*Manager, *deliv
 			}
 		}
 		s.BeforeStart()
-		return claudecli.Run(ctx, claudecli.Invocation{Provider: s.Settings.Provider, Run: claudecli.Spawn{Binary: os.Args[0], Args: []string{"-p"}, Dir: s.Dir, Env: env, Prompt: s.Prompt, WaitDelay: runWaitDelay}, ExitGrace: postResultGrace, NoticeAfter: time.Hour}, c)
+		return claudecli.Run(ctx, claudecli.Invocation{Provider: string(s.Settings.Provider), Run: claudecli.Spawn{Binary: os.Args[0], Args: []string{"-p"}, Dir: s.Dir, Env: env, Prompt: s.Prompt, WaitDelay: runWaitDelay}, ExitGrace: postResultGrace, NoticeAfter: time.Hour}, c)
 	})
 	mgr := NewManager(Options{Runner: runner, Sink: &testSink{Deliver: d.add}, ClaimMedia: func(string, string, []string) map[string]string { return nil }, Input: inputRules(), ShutdownGrace: func() time.Duration { return 0 }})
 	t.Cleanup(mgr.Stop)

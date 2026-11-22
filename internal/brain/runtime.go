@@ -112,8 +112,9 @@ type Settings struct {
 	Name            string
 	Manifest        manifest.Manifest
 	ClaudePath      string
-	Provider        string
+	Provider        manifest.Provider
 	CodexPath       string
+	AntigravityPath string
 	Model           string
 	Effort          string
 	DisallowedTools []string

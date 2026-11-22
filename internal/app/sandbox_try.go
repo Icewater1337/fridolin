@@ -19,7 +19,7 @@ import (
 // the run and whether that is what want ("visible" or "hidden") says.
 const trySandboxScript = `echo "user: $(id -un 2>/dev/null || id -u) ($(id -u))"
 echo "HOME: $HOME"
-for t in claude codex plaud git python3 node gh cloudflared ffmpeg; do
+for t in claude codex agy plaud git python3 node gh cloudflared ffmpeg; do
 	if command -v "$t" >/dev/null 2>&1; then echo "  tool $t: $(command -v "$t")"; else echo "  tool $t: not on PATH"; fi
 done
 bad=0

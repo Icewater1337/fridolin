@@ -62,6 +62,13 @@ test('the CLI card follows the selected mode', async (t) => {
   assert.ok(!root.textContent.includes('Claude CLI'));
 });
 
+test('the CLI card shows agy in Antigravity mode', async (t) => {
+  const root = await openOverview(t, { agent_provider: 'antigravity', antigravity: { found: false, path: 'agy' } });
+  assert.ok(root.textContent.includes('Antigravity CLI (agy)'));
+  assert.ok(root.textContent.includes('log in with agy'), root.textContent);
+  assert.ok(!root.textContent.includes('Claude CLI'));
+});
+
 test('the housekeeping card shows the last dry run and what it would stop', async (t) => {
   const hk = {
     enabled: true, dry_run: true, every_hours: 48, running: false, asked: [],

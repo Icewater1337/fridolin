@@ -39,6 +39,9 @@ func (s *agentSession) startTurn(text string) {
 func (s *agentSession) turnArgs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.provider == nodeproto.ProviderAntigravity {
+		return s.agyArgsLocked()
+	}
 	if s.provider == nodeproto.ProviderCodex {
 		args := []string{"exec", "--json", "--skip-git-repo-check", "-C", s.folder}
 		if s.model != "" {
@@ -101,6 +104,12 @@ func (s *agentSession) runTurn(ctx context.Context, text string) {
 	cmd := exec.CommandContext(ctx, prog, args...)
 	cmd.Dir = s.folder
 	env := append(filteredEnv(), "TMPDIR="+s.tmp, "CLAUDE_CODE_TMPDIR="+s.tmp, "FRIDOLIN_NODE_AGENT=1")
+	if s.provider == nodeproto.ProviderAntigravity {
+		// agy reads its prompt as a stream-json message; its updater
+		// stays off, as the sandbox would not let it replace agy.
+		text = agyPrompt(text)
+		env = append(env, "AGY_CLI_DISABLE_AUTO_UPDATE=true")
+	}
 	s.mu.Lock()
 	if s.coreToken != "" {
 		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+s.coreToken)
@@ -181,6 +190,8 @@ func (s *agentSession) parse(r interface{ Read([]byte) (int, error) }) turnResul
 		if tooLong {
 			skipped = true
 			s.a.logf("node: agent session %s: skipped a stream line over %d MiB", s.id, maxStreamLine>>20)
+		} else if len(line) > 0 && line[0] == '{' && s.provider == nodeproto.ProviderAntigravity {
+			s.agyEvent(line, &res)
 		} else if len(line) > 0 && line[0] == '{' {
 			var ev streamLine
 			if json.Unmarshal(line, &ev) == nil {

@@ -615,7 +615,7 @@ another. `fridolin node status` shows it.
 | `fride` | `fride.*` | FrIDE on the node, while it answers: see [FrIDE](#fride) below |
 | `android-build` (`android_build`) | `android.build`, `android.read`, `android.drop` | builds an Android app with Gradle, while the node has a JDK 17+ and the Android SDK: see [android-build](#android-build) below |
 | `backup` | `fs.roots`, `fs.browse`, `backup.*` | keeps the core's restic repositories in folders the owner picks: see [Backups](#backups) below |
-| `agent`, `terminal` | `agent.*`, `terminal.*` | a Claude Code or Codex session, and a shell, in folders the owner granted: see [Workstation](#workstation) below |
+| `agent`, `terminal` | `agent.*`, `terminal.*` | a Claude Code, Codex or Antigravity session, and a shell, in folders the owner granted: see [Workstation](#workstation) below |
 | `core-host` (`core_host`) | `core.check`, `core.secrets.*` | a machine the core may move to, which holds host secrets for it; on unless `core-host.json` turns it off (not `node.json`), and needs no approval: see [core-host](#core-host) below |
 
 **exec rules.** `name` is `argv[0]` exactly: a bare program name, which
@@ -2565,8 +2565,8 @@ that failed.
 
 ## Workstation
 
-A node in the workstation mode lets the core run a **Claude Code or Codex
-session** (capability `agent`) and a **terminal** (capability `terminal`)
+A node in the workstation mode lets the core run a **Claude Code, Codex or
+Antigravity session** (capability `agent`) and a **terminal** (capability `terminal`)
 in folders its owner granted, so the core brain can say "look into
 ~/Projects/foo on the laptop and fix the build" and a session does it
 there. It is the lightweight path: [FrIDE](#fride) stays the one for real
@@ -2605,7 +2605,7 @@ capability, and a node that adds a folder waits for the owner again.
 
 | Capability | Methods | What it does |
 | --- | --- | --- |
-| `agent` | `agent.start`, `agent.status`, `agent.reply`, `agent.stop`, `agent.list` | a Claude Code (`claude -p`) or Codex (`codex exec`) session in a folder, its events streamed back, its questions answered, stopped |
+| `agent` | `agent.start`, `agent.status`, `agent.reply`, `agent.stop`, `agent.list` | a Claude Code (`claude -p`), Codex (`codex exec`) or Antigravity (`agy -p=`, Gemini) session in a folder, its events streamed back, its questions answered, stopped |
 | `terminal` | `terminal.open`, `terminal.send`, `terminal.read`, `terminal.resize`, `terminal.close`, `terminal.list` | a shell in a folder on a pseudo-terminal (a PTY on macOS and Linux, ConPTY on Windows), its output kept (1 MiB) to be read from an offset |
 
 At most 8 sessions of each kind run on a node; a terminal nobody used for
@@ -2636,21 +2636,25 @@ yes in a lockdown is a no.
 
 | OS | A session runs | Its permissions |
 | --- | --- | --- |
-| macOS | under `sandbox-exec` with a profile of its own: writes only in its folder, its temp folder and the provider's own state; the denied places above unreadable | `claude --dangerously-skip-permissions` (Codex: its own sandbox off), since the sandbox holds it |
+| macOS | under `sandbox-exec` with a profile of its own: writes only in its folder, its temp folder and the provider's own state; the denied places above unreadable | `claude --dangerously-skip-permissions` (Codex: its own sandbox off; agy: `--dangerously-skip-permissions`), since the sandbox holds it |
 | Linux | under bubblewrap (`bwrap`), the same confinement, where `bwrap` runs | as on macOS; without a working `bwrap`, as on Windows |
-| Windows | without a sandbox | Claude Code's own permission checks (`--permission-mode acceptEdits`: edits in the folder), and what they refuse goes to the owner as an approval poll; Codex with `--sandbox workspace-write` |
+| Windows | without a sandbox | Claude Code's own permission checks (`--permission-mode acceptEdits`: edits in the folder), and what they refuse goes to the owner as an approval poll; Codex with `--sandbox workspace-write`; agy with `--mode accept-edits` and its own rules |
 
 The node reports which it uses (`sandbox` on the Nodes page and in each
 session); a terminal runs in the same sandbox, or as an ordinary shell of
 the node's user on Windows, or without one for a brain trusted with
 [full access](#full-access).
 
-The node finds `claude` and `codex` in its PATH, in `/opt/homebrew/bin`,
+The node finds `claude`, `codex` and `agy` (Antigravity) in its PATH, in `/opt/homebrew/bin`,
 `/usr/local/bin`, `/usr/bin` and `/bin`, and, outside Windows, in
-`~/.local/bin` (Claude Code's native installer), `~/.claude/local` and
-`~/.npm-global/bin`, which a service's PATH leaves out.
+`~/.local/bin` (Claude Code's and agy's native installers), `~/.claude/local` and
+`~/.npm-global/bin`, which a service's PATH leaves out. It declares each
+one it finds as a provider of its `agent` capability; an Antigravity
+session takes its prompt as a stream-json message on stdin, resumes its
+conversation by ID (`--conversation`) on the next turn, writes `~/.gemini`
+(its state) and runs with agy's updater off.
 
-**Credentials.** A session uses the node's own Claude or Codex login: the
+**Credentials.** A session uses the node's own Claude, Codex or Antigravity login: the
 node owner's machine, logged in as they are. The core sends its own
 `CLAUDE_CODE_OAUTH_TOKEN` only when the core brain passes `use_core_login`
 for that one session, which it does only when the person asked for it;

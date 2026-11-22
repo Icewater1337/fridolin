@@ -71,6 +71,11 @@ type File struct {
 	CodexPath   string `json:"codex_path,omitempty"`
 	CodexModel  string `json:"codex_model,omitempty"`
 	CodexEffort string `json:"codex_effort,omitempty"`
+	// Antigravity settings, for brains on Google's Antigravity CLI (agy).
+	// An empty model or effort leaves agy its own default.
+	AntigravityPath   string `json:"antigravity_path,omitempty"`
+	AntigravityModel  string `json:"antigravity_model,omitempty"`
+	AntigravityEffort string `json:"antigravity_effort,omitempty"`
 
 	// Timezone is the owner's time zone, an IANA name such as
 	// "Europe/Zurich": the zone of every time of day the bridge keeps,
@@ -706,11 +711,17 @@ func (c *File) Validate(goos string) error {
 		return fmt.Errorf("log_level must be debug, info, warn or error, not %q", c.LogLevel)
 	}
 
-	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
-		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
+	if p := manifest.Provider(c.AgentProvider); p == "" || !manifest.ValidProvider(p) {
+		return fmt.Errorf("agent_provider must be claude, codex or antigravity, not %q", c.AgentProvider)
 	}
 	if !manifest.ValidEffort(c.CodexEffort) {
 		return fmt.Errorf("codex_effort %q must be one of low, medium, high, xhigh, max", c.CodexEffort)
+	}
+	if !manifest.ValidEffort(c.AntigravityEffort) {
+		return fmt.Errorf("antigravity_effort %q must be one of low, medium, high, xhigh, max", c.AntigravityEffort)
+	}
+	if strings.ContainsAny(c.AntigravityModel, " \t\r\n") {
+		return fmt.Errorf("antigravity_model %q is not a model name", c.AntigravityModel)
 	}
 	if c.Timezone != "" {
 		if _, err := trigger.LoadZone(c.Timezone); err != nil {

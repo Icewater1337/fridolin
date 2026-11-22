@@ -407,10 +407,11 @@ func TestLiveSessionView(t *testing.T) {
 	}{
 		{"claude", true, false, ""},
 		{"codex", true, false, "Codex"},
+		{"antigravity", true, false, "Antigravity"},
 		{"claude", false, false, "dangerously_skip_permissions"},
 		{"claude", true, true, "inherit_claude_user_config"},
 	} {
-		got := liveBlocker(c.provider, c.dangerously, c.inherits)
+		got := liveBlocker(manifest.Provider(c.provider), c.dangerously, c.inherits)
 		if (got == "") != (c.want == "") || !strings.Contains(got, c.want) {
 			t.Errorf("liveBlocker(%s, %v, %v) = %q, want one naming %q", c.provider, c.dangerously, c.inherits, got, c.want)
 		}
