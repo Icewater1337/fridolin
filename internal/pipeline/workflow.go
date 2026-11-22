@@ -51,8 +51,10 @@ type Workflow struct {
 	Move func(ctx context.Context, jid, thread, node string)
 	// Owner answers the owner's commands, OwnerCommands, from m: the
 	// command in lower case and the words after it. It decides itself
-	// who may send them, and where; nil leaves them to the brain.
-	Owner func(m brainruntime.Inbound, command string, args []string) string
+	// who may send them, and where; nil leaves them to the brain. then, if
+	// not nil, runs once the reply is sent: what the command started and
+	// tells the chat about comes after the reply, not before it (#752).
+	Owner func(m brainruntime.Inbound, command string, args []string) (reply string, then func())
 	// Read hears that br took m, a batch the debouncer handed on: its
 	// messages can be marked read. It decides itself which. Nil for
 	// none.
@@ -155,7 +157,11 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 // !unlock and the OwnerCommands. It reports whether text was one.
 func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, settings Settings) bool {
 	if f := strings.Fields(m.Text); len(f) > 0 && p.Owner != nil && ownerCommandOf(f[0]) != "" {
-		_ = p.Notice(ctx, m.JID, p.Owner(m, ownerCommandOf(f[0]), f[1:]))
+		reply, then := p.Owner(m, ownerCommandOf(f[0]), f[1:])
+		_ = p.Notice(ctx, m.JID, reply)
+		if then != nil {
+			then()
+		}
 		return true
 	}
 	if f := strings.Fields(m.Text); len(f) > 0 && strings.EqualFold(f[0], "!move") && p.Move != nil {

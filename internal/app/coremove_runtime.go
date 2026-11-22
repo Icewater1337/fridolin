@@ -81,7 +81,7 @@ func (a *coreMoveAsk) done(id string) {
 }
 
 // moveCoreCommand answers !movecore [node] from the owner.
-func (b *App) moveCoreCommand(args []string, record func(id, outcome string)) string {
+func (b *App) moveCoreCommand(ctx context.Context, args []string, record func(id, outcome string)) string {
 	switch {
 	case !b.nodesEnabled:
 		record("", "refused: nodes are off")
@@ -118,7 +118,7 @@ func (b *App) moveCoreCommand(args []string, record func(id, outcome string)) st
 		return outboundmsg.OwnerCommandRateLimited("!movecore", coreMoveAsksPerHour)
 	}
 	record(dst.ID, "checking")
-	go b.coreMoveCheck(dst.ID, dst.Name)
+	goAfterReply(ctx, func() { b.coreMoveCheck(dst.ID, dst.Name) })
 	return outboundmsg.CoreMoveChecking(dst.Name)
 }
 

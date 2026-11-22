@@ -670,14 +670,14 @@ func (b *App) decide(ctx context.Context, id, status, answer, by string, late la
 		return a, true
 	}
 	if late == answerAsMessage {
-		b.deliverAnswer(a)
+		b.deliverAnswer(ctx, a)
 	}
 	return a, true
 }
 
 // deliverAnswer hands the brain an answer no call waited for, as a new
 // message in the chat it was asked in.
-func (b *App) deliverAnswer(a store.Approval) {
+func (b *App) deliverAnswer(ctx context.Context, a store.Approval) {
 	if a.Notify == housekeepingNotify {
 		b.housekeepingDecided(a)
 		return
@@ -687,13 +687,14 @@ func (b *App) deliverAnswer(a store.Approval) {
 		return
 	}
 	// A move's answers ask the nodes, which takes a while: not on the
-	// goroutine that brought the vote.
+	// goroutine that brought the vote, and after the reply to an !approve
+	// or !deny that brought it.
 	if a.Notify == coreMoveNotify {
-		go b.coreMoveDecided(a)
+		goAfterReply(ctx, func() { b.coreMoveDecided(a) })
 		return
 	}
 	if a.Notify == coreSecretsNotify {
-		go b.coreSecretsDecided(a)
+		goAfterReply(ctx, func() { b.coreSecretsDecided(a) })
 		return
 	}
 	// An errand's first message goes out on the outbox, which may wait:
