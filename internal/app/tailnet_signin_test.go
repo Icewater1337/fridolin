@@ -61,7 +61,7 @@ func TestTailnetSignInWithALink(t *testing.T) {
 	}
 
 	// !dashboard in the owner's DM.
-	reply := c.ownerCommand(brain.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "!dashboard"}}, "!dashboard", nil)
+	reply, _ := c.ownerCommand(brain.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "!dashboard"}}, "!dashboard", nil)
 	prefix := "http://" + host + "/#login="
 	i := strings.Index(reply, prefix)
 	if i < 0 {
