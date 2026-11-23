@@ -177,6 +177,67 @@ func TestFrideInstanceFailoverUnblocksTheInstance(t *testing.T) {
 	}
 }
 
+// The 2026-11-23 incident: icebase came back online, but its sandboxes
+// could not run (sbx was not signed in), so the instance stayed held there
+// by its open thread and new work waited for good. Work on a node that is
+// online but cannot run its instance closes at once, and fails over once
+// that lasted fride.failover_minutes, as on an offline node.
+func TestFrideInstanceFailoverOffANodeThatCannotRunIt(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
+	optionsOf(t).waits.frideFailoverUnit = 10 * time.Millisecond
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"failover_minutes": -1, "instances": {"work": {}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	icebase := h.fakeHostNode("icebase", addr, 32768, 30000, 6144)
+	h.coreSays("two things", step("fride_task", `{"message":"Fix it","instance":"work"}`), step("fride_task", `{"message":"Look into it","instance":"work"}`))
+	icebase.emit(nodeproto.FrideEvent{Instance: "work", Event: "started", ThreadID: 1, TaskID: "fix", Branch: "fix/it", Status: "active"})
+	icebase.emit(nodeproto.FrideEvent{Instance: "work", Event: "started", ThreadID: 2, TaskID: "look", Branch: "look/it", Status: "active"})
+	h.WaitFor("both threads on their branches", func() bool {
+		a, err1 := h.b.store.GetFrideThread(t.Context(), 1)
+		b, err2 := h.b.store.GetFrideThread(t.Context(), 2)
+		return err1 == nil && err2 == nil && a.Branch == "fix/it" && b.Branch == "look/it"
+	})
+	mini := h.fakeHostNode("mini", addr, 32768, 30000, 6144)
+
+	// icebase stays online, but its sandboxes break: new work is held there.
+	icebase.breakSandboxes("sbx is not signed in to Docker: run sbx login on this machine")
+	h.WaitFor("icebase not ready", func() bool {
+		n, err := h.b.nodes.Registry().Get(icebase.ID)
+		return err == nil && h.b.nodes.Online(icebase.ID) && !n.Effective().FrideHost.Ready
+	})
+	reply := h.coreSays("and the docs", step("fride_task", `{"message":"Write docs","instance":"work"}`))
+	if !strings.Contains(reply, "FrIDE #3 waits") || !strings.Contains(reply, "open threads on icebase, which cannot start instances now: sbx is not signed in") {
+		t.Fatalf("fride_task while icebase cannot run the instance:\n%s", reply)
+	}
+
+	// A close does not need icebase to run it.
+	reply = h.coreSays("close the look", step("fride_close", `{"thread":2}`))
+	if !strings.Contains(reply, "FrIDE #2 is closed here while the FrIDE instance work cannot run on icebase (icebase cannot start instances now: sbx is not signed in") || !strings.Contains(reply, "Branch look/it keeps what was pushed.") {
+		t.Fatalf("fride_close while icebase cannot run the instance:\n%s", reply)
+	}
+
+	// The failover moves #1 off it, and #3 follows.
+	if _, err := h.b.cfgs.Update("", func(c *config.File) error {
+		c.Fride.FailoverMinutes = 1
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.WaitSent(harnessDM, "🔀 *FrIDE #1* moved from icebase/work to mini/work")
+	h.WaitSent(harnessDM, "the FrIDE instance work has not been able to run on icebase")
+	h.WaitSent(harnessDM, "🛠️ *FrIDE #3* went to mini/work now.")
+	for _, id := range []int64{1, 3} {
+		if th, err := h.b.store.GetFrideThread(t.Context(), id); err != nil || th.Node != mini.ID || th.State != store.FrideSent {
+			t.Errorf("FrIDE #%d: %+v, %v", id, th, err)
+		}
+	}
+	if o, err := h.b.store.FrideOrphans(t.Context()); err != nil || len(o) != 2 {
+		t.Errorf("what #1 and #2 left on icebase: %+v, %v", o, err)
+	}
+}
+
 func countContaining(texts []string, substr string) int {
 	n := 0
 	for _, s := range texts {

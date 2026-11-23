@@ -417,6 +417,18 @@ for compatibility.
 
 ### Fixed
 
+- **FrIDE instance work no longer waits for good on a node that is online
+  but cannot run the instance.** The failover only looked at offline
+  nodes: when icebase came back with its sandboxes not ready (sbx not
+  signed in), the instance stayed held there by its open threads, every
+  new thread for it waited, and `fride_close` failed because the
+  instance could not start there. Such work now fails over after
+  `fride.failover_minutes` like work on an offline node, and
+  `fride_close` closes it on the core at once. A node's time offline
+  also no longer starts again at each core restart: it counts from when
+  the node was last heard from, after a five-minute grace for nodes to
+  reconnect.
+
 - **A voice answer without a `[SPOKEN]` block no longer reads markdown
   aloud.** The phone read the first 60 words as they were, with `**`,
   `#`, bullets and backticks. Now it reads the answer without markdown,

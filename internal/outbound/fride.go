@@ -198,12 +198,22 @@ func FrideAgentNews(n FrideNews, brief string) string {
 	return b.String()
 }
 
-// frideOffline says how long node has been offline; down 0 is unknown.
-func frideOffline(node string, down time.Duration) string {
+// FrideOffline says how long node has been offline; down 0 is unknown.
+func FrideOffline(node string, down time.Duration) string {
 	if down <= 0 {
 		return node + " is offline"
 	}
 	return fmt.Sprintf("%s has been offline for %s", node, hoursMinutes(down))
+}
+
+// FrideCannotRun says the FrIDE instance has not been able to run on
+// node, which is online, for down (0: it cannot now); why goes on "node
+// …" ("cannot start instances now: …").
+func FrideCannotRun(node, instance string, down time.Duration, why string) string {
+	if down <= 0 {
+		return fmt.Sprintf("the FrIDE instance %s cannot run on %s (%s %s)", instance, node, node, why)
+	}
+	return fmt.Sprintf("the FrIDE instance %s has not been able to run on %s for %s (%s %s)", instance, node, hoursMinutes(down), node, why)
 }
 
 // frideResumes says where moved work picks up: its pushed branch, or the

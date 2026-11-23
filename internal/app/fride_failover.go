@@ -5,18 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // Failover (docs/NODES.md, "Failover"; #761): work on a node that has been
-// offline longer than fride.failover_minutes leaves it for another node
-// that can take it, and resumes there from its pushed branch. What it left
+// offline longer than fride.failover_minutes, or an instance's work on a
+// node that has not been able to run the instance that long, leaves it for
+// another node that can take it, and resumes there from its pushed branch. What it left
 // behind on the offline node is recorded (store.FrideOrphan) and closed,
 // archived and removed there once that node answers again.
 
@@ -52,37 +55,135 @@ func (f *frideRuntime) failoverAfter() time.Duration {
 }
 
 // offlineFor reports whether node id is offline, and for how long: since
-// it was last seen, or since this core started when that is later (a core
-// that was down itself has not seen its nodes come back yet). A node the
+// it was last heard from (the registry keeps that across restarts), or
+// since this core started for a node it has never heard from. A node the
 // registry no longer has is offline since the core started.
 func (f *frideRuntime) offlineFor(id string) (time.Duration, bool) {
 	if f.b.nodes.Online(id) {
 		return 0, false
 	}
 	since := f.born
-	if n, err := f.b.nodes.Registry().Get(id); err == nil && n.LastSeen != nil && n.LastSeen.After(since) {
+	if n, err := f.b.nodes.Registry().Get(id); err == nil && n.LastSeen != nil {
 		since = *n.LastSeen
 	}
 	return time.Since(since), true
 }
 
-// failover moves the work of nodes offline longer than failoverAfter, and
-// cleans up what earlier failovers left on nodes that are back. The queue
-// loop runs it.
+// frideStranding is why a thread's node cannot serve its work now: the
+// node is offline, or, for an instance's work, it is online but cannot
+// run the instance (its sandboxes are not ready, say), which keeps the
+// instance's new work waiting as much as an offline node does.
+type frideStranding struct {
+	node, instance string
+	offline        bool
+	// why is what keeps the instance from running there, as "which …"
+	// goes on (hostProblem).
+	why string
+	// down is how long it has been so: since the node was last heard
+	// from, or since this core first saw the instance unable to run there.
+	down time.Duration
+}
+
+// gone says why the work left, for a failover's notice.
+func (s frideStranding) gone() string {
+	if s.offline {
+		return outboundmsg.FrideOffline(s.node, s.down)
+	}
+	return outboundmsg.FrideCannotRun(s.node, s.instance, s.down, s.why)
+}
+
+// now says what is wrong now, for a close while it is so.
+func (s frideStranding) now() string {
+	if s.offline {
+		return s.node + " is offline"
+	}
+	return outboundmsg.FrideCannotRun(s.node, s.instance, 0, s.why)
+}
+
+// stranded reports whether thread t's node cannot serve it now, and why
+// (frideStranding). It keeps when an instance was first seen unable to
+// run on its node, which the failover counts from, and forgets it once
+// the instance can run there again.
+func (f *frideRuntime) stranded(t store.FrideThread) (frideStranding, bool) {
+	if t.Node == "" {
+		return frideStranding{}, false
+	}
+	s := frideStranding{node: f.nodeName(t.Node), instance: t.Instance}
+	if down, off := f.offlineFor(t.Node); off {
+		s.offline, s.down = true, down
+		return s, true
+	}
+	if t.Instance == "" {
+		return s, false
+	}
+	key := t.Node + "/" + t.Instance
+	why := f.cannotRun(t.Node, t.Instance)
+	f.stuckMu.Lock()
+	defer f.stuckMu.Unlock()
+	if why == "" {
+		delete(f.stuck, key)
+		return s, false
+	}
+	since, ok := f.stuck[key]
+	if !ok {
+		since = time.Now()
+		f.stuck[key] = since
+	}
+	s.why, s.down = why, time.Since(since)
+	return s, true
+}
+
+// cannotRun says why FrIDE instance name cannot run on node id, which is
+// online, as "which …" goes on; "" when it runs or starts there, or the
+// node can start it.
+func (f *frideRuntime) cannotRun(id, name string) string {
+	ic, ok := f.inst.configured()[name]
+	if !ok {
+		// No longer configured: nothing starts it anywhere.
+		return ""
+	}
+	views := f.inst.views()
+	k := slices.IndexFunc(views, func(v nodes.View) bool { return v.ID == id })
+	if k < 0 {
+		return "is not in the registry"
+	}
+	v := views[k]
+	var in *nodeproto.FrideInstance
+	if h := v.Effective.FrideHost; h != nil {
+		in = h.Instance(name)
+	}
+	if in != nil && (in.State == nodeproto.FrideInstanceRunning || in.State == nodeproto.FrideInstanceStarting) {
+		return ""
+	}
+	if !hostReady(v, f.inst.template(), f.inst.lends(ic)) {
+		return hostProblem(v, f.inst.template(), f.inst.lends(ic))
+	}
+	if in != nil && in.State == nodeproto.FrideInstanceFailed {
+		return "cannot start it: " + orDefault(in.Problem, "its last start there failed")
+	}
+	return ""
+}
+
+// failover moves the work of nodes that cannot serve it (offline, or
+// unable to run its instance) longer than failoverAfter, and cleans up
+// what earlier failovers left on nodes that are back. A core that just
+// started first gives its nodes frideFailoverGrace to connect again. The
+// queue loop runs it.
 func (f *frideRuntime) failover() {
 	if after := f.failoverAfter(); after > 0 {
 		threads, err := f.b.store.FrideThreads(f.ctx, store.FrideSent)
 		if err != nil {
 			log.Printf("fride: reading the work on nodes: %v", err)
 		}
+		settled := time.Since(f.born) >= min(after, f.b.waits.frideFailoverGrace)
 		for _, t := range threads {
 			if f.ctx.Err() != nil {
 				return
 			}
-			if down, off := f.offlineFor(t.Node); t.Node == "" || !off || down < after {
+			if s, ok := f.stranded(t); !ok || s.down < after || s.offline && !settled {
 				continue
 			}
-			release, err := f.claim(t.ID, "it is moving off its offline node")
+			release, err := f.claim(t.ID, "it is moving off its node")
 			if err != nil {
 				continue
 			}
@@ -92,7 +193,7 @@ func (f *frideRuntime) failover() {
 			release()
 			switch {
 			case err != nil:
-				log.Printf("fride: moving FrIDE #%d off its offline node: %v", t.ID, err)
+				log.Printf("fride: moving FrIDE #%d off its node: %v", t.ID, err)
 			case text != "":
 				f.say(t, text)
 			}
@@ -101,12 +202,13 @@ func (f *frideRuntime) failover() {
 	f.cleanOrphans()
 }
 
-// failoverThread moves thread id off its offline node: the thread is
-// detached from it (what it had there is recorded as an orphan), and
-// handed to another node (one that matches want, when given) or its
-// instance elsewhere, with a brief that continues its branch. A thread no
-// node takes now waits in the queue, which places it once one can. It
-// returns what the chat is told; the caller holds the thread's claim.
+// failoverThread moves thread id off a node that cannot serve it
+// (stranded): the thread is detached from it (what it had there is
+// recorded as an orphan), and handed to another node (one that matches
+// want, when given) or its instance elsewhere, with a brief that
+// continues its branch. A thread no node takes now waits in the queue,
+// which places it once one can. It returns what the chat is told; the
+// caller holds the thread's claim.
 func (f *frideRuntime) failoverThread(ctx context.Context, id int64, want, by string) (string, error) {
 	unlock := f.lock(id)
 	defer unlock()
@@ -114,8 +216,8 @@ func (f *frideRuntime) failoverThread(ctx context.Context, id int64, want, by st
 	if err != nil {
 		return "", err
 	}
-	down, off := f.offlineFor(t.Node)
-	if t.State != store.FrideSent || t.Node == "" || !off {
+	s, ok := f.stranded(t)
+	if t.State != store.FrideSent || !ok {
 		return "", nil
 	}
 	from := f.where(t.Node, t.Instance)
@@ -131,14 +233,14 @@ func (f *frideRuntime) failoverThread(ctx context.Context, id int64, want, by st
 	if err := f.b.store.SaveFrideThread(ctx, t); err != nil {
 		return "", err
 	}
-	log.Printf("fride: FrIDE #%d left %s, offline for %s; it resumes from branch %q", id, from, down.Round(time.Second), t.Branch)
+	log.Printf("fride: FrIDE #%d left %s (%s); it resumes from branch %q", id, from, s.gone(), t.Branch)
 	var placed bool
 	var why string
 	if t.Instance != "" {
-		var s frideStarted
-		placed, why, s = f.placeOnInstance(ctx, &t, by, by == frideByQueue)
+		var st frideStarted
+		placed, why, st = f.placeOnInstance(ctx, &t, by, by == frideByQueue)
 		if placed {
-			f.instanceNotice(t, s)
+			f.instanceNotice(t, st)
 		}
 	} else {
 		pick := t
@@ -149,15 +251,15 @@ func (f *frideRuntime) failoverThread(ctx context.Context, id int64, want, by st
 		t = pick
 	}
 	if !placed {
-		return outboundmsg.FrideFailoverWaitsNotice(id, from, down, why, t.Branch), nil
+		return outboundmsg.FrideFailoverWaitsNotice(id, from, s.gone(), why, t.Branch), nil
 	}
-	return outboundmsg.FrideFailoverNotice(id, from, down, f.where(t.Node, t.Instance), t.FrideThread, t.Branch), nil
+	return outboundmsg.FrideFailoverNotice(id, from, s.gone(), f.where(t.Node, t.Instance), t.FrideThread, t.Branch), nil
 }
 
-// detach closes thread t here while its node is offline: what it has
-// there is recorded as an orphan, closed and archived once the node is
-// back. The caller holds the thread's claim.
-func (f *frideRuntime) detach(ctx context.Context, t store.FrideThread) (string, error) {
+// detach closes thread t here while its node cannot serve it (s): what it
+// has there is recorded as an orphan, closed and archived once it can be
+// reached again. The caller holds the thread's claim.
+func (f *frideRuntime) detach(ctx context.Context, t store.FrideThread, s frideStranding) (string, error) {
 	unlock := f.lock(t.ID)
 	defer unlock()
 	cur, err := f.thread(ctx, t.ID)
@@ -174,12 +276,12 @@ func (f *frideRuntime) detach(ctx context.Context, t store.FrideThread) (string,
 	if err := f.b.store.SaveFrideThread(ctx, cur); err != nil {
 		return "", err
 	}
-	text := fmt.Sprintf("FrIDE #%d is closed here while %s is offline.", cur.ID, from)
+	text := fmt.Sprintf("FrIDE #%d is closed here while %s.", cur.ID, s.now())
 	if cur.Branch != "" {
 		text += fmt.Sprintf(" Branch %s keeps what was pushed.", cur.Branch)
 	}
 	if cur.TaskID != "" || cur.FrideThread != 0 {
-		text += fmt.Sprintf(" What it left on %s is closed, archived into the vault and removed there once it is back.", from)
+		text += fmt.Sprintf(" What it left on %s is closed, archived into the vault and removed there once it can be reached again.", from)
 	}
 	return text, nil
 }
