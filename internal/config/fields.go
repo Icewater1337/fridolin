@@ -140,6 +140,8 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "run_files.keep_days"}},
 	{Field: Field{Name: "run_files.max_store_mb"}},
 	{Field: Field{Name: "fride.news"}},
+	// Read at each failover check.
+	{Field: Field{Name: "fride.failover_minutes"}},
 	// Read at each start of an instance and by the idle stop.
 	{Field: Field{Name: "fride.instances"}},
 	{Field: Field{Name: "connections.openai.brains"}},

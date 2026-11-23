@@ -21,6 +21,11 @@ func TestFrideInstancesValidate(t *testing.T) {
 			t.Errorf("%s: no error", name)
 		}
 	}
+	for v, want := range map[int]int{0: FrideFailoverDefault, -1: 0, 5: 5} {
+		if got := (FrideConfig{FailoverMinutes: v}).Failover(); got != want {
+			t.Errorf("Failover(%d) = %d", v, got)
+		}
+	}
 	for v, want := range map[int]int{0: FrideIdleStopDefault, -1: 0, 5: 5} {
 		if got := (FrideInstanceConfig{IdleStopMinutes: v}).IdleStop(); got != want {
 			t.Errorf("IdleStop(%d) = %d", v, got)
