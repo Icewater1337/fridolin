@@ -376,6 +376,12 @@ for compatibility.
 
 ### Fixed
 
+- **A voice answer without a `[SPOKEN]` block no longer reads markdown
+  aloud.** The phone read the first 60 words as they were, with `**`,
+  `#`, bullets and backticks. Now it reads the answer without markdown,
+  links, URLs and emoji, and of a list, a table, code or a long answer
+  only its short opening sentence and "The details are in WhatsApp."
+
 - **A node finds Claude Code in `~/.local/bin`.** The node service's PATH
   leaves out the folder Claude Code's native installer uses, so
   `node_agent_run` said neither claude nor codex was installed. The node
