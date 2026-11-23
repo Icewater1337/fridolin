@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
@@ -12,13 +13,14 @@ type Settings struct {
 	Live
 }
 
-// Live holds resolved global policy. BrainDirs are approval documents, whose
-// optional manifest fields describe per-brain inheritance rather than defaults.
-type Provider string
+// Provider is the agent CLI brains run on (agent_provider), which a
+// brain.json's provider overrides for that brain.
+type Provider = manifest.Provider
 
 const (
-	ProviderClaude Provider = "claude"
-	ProviderCodex  Provider = "codex"
+	ProviderClaude      = manifest.ProviderClaude
+	ProviderCodex       = manifest.ProviderCodex
+	ProviderAntigravity = manifest.ProviderAntigravity
 )
 
 type QueueMode string
@@ -28,6 +30,8 @@ const (
 	QueueInterrupt QueueMode = "interrupt"
 )
 
+// Live holds resolved global policy. BrainDirs are approval documents, whose
+// optional manifest fields describe per-brain inheritance rather than defaults.
 type Live struct {
 	Comment                    string
 	Version                    int
@@ -41,6 +45,9 @@ type Live struct {
 	CodexPath                  string
 	CodexModel                 string
 	CodexEffort                string
+	AntigravityPath            string
+	AntigravityModel           string
+	AntigravityEffort          string
 	Timezone                   string
 	MaxChunkSize               int
 	MaxMediaMB                 int
@@ -143,6 +150,9 @@ func liveOf(c *File) Live {
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
+		AntigravityPath:            c.AntigravityPath,
+		AntigravityModel:           c.AntigravityModel,
+		AntigravityEffort:          c.AntigravityEffort,
 		Timezone:                   c.Timezone,
 		MaxChunkSize:               c.MaxChunkSize,
 		MaxMediaMB:                 c.MaxMediaMB,
@@ -262,6 +272,9 @@ func fileOf(c Live) File {
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
+		AntigravityPath:            c.AntigravityPath,
+		AntigravityModel:           c.AntigravityModel,
+		AntigravityEffort:          c.AntigravityEffort,
 		Timezone:                   c.Timezone,
 		MaxChunkSize:               c.MaxChunkSize,
 		MaxMediaMB:                 c.MaxMediaMB,

@@ -51,12 +51,12 @@ func (b *App) registerAgentTools(r *tools.Set[mcpCaller]) {
 		Available: b.agentTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Start a Claude Code (or Codex) session in a folder on one of the owner's machines, to just do something there: look into a build, fix a small thing, tidy a folder. Use FrIDE (fride_task) instead for real coding work in a repository (a feature, a refactor, a branch to review). The session runs with the node's own login and permission rules; its questions, the steps it needs approved, and its end with what changed arrive in this chat as messages naming the session (Agent #2). Returns the session's number.",
+				Description: "Start a Claude Code (or Codex, or Antigravity) session in a folder on one of the owner's machines, to just do something there: look into a build, fix a small thing, tidy a folder. Use FrIDE (fride_task) instead for real coding work in a repository (a feature, a refactor, a branch to review). The session runs with the node's own login and permission rules; its questions, the steps it needs approved, and its end with what changed arrive in this chat as messages naming the session (Agent #2). Returns the session's number.",
 				InputSchema: tools.Schema(map[string]any{
 					"prompt":         tools.Str("What the session is to do, in full: it cannot see this chat."),
 					"node":           nodeProp(),
 					"folder":         folderProp(),
-					"provider":       map[string]any{"type": "string", "enum": []string{"claude", "codex"}, "description": "claude or codex; leave it out for the node's first."},
+					"provider":       map[string]any{"type": "string", "enum": []string{"claude", "codex", "antigravity"}, "description": "claude, codex or antigravity (Gemini); leave it out for the node's first."},
 					"model":          tools.Str("The provider's model, only when the person named one."),
 					"use_core_login": map[string]any{"type": "boolean", "description": "Lend the core's Claude login to this one session instead of the node's own. Only when the person explicitly asked for it for this session; default false."},
 				}, "prompt"),

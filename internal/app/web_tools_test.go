@@ -22,7 +22,7 @@ func TestWebTools(t *testing.T) {
 		own      = "blocked by the brain's disallowed_tools in brain.json"
 		approves = "without dangerously_skip_permissions nobody approves it: a permissions.allow rule in the brain's .claude/settings.json can"
 	)
-	empty, fetch := []string{}, []string{"WebFetch"}
+	empty, fetch, search := []string{}, []string{"WebFetch"}, []string{"WebSearch"}
 	for _, c := range []struct {
 		name        string
 		provider    string
@@ -41,6 +41,9 @@ func TestWebTools(t *testing.T) {
 		{name: "deny rule", dangerously: true, settings: `{"permissions": {"deny": ["WebSearch", "Read(~/x/**)"]}}`, want: "WebFetch; not WebSearch (denied by a permissions.deny rule in the brain's .claude settings)"},
 		{name: "two reasons", inherited: []string{"WebSearch"}, want: "none; not WebSearch (" + global + "); not WebFetch (" + approves + ")"},
 		{name: "codex", provider: "codex", want: "Codex's web search"},
+		{name: "antigravity", provider: "antigravity", dangerously: true, want: "agy's web search and URL fetching"},
+		{name: "antigravity without permissions", provider: "antigravity", want: "agy's web search (fetching URLs needs dangerously_skip_permissions)"},
+		{name: "antigravity WebSearch blocked", provider: "antigravity", dangerously: true, ownList: &search, want: "none: its runs are refused (the Antigravity CLI cannot enforce the blocked tools entry \"WebSearch\" (it can block only WebFetch); remove it from disallowed_tools or use Claude for this brain)"},
 		{name: "codex blocked", provider: "codex", dangerously: true, ownList: &fetch, want: "none (Codex's web search is " + own + ")"},
 		{name: "unreadable settings", settings: `{"permissions": [`, want: "cannot tell: "},
 	} {
@@ -59,7 +62,7 @@ func TestWebTools(t *testing.T) {
 			if c.ownList != nil {
 				tools = *c.ownList
 			}
-			s := &brain.Settings{Provider: c.provider, Dangerously: c.dangerously, DisallowedTools: tools, Manifest: manifest.Manifest{ID: "b", DisallowedTools: c.ownList}}
+			s := &brain.Settings{Provider: manifest.Provider(c.provider), Dangerously: c.dangerously, DisallowedTools: tools, Manifest: manifest.Manifest{ID: "b", DisallowedTools: c.ownList}}
 			if got := webTools(s, dir); got != c.want && !(strings.HasSuffix(c.want, ": ") && strings.HasPrefix(got, c.want)) {
 				t.Errorf("webTools = %q, want %q", got, c.want)
 			}

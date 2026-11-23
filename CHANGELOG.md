@@ -32,6 +32,25 @@ for compatibility.
   `fride_move` and `!move` work while the node is offline. Every brief
   tells FrIDE to commit and push small steps as it goes (and FrIDE's own
   agent instructions do). [docs/NODES.md](docs/NODES.md#failover)
+- **Antigravity (Gemini) as a third AI provider (#749).** `agent_provider`
+  takes `"antigravity"`, which runs brains on Google's Antigravity CLI
+  (`agy`), with `antigravity_path` (default `agy`, also found in
+  `~/.local/bin`), `antigravity_model` and `antigravity_effort` (empty:
+  agy's own defaults). A brain.json's new `provider` (`claude`, `codex`
+  or `antigravity`) puts one brain on another provider than the rest; a
+  brain that changes it waits for your approval. Each brain's agy runs
+  with its own `HOME`, `<data_dir>/brains/<id>/antigravity`, which you sign
+  in once with your Google account (`HOME=… agy`; in the container
+  `docker exec -it fridolin-core env HOME=/data/brains/<id>/antigravity agy`);
+  the Overview shows the command once a run failed without a login.
+  `GEMINI_API_KEY` in the service's environment is the alternative. Tools
+  off denies commands, writes and URL fetching; `WebFetch` in
+  `disallowed_tools` denies URL fetching, and `WebSearch` (which agy cannot
+  turn off) refuses the brain's runs. Nodes find `agy` and offer
+  Antigravity sessions; live sessions stay Claude-only. `fridolin check`
+  names each brain's provider, `fridolin doctor` checks agy when a brain
+  uses it, and the core's image has agy.
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md#antigravity_path-antigravity_model-antigravity_effort)
 - **Full access on a node for a trusted brain.** A node whose owner runs
   `fridolin node full-access on` there, and approves it, lets the brains
   that the core's new `nodes.full_access_brains` names (empty by default)
@@ -414,6 +433,18 @@ for compatibility.
   answer waits, and Fridolin's log follows each answer to the phone.
   Build the app again (0.9) on the Plaud card so the phone updates.
   [docs/PLAUD.md](docs/PLAUD.md#voice-mode)
+
+- **FrIDE instance work no longer waits for good on a node that is online
+  but cannot run the instance.** The failover only looked at offline
+  nodes: when icebase came back with its sandboxes not ready (sbx not
+  signed in), the instance stayed held there by its open threads, every
+  new thread for it waited, and `fride_close` failed because the
+  instance could not start there. Such work now fails over after
+  `fride.failover_minutes` like work on an offline node, and
+  `fride_close` closes it on the core at once. A node's time offline
+  also no longer starts again at each core restart: it counts from when
+  the node was last heard from, after a five-minute grace for nodes to
+  reconnect.
 
 - **A voice answer without a `[SPOKEN]` block no longer reads markdown
   aloud.** The phone read the first 60 words as they were, with `**`,

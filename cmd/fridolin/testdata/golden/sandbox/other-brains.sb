@@ -136,6 +136,7 @@
 (deny file-read* (literal "<HOME>/.fridolin/bridge.db-journal"))
 (deny file-write* (literal "<HOME>/.fridolin/bridge.db-journal"))
 (deny file-write* (literal "<HOME>/.fridolin/brains/main"))
+(deny file-write* (literal "<HOME>/.fridolin/brains/main/antigravity"))
 (deny file-write* (literal "<HOME>/.fridolin/brains/main/cache"))
 (deny file-write* (literal "<HOME>/.fridolin/brains/main/claude"))
 (deny file-write* (literal "<HOME>/.fridolin/brains/main/codex"))

@@ -23,13 +23,15 @@ type StatusResponse struct {
 	Claude        claudecli.Status  `json:"claude"`
 	AgentProvider string            `json:"agent_provider"`
 	Codex         *claudecli.Status `json:"codex,omitempty"`
-	Sandbox       SandboxStatus     `json:"sandbox"`
-	Brains        []brain.Runtime   `json:"brains"`
-	Issues        []registry.Issue  `json:"issues"`
-	Warnings      []string          `json:"warnings"`
-	Backup        backup.Summary    `json:"backup"`
-	Ingest        bool              `json:"ingest"`
-	Pending       int               `json:"debouncing"`
+	// Antigravity is agy, when a brain runs on it.
+	Antigravity *claudecli.Status `json:"antigravity,omitempty"`
+	Sandbox     SandboxStatus     `json:"sandbox"`
+	Brains      []brain.Runtime   `json:"brains"`
+	Issues      []registry.Issue  `json:"issues"`
+	Warnings    []string          `json:"warnings"`
+	Backup      backup.Summary    `json:"backup"`
+	Ingest      bool              `json:"ingest"`
+	Pending     int               `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The
 	// dashboard shows its restart banner from this, in every tab.
 	RestartRequired []string `json:"restart_required"`

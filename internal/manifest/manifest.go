@@ -45,6 +45,10 @@ type Manifest struct {
 
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
+	// Provider is the agent CLI this brain's runs start, in place of
+	// config's agent_provider: "claude", "codex" or "antigravity"; ""
+	// inherits it. Model and Effort are Claude's, used by "claude" only.
+	Provider Provider `json:"provider,omitempty"`
 	// DisallowedTools overrides the global list; nil inherits it, [] allows all.
 	DisallowedTools *[]string `json:"disallowed_tools,omitempty"`
 
@@ -574,6 +578,9 @@ func (m *Manifest) Validate() error {
 	}
 	if !ValidEffort(m.Effort) {
 		return fmt.Errorf("brain %q: effort %q must be one of low, medium, high, xhigh, max", m.ID, m.Effort)
+	}
+	if !ValidProvider(m.Provider) {
+		return fmt.Errorf("brain %q: provider %q must be claude, codex or antigravity", m.ID, m.Provider)
 	}
 	if !ValidObserve(m.Observe) {
 		return fmt.Errorf("brain %q: observe %q must be %q or %q", m.ID, m.Observe, ObserveHistory, ObserveRun)

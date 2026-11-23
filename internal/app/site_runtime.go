@@ -14,6 +14,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -102,7 +103,7 @@ func (b *App) runBrainSearch(ctx context.Context, brainID, prompt string, out io
 	// Only the brain folder's own setup, as for a brain's runs, and tools
 	// that only read.
 	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir(), cfg.Home), "--tools", "Read,Grep,Glob")
-	bin, err := resolveAgentBinary("claude", cfg.ClaudePath)
+	bin, err := resolveAgentBinary(manifest.ProviderClaude, cfg.ClaudePath, "")
 	if err != nil {
 		return err
 	}

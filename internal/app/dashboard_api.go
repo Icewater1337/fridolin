@@ -23,6 +23,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
@@ -52,19 +53,26 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		RestartRequired: nonNil(b.cfgs.RestartRequired()),
 		Core:            b.coreStatus(),
 	}
-	if cfg.AgentProvider == "codex" {
+	on := b.brainsByProvider(cfg)
+	usesClaude := cfg.AgentProvider == config.ProviderClaude || len(on[manifest.ProviderClaude]) > 0
+	if cfg.AgentProvider == config.ProviderCodex || len(on[manifest.ProviderCodex]) > 0 {
 		st := b.codexInfo(cfg)
 		resp.Codex = &st
 		if !st.Found {
 			resp.Warnings = append(resp.Warnings, "Codex CLI was not found. Set its path under Settings → AI mode.")
 		}
 		if getenv(b.env, "CODEX_API_KEY") == "" {
-			for _, br := range b.brainMgr.Brains() {
+			for _, br := range on[manifest.ProviderCodex] {
 				if !fsx.Exists(filepath.Join(brainStateOf(cfg.DataDir, br.ID()).codex, "auth.json")) {
 					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.ID()+" from Terminal: "+codexLoginHint(cfg.DataDir, br.ID()))
 				}
 			}
 		}
+	}
+	if cfg.AgentProvider == config.ProviderAntigravity || len(on[manifest.ProviderAntigravity]) > 0 {
+		st := b.antigravityInfo(cfg)
+		resp.Antigravity = &st
+		resp.Warnings = append(resp.Warnings, antigravityWarnings(cfg, st, on[manifest.ProviderAntigravity])...)
 	}
 	resp.Warnings = append(resp.Warnings, b.coreWarnings()...)
 	resp.Warnings = append(resp.Warnings, b.outboxWarnings(ctx)...)
@@ -75,13 +83,13 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
 	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Get(), ConfigGOOS())...)
-	if w := claudecli.VersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
+	if w := claudecli.VersionWarning(resp.Claude); usesClaude && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
 	if cfg.ScriptAPI.TokenlessSend {
 		resp.Warnings = append(resp.Warnings, "/send works without a token (script_api.tokenless_send), so any program on this computer, brains included, can message your allowed chats. Have your scripts send the token in scripts.token in the data folder, then turn it off under Settings → Advanced.")
 	}
-	if cfg.AgentProvider != "codex" && cfg.InheritClaudeUserConfig {
+	if usesClaude && cfg.InheritClaudeUserConfig {
 		// Set in config.json only, so the dashboard shows it nowhere else.
 		resp.Warnings = append(resp.Warnings, "Brains load your own Claude Code setup (inherit_claude_user_config in config.json): they run your hooks, read your instructions and can use your MCP servers for anyone who may message them.")
 	}
@@ -93,7 +101,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		} else if w := sandboxProfileWarning(b.brainMgr); w != "" {
 			resp.Warnings = append(resp.Warnings, w)
 		}
-		if cfg.AgentProvider != "codex" && !brainLoginInEnv(b.env) {
+		if usesClaude && !brainLoginInEnv(b.env) {
 			resp.Warnings = append(resp.Warnings, "Sandboxed brains cannot read your keychain, where the login you made with `claude` lives, and the bridge's environment has no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY for them either: they fail with \"Not logged in\" unless their own settings log them in. Run `claude setup-token` and set the token in the bridge's environment (docs/CONFIGURATION.md, \"Where to set them\").")
 		}
 	}
@@ -242,7 +250,7 @@ func (b *App) brainViews() []httpapi.BrainView {
 // session when its brain.json asks for one.
 func (b *App) brainRuntime(cfg *config.Settings, br *brain.Brain) brain.Runtime {
 	rt := br.Snapshot()
-	rt.Live = b.live.view(br.ID(), rt.Manifest.LiveSession, liveBlocker(string(cfg.AgentProvider), cfg.DangerouslySkipPermissions, cfg.InheritClaudeUserConfig))
+	rt.Live = b.live.view(br.ID(), rt.Manifest.LiveSession, liveBlocker(manifest.ProviderOf(cfg.AgentProvider, rt.Manifest), cfg.DangerouslySkipPermissions, cfg.InheritClaudeUserConfig))
 	return rt
 }
 

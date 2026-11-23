@@ -136,11 +136,12 @@ const MaxStreamLine = 4 << 20
 // are for the sink to do (see Brain.readStream), so that the parser can be
 // run on a recorded stream alone.
 func Parse(r io.Reader, sink StreamSink) Result {
-	return ParseProvider(r, sink, "claude")
+	return ParseProvider(r, sink, ProviderClaude)
 }
 
-// ParseProvider shares line limits and terminal-result handling across both
-// providers; codexStream translates Codex JSONL into the common events.
+// ParseProvider shares line limits and terminal-result handling across the
+// providers; codexStream and antigravityStream translate theirs into the
+// common events.
 func ParseProvider(r io.Reader, sink StreamSink, provider string) Result {
 	in := bufio.NewReaderSize(r, 64<<10)
 	p := streamParser{sink: sink, provider: provider}
@@ -200,6 +201,7 @@ func readStreamLine(r *bufio.Reader, buf []byte) (line []byte, size int, err err
 type streamParser struct {
 	provider string
 	codex    codexStream
+	agy      antigravityStream
 	sink     StreamSink
 	done     bool            // the first result arrived
 	result   string          // the first result's
@@ -218,13 +220,21 @@ func (p *streamParser) event(line []byte) {
 		return
 	}
 	var event streamEvent
-	if p.provider == "codex" {
+	switch p.provider {
+	case ProviderCodex:
 		event = p.codex.event(line)
 		if event.Type == "" {
 			return // Codex progress, retries, and malformed JSON carry no common event.
 		}
-	} else if err := json.Unmarshal(line, &event); err != nil {
-		return
+	case ProviderAntigravity:
+		event = p.agy.event(line)
+		if event.Type == "" {
+			return // text deltas, steps of other kinds, events agy may add
+		}
+	default:
+		if err := json.Unmarshal(line, &event); err != nil {
+			return
+		}
 	}
 
 	switch event.Type {
@@ -269,7 +279,7 @@ func (p *streamParser) event(line []byte) {
 				errMsg = textx.Truncate(p.lastText, 300)
 			}
 			if errMsg == "" {
-				errMsg = "(claude exited with an error but no message)"
+				errMsg = "(" + AgentName(p.provider) + " exited with an error but no message)"
 			}
 			p.sink.Log("❌ Error: " + errMsg)
 			p.err = &Error{Message: errMsg, Provider: p.provider}
@@ -277,11 +287,12 @@ func (p *streamParser) event(line []byte) {
 			return
 		}
 		p.result = event.Result
-		if p.result == "" && p.lastText != "" && !p.asked && p.provider != "codex" {
+		if p.result == "" && p.lastText != "" && !p.asked && p.provider != ProviderCodex {
 			// Claude's result carries only the model's last message, which
 			// is empty when it wrote its answer and then only called tools:
-			// the answer is the last text it wrote. (Codex's result is its
-			// final answer, never its commentary.)
+			// the answer is the last text it wrote. Antigravity's response
+			// is taken the same way. (Codex's result is its final answer,
+			// never its commentary.)
 			p.result = p.lastText
 			p.sink.Log("(the result carried no text: the answer is the last text the run wrote)")
 		}
@@ -316,7 +327,7 @@ func (p *streamParser) outcome() Result {
 	// Monday"), which the chat must get too. A run that only asked has said
 	// what it had to say.
 	if p.result == "" && !p.asked {
-		if p.provider == "codex" && p.codex.err != "" {
+		if p.provider == ProviderCodex && p.codex.err != "" {
 			return Result{Err: &Error{Message: p.codex.err, Provider: p.provider}}
 		}
 		return Result{Err: ErrNoResult}

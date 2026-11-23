@@ -207,6 +207,22 @@ func (f *fakeHost) setNoLogin(why string, running map[string]string) {
 	f.declare()
 }
 
+// breakSandboxes makes the node's sandboxes not ready, with problem, and
+// its running instances failed, as a node whose sandbox runtime broke
+// says, and declares it.
+func (f *fakeHost) breakSandboxes(problem string) {
+	f.mu.Lock()
+	f.cap.Ready, f.cap.Problem = false, problem
+	for k := range f.cap.Instances {
+		if in := &f.cap.Instances[k]; in.State == nodeproto.FrideInstanceRunning {
+			f.cap.AvailableMemoryMB += in.MemoryMB
+			in.State, in.URL, in.Problem = nodeproto.FrideInstanceFailed, "", "cannot start sandbox: "+problem
+		}
+	}
+	f.mu.Unlock()
+	f.declare()
+}
+
 // emit sends FrIDE's news, as the node relays it.
 func (f *fakeHost) emit(ev nodeproto.FrideEvent) {
 	data, _ := json.Marshal(ev)

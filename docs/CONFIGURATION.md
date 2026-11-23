@@ -50,7 +50,7 @@ folder, its log lines and any `--print-sandbox` profile included.
 `fridolin doctor` looks at the machine rather than the routing: the config
 loads, the data dir is writable and has room (a warning under 20 GB free,
 a failure under 2 GB), the Claude CLI is there and recent enough (the
-Codex CLI in Codex mode), and sandboxed brains have a login
+Codex CLI, or agy, when a brain runs on it), and sandboxed brains have a login
 (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in your shell or the
 service's environment). It also checks what the coming parts of
 [the plan](PLAN.md) need — Tailscale running, its auth key and the four
@@ -325,10 +325,17 @@ they show twice in autumn runs once, at its first showing.
 
 ### `agent_provider`
 
-`"claude"` (default) or `"codex"`. Change it in **Settings → AI mode →
+`"claude"` (default), `"codex"` or `"antigravity"` (Google's Antigravity
+CLI, `agy`, with Gemini models). Change it in **Settings → AI mode →
 Mode**, then Save. It applies to the next run of every brain without a
-restart. A running turn keeps its provider, model and effort. Both modes
+restart. A running turn keeps its provider, model and effort. All modes
 use the same brain prompt, files, chat history, routing and delivery queue.
+
+A brain can run on another provider than the rest: `"provider"` in its
+`brain.json` (`claude`, `codex` or `antigravity`; left out, it takes
+`agent_provider`), which its page in the dashboard sets too
+([BRAINS.md](BRAINS.md)). A brain that changes it itself waits for your
+approval, like any other change to its `brain.json`.
 
 ### `codex_path`, `codex_model`, `codex_effort`
 
@@ -382,7 +389,81 @@ plugins and `.mcp.json` are not imported. Fridolin's built-in site builder suppl
 and MCP tools in Codex format. The site's separate read-only search helper
 continues to use Claude's Read/Grep/Glob tools.
 
-## Claude
+### `antigravity_path`, `antigravity_model`, `antigravity_effort`
+
+The Antigravity CLI (default `"agy"` on PATH, else `~/.local/bin/agy`,
+where its installer puts it), its model (a slug from `agy models`) and
+reasoning effort (`low`, `medium`, `high`, `xhigh` or `max`). Empty model
+and effort leave agy its own defaults. Install it with
+`curl -fsSL https://antigravity.google/cli/install.sh | bash`; the core's
+container image has it. Like Codex, it ignores Claude's `brain_model`,
+`brain_effort` and a `brain.json`'s `model` and `effort`.
+
+Everything agy keeps (settings, MCP servers, conversations, and its login
+when there is no keyring) lives under `$HOME/.gemini`, and agy has no other
+way to move it. So each brain's agy runs with `HOME` set to
+`<data_dir>/brains/<id>/antigravity`, even when Fridolin's sandbox is off,
+and so do the programs it starts. The bridge's own tools find their files
+through `FRIDOLIN_*` variables and do not mind; a `git` or `gh` the brain
+runs finds no user config of yours there. Your own `~/.gemini` is never
+read or copied. Before each run the bridge writes that home's
+`.gemini/config/mcp_config.json` (the bridge's MCP server, and the site
+builder's for a builder brain; a server the brain added itself is gone
+again) and `.gemini/antigravity-cli/settings.json`, and turns agy's
+auto-updater off (`AGY_CLI_DISABLE_AUTO_UPDATE=true`).
+
+Sign in once for each brain, with your Google account (AI Pro or Ultra),
+from Terminal on the bridge machine, replacing the data folder and brain ID:
+
+```sh
+HOME=~/.fridolin/brains/main/antigravity agy
+```
+
+In the core's container:
+
+```sh
+docker exec -it fridolin-core env HOME=/data/brains/main/antigravity agy
+```
+
+agy offers Google OAuth; choose it, open the sign-in link it prints, sign
+in, and paste the code Google shows back into agy. Where there is no
+system keyring, as in the core's container, agy keeps the login in files
+of that home (`.gemini/antigravity-cli/antigravity-oauth-token` and
+`.config/antigravity/`), so it lasts across runs and restarts and stays
+with that one brain. On macOS agy keeps it in the keychain instead, which
+Fridolin's sandbox closes to brains, so a natively run bridge on macOS
+may need the API key below for sandboxed brains. The bridge cannot see a
+login from outside, so the Overview shows the sign-in command once a run
+of the brain failed for want of one, and the chat is told to look there.
+
+An alternative is a Gemini API key: `GEMINI_API_KEY` in the service
+environment, passed only to Antigravity runs, which then run with
+`modelProvider: "gemini"`. The same warning as for Codex holds: anyone
+allowed to message the brain can use the key and read it.
+
+Each run is a fresh `agy -p=` turn with `--output-format stream-json
+--input-format stream-json --disable-slash-commands`: its prompt goes on
+stdin as one stream-json message (agy's `-p` reads no stdin, and argv is
+bounded and shown in process listings). agy's `result` event is the reply;
+a result whose status is not `SUCCESS` fails the turn with its error, and
+progress (its text and tool steps) goes to the activity log. The run's
+policy goes in `--settings`, for that run only:
+
+- With `dangerously_skip_permissions`, `--dangerously-skip-permissions
+  --mode accept-edits`. Inside Fridolin's sandbox agy's own terminal
+  sandbox stays off (macOS cannot nest `sandbox-exec`); without it,
+  `--sandbox` turns agy's on.
+- Without it, deny rules for `command(*)`, `write_file(*)` and agy's URL
+  actions (`read_url`, `execute_url`, `download_url`): no commands, no
+  writes, no fetching a page the model picks. Deny rules hold in every
+  mode, the flag above included.
+- The bridge's MCP tools are allowed (`mcp(fridolin/*)`).
+
+`WebFetch` in `disallowed_tools` denies agy's URL actions. agy's web
+search has no permission that turns it off, so `WebSearch`, like any other
+entry, refuses the brain's Antigravity runs rather than being dropped.
+Live sessions stay Claude-only, and errands keep running through Claude
+(or, in Codex mode, OpenAI) whatever the brains run on.
 
 ### `claude_path`
 
@@ -457,6 +538,10 @@ has, and why it has not one:
 
 In [Codex mode](#agent_provider) the line names Codex's web search,
 which either name in the list turns off.
+A brain on Antigravity has agy's web search, and URL fetching when it has
+all permissions and `WebFetch` is not in the list; a `WebSearch` there
+refuses its runs. `fridolin check` also says each brain's provider, and
+whether its `brain.json` or `agent_provider` chose it.
 
 ### `dangerously_skip_permissions`
 

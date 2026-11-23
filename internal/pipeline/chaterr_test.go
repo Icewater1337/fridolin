@@ -39,6 +39,9 @@ func TestChatErrorText(t *testing.T) {
 		{"the CLI's own words in a DM", &claudecli.Error{Message: "Credit balance is too low"}, true, "❌ Claude: Credit balance is too low"},
 		{"but not in a group", &claudecli.Error{Message: "Credit balance is too low"}, false, outboundmsg.ChatErrGeneric},
 		{"no result", claudecli.ErrNoResult, true, outboundmsg.ChatErrGeneric},
+		{"antigravity not signed in", &claudecli.Error{Message: claudecli.AntigravityNotSignedIn + " (authentication failed or timed out)", Provider: "antigravity"}, false, outboundmsg.ChatErrAntigravityNotSignedIn},
+		{"antigravity quota", &claudecli.Error{Message: "quota exhausted", Provider: "antigravity"}, false, outboundmsg.ChatErrAntigravityLimit},
+		{"antigravity's own words in a DM", &claudecli.Error{Message: "model not found", Provider: "antigravity"}, true, "❌ Antigravity: model not found"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

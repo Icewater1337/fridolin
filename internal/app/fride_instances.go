@@ -289,6 +289,21 @@ func allowedOn(ic config.FrideInstanceConfig, v nodes.View) bool {
 	})
 }
 
+// hostProblem says why v, online, cannot start instances now (hostReady
+// is false), as "which …" goes on: "cannot start instances now: …".
+func hostProblem(v nodes.View, tpl string, lent bool) string {
+	h := v.Effective.FrideHost
+	switch {
+	case v.Device != nodeproto.DeviceApproved, h == nil:
+		return "does not offer FrIDE instances now"
+	case h.Ready && h.NeedsTemplate && tpl == "":
+		return "cannot start instances of this core: " + noTemplate
+	case h.Ready && h.NoLogin != "" && !lent:
+		return "cannot log in FrIDE's agents to Claude: " + h.NoLogin
+	}
+	return "cannot start instances now: " + orDefault(h.Problem, "its sandboxes are not ready")
+}
+
 // hostReady reports whether v can start instances now: tpl is the
 // template the core sends ("" for none), which a node that built none
 // needs; lent says the core lends the instance its Claude token, so that
@@ -415,17 +430,9 @@ func (i *frideInstances) noHost(name string, ic config.FrideInstanceConfig, view
 		why := "is not in the registry"
 		if i := slices.IndexFunc(views, func(v nodes.View) bool { return v.ID == pin }); i >= 0 {
 			v := views[i]
-			switch {
-			case !v.Online:
-				why = "is offline"
-			case v.Effective.FrideHost == nil:
-				why = "does not offer FrIDE instances now"
-			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NeedsTemplate && tpl == "":
-				why = "cannot start instances of this core: " + noTemplate
-			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NoLogin != "" && !lent:
-				why = "cannot log in FrIDE's agents to Claude: " + v.Effective.FrideHost.NoLogin
-			default:
-				why = "cannot start instances now: " + orDefault(v.Effective.FrideHost.Problem, "its sandboxes are not ready")
+			why = "is offline"
+			if v.Online {
+				why = hostProblem(v, tpl, lent)
 			}
 			return fmt.Sprintf("the FrIDE instance %s has open threads on %s, which %s", name, v.Name, why)
 		}

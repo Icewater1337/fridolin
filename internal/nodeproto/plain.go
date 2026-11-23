@@ -71,7 +71,7 @@ func (c Capabilities) Plain() []string {
 		out = append(out, "update Fridolin there to the core's version")
 	}
 	if c.Agent != nil {
-		out = append(out, "run Claude Code or Codex sessions in "+folders(c.Agent.Roots)+" — they can run any command there")
+		out = append(out, "run Claude Code, Codex or Antigravity sessions in "+folders(c.Agent.Roots)+" — they can run any command there")
 	}
 	if c.Terminal != nil {
 		out = append(out, "open a terminal in "+folders(c.Terminal.Roots)+" — anything you could type there")

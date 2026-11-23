@@ -10,6 +10,9 @@
     "15551234567",
     "15559876543"
   ],
+  "antigravity_effort": "high",
+  "antigravity_model": "gemini-test",
+  "antigravity_path": "agy",
   "backup": {
     "daily_at": "04:15",
     "enabled": true,

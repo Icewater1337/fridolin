@@ -106,7 +106,7 @@ func (a *Agent) probeWork() (string, []string) {
 		if a.work.sandbox == "" {
 			a.work.sandbox = detectSandbox()
 		}
-		for _, p := range []string{nodeproto.ProviderClaude, nodeproto.ProviderCodex} {
+		for _, p := range []string{nodeproto.ProviderClaude, nodeproto.ProviderCodex, nodeproto.ProviderAntigravity} {
 			if _, err := a.agentPath(p); err == nil {
 				a.work.providers = append(a.work.providers, p)
 			}
@@ -123,7 +123,16 @@ func (a *Agent) agentPath(provider string) (string, error) {
 		}
 		return "", exec.ErrNotFound
 	}
-	return lookAgent(provider)
+	return lookAgent(agentCLIName(provider))
+}
+
+// agentCLIName is the program of provider: its own name, but agy for
+// Antigravity.
+func agentCLIName(provider string) string {
+	if provider == nodeproto.ProviderAntigravity {
+		return "agy"
+	}
+	return provider
 }
 
 // declareWork fills in what the node reports of its workstation

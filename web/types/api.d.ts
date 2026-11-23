@@ -129,6 +129,8 @@ export interface BrainManifest {
   routing: Routing;
   model?: string;
   effort?: string;
+  /** claude, codex or antigravity; unset (or "") inherits agent_provider. */
+  provider?: string;
   /** Overrides the global list; unset inherits it, [] allows all. */
   disallowed_tools?: string[];
   prompt_file?: string;
@@ -390,6 +392,8 @@ export interface Status {
   agent_provider: string;
   /** Only in Codex mode. */
   codex?: AgentCLIStatus;
+  /** agy, when a brain runs on Antigravity. */
+  antigravity?: AgentCLIStatus;
   sandbox: SandboxStatus;
   brains: BrainRuntime[];
   issues: BrainIssue[];
@@ -620,6 +624,9 @@ export interface ConfigFile {
   codex_path?: string;
   codex_model?: string;
   codex_effort?: string;
+  antigravity_path?: string;
+  antigravity_model?: string;
+  antigravity_effort?: string;
   data_dir: string;
   db_path?: string;
   media_dir?: string;

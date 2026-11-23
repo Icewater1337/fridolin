@@ -47,6 +47,11 @@ type BrainHooks struct {
 	// CodexSetup supplies the site builder's instructions and MCP settings
 	// using Codex's format; credentials travel in the environment, not argv.
 	CodexSetup func(brainID string) (args, env []string, prompt string, err error)
+	// SiteSetup is the site builder's MCP server (its command line), its
+	// variables and instructions, for an Antigravity run, which reads
+	// the server from the brain's mcp_config.json; nil cmd for a brain
+	// that does not build the site.
+	SiteSetup func(brainID string) (cmd, env []string, prompt string, err error)
 	// RunEnv adds variables to one run's environment (the brain API's
 	// address and a token for the run) and the MCP server with the
 	// bridge's tools, and says what to call once the run is over (Done).

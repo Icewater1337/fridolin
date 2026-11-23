@@ -82,6 +82,7 @@ Content-Type: application/json
     "allowed_numbers": [
       "15551234567"
     ],
+    "antigravity_path": "agy",
     "backup": {
       "daily_at": "03:30",
       "enabled": true,

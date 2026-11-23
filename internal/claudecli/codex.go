@@ -10,11 +10,13 @@ import (
 
 const DefaultCodexModel = "gpt-6.1-sol"
 
+// AgentName is the provider's name in messages: its CLI's.
 func AgentName(provider string) string {
-	if provider == "codex" {
-		return "codex"
+	switch provider {
+	case ProviderCodex, ProviderAntigravity:
+		return provider
 	}
-	return "claude"
+	return ProviderClaude
 }
 
 // Codex's combined web tool covers both Claude web tools. Turning it off

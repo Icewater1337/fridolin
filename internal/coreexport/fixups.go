@@ -19,7 +19,7 @@ import (
 
 // ProgramKeys are the settings that name a program the bridge runs, which
 // a native install may have pointed at a file of the Mac's.
-var ProgramKeys = []string{"claude_path", "codex_path", "backup.rclone_path", "plaud.cli_path"}
+var ProgramKeys = []string{"claude_path", "codex_path", "antigravity_path", "backup.rclone_path", "plaud.cli_path"}
 
 // HostKeys are what a move back to the native install takes from the
 // native config.json it replaces rather than from the container's: where
@@ -127,6 +127,8 @@ func editConfig(dataDir string, edit func(c config) ([]string, error)) ([]string
 var ImagePrograms = map[string]string{
 	"claude_path": "/usr/local/bin/claude",
 	"codex_path":  "/usr/local/bin/codex",
+	// agy's installer puts it in ~/.local/bin on the Mac.
+	"antigravity_path": "/usr/local/bin/agy",
 }
 
 // ResetProgramPaths replaces the program settings (ProgramKeys) of
@@ -198,7 +200,8 @@ func AddAllowPaths(dataDir string, paths []string) ([]string, error) {
 
 // ForRehearsal turns off, in dataDir's config.json, what would reach past
 // a rehearsal of a move while the native install still runs on the same
-// accounts: brains' runs (claude_path and codex_path become /usr/bin/false,
+// accounts: brains' runs (claude_path, codex_path and antigravity_path
+// become /usr/bin/false,
 // so a run fails at once and spends nothing, and no login is refreshed
 // under the native install), Plaud, the Google Drive backup, the lease, the
 // tailnet, nodes and the vault.
@@ -213,7 +216,7 @@ func ForRehearsal(dataDir string) ([]string, error) {
 			notes = append(notes, fmt.Sprintf("rehearsal: %s = %s", key, raw))
 			return c.set(key, raw)
 		}
-		for _, key := range []string{"claude_path", "codex_path"} {
+		for _, key := range []string{"claude_path", "codex_path", "antigravity_path"} {
 			if err := set(key, "/usr/bin/false"); err != nil {
 				return nil, err
 			}

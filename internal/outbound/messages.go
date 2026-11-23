@@ -97,12 +97,14 @@ const (
 // CLI's stderr, with local paths and sandbox denials, and in a group every
 // member would read it.
 const (
-	ChatErrCodexNotSignedIn = "🔑 Codex is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again."
-	ChatErrCodexLimit       = "⏳ Codex's usage limit is reached for now. Try again later."
-	ChatErrNotSignedIn      = "🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again."
-	ChatErrLimit            = "⏳ Claude's usage limit is reached for now. Try again later."
-	ChatErrTimeout          = "⌛ That took too long and was stopped. Try again, perhaps with a smaller request."
-	ChatErrGeneric          = "❌ Something went wrong — details on the bridge dashboard."
+	ChatErrCodexNotSignedIn       = "🔑 Codex is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again."
+	ChatErrCodexLimit             = "⏳ Codex's usage limit is reached for now. Try again later."
+	ChatErrAntigravityNotSignedIn = "🔑 Antigravity is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again."
+	ChatErrAntigravityLimit       = "⏳ Antigravity's usage limit is reached for now. Try again later."
+	ChatErrNotSignedIn            = "🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again."
+	ChatErrLimit                  = "⏳ Claude's usage limit is reached for now. Try again later."
+	ChatErrTimeout                = "⌛ That took too long and was stopped. Try again, perhaps with a smaller request."
+	ChatErrGeneric                = "❌ Something went wrong — details on the bridge dashboard."
 )
 
 // ChatErrSandbox is what a chat is told about a run its sandbox kept from
@@ -115,6 +117,10 @@ func ChatErrClaude(msg string) string { return "❌ Claude: " + textx.Truncate(m
 
 // ChatErrCodex is Codex's own short account, shown only in a direct chat.
 func ChatErrCodex(msg string) string { return "❌ Codex: " + textx.Truncate(msg, 300) }
+
+// ChatErrAntigravity is agy's own short account, shown only in a direct
+// chat.
+func ChatErrAntigravity(msg string) string { return "❌ Antigravity: " + textx.Truncate(msg, 300) }
 
 // BuildChatError is what a build chat on the Site's Build page shows for
 // a message the builder brain could not take.
@@ -541,20 +547,21 @@ func FridePlacedNotice(thread int64, node string) string {
 	return fmt.Sprintf("🛠️ *FrIDE #%d* went to %s now.", thread, node)
 }
 
-// FrideFailoverNotice says thread's work left node from, offline for
-// down, for to, where FrIDE took it as its thread (0 when not known yet).
-func FrideFailoverNotice(thread int64, from string, down time.Duration, to string, toThread int, branch string) string {
+// FrideFailoverNotice says thread's work left node from for to, where
+// FrIDE took it as its thread (0 when not known yet); gone says why it
+// left (FrideOffline, FrideCannotRun).
+func FrideFailoverNotice(thread int64, from, gone, to string, toThread int, branch string) string {
 	there := to
 	if toThread > 0 {
 		there = fmt.Sprintf("%s (its thread %d there)", to, toThread)
 	}
-	return fmt.Sprintf("🔀 *FrIDE #%d* moved from %s to %s: %s, and %s. The task left on %s is archived into the vault and removed there once it is back.", thread, from, there, frideOffline(from, down), frideResumes(branch), from)
+	return fmt.Sprintf("🔀 *FrIDE #%d* moved from %s to %s: %s, and %s. The task left on %s is archived into the vault and removed there once it can be reached.", thread, from, there, gone, frideResumes(branch), from)
 }
 
-// FrideFailoverWaitsNotice says thread's work left node from, offline for
-// down, but no other node can take it now, and why.
-func FrideFailoverWaitsNotice(thread int64, from string, down time.Duration, why, branch string) string {
-	return fmt.Sprintf("⏳ *FrIDE #%d* left %s (%s) but waits: no other node can take it now (%s). Once one can, %s, and I'll say so here.", thread, from, frideOffline(from, down), why, frideResumes(branch))
+// FrideFailoverWaitsNotice says thread's work left node from, for the
+// reason gone, but no other node can take it now, and why.
+func FrideFailoverWaitsNotice(thread int64, from, gone, why, branch string) string {
+	return fmt.Sprintf("⏳ *FrIDE #%d* left %s (%s) but waits: no other node can take it now (%s). Once one can, %s, and I'll say so here.", thread, from, gone, why, frideResumes(branch))
 }
 
 // FrideMoveUsage answers a !move that names no thread and node.

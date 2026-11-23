@@ -550,14 +550,16 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		file    string // a file that sets it, %s for the value as JSON
 	}{
 		{"brain_effort", "config.schema.json#/properties/brain_effort", manifest.Efforts(), `{"brain_effort": %s}`},
-		{"agent_provider", "config.schema.json#/properties/agent_provider", []string{"", "claude", "codex"}, `{"agent_provider": %s}`},
+		{"agent_provider", "config.schema.json#/properties/agent_provider", manifest.ProviderValues(), `{"agent_provider": %s}`},
 		{"codex_effort", "config.schema.json#/properties/codex_effort", manifest.Efforts(), `{"codex_effort": %s}`},
+		{"antigravity_effort", "config.schema.json#/properties/antigravity_effort", manifest.Efforts(), `{"antigravity_effort": %s}`},
 		{"fride.news", "config.schema.json#/properties/fride/properties/news", config.FrideNewsModes(), `{"fride": {"news": %s}}`},
 		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", config.QueueModes(), `{"queue": {"mode": %s}}`},
 		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", config.GitConfigs(), `{"sandbox": {"git_config": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},
 		{"log_level", "config.schema.json#/properties/log_level", levels, `{"log_level": %s}`},
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
+		{"brain.json provider", "brain.schema.json#/properties/provider", manifest.ProviderValues(), `{"id": "a", "name": "A", "provider": %s}`},
 		{"brain.json observe", "brain.schema.json#/properties/observe", manifest.ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
 		{"brain.json approvals", "brain.schema.json#/properties/approvals", manifest.ApprovalsModes(), `{"id": "a", "name": "A", "approvals": %s}`},
 		{"brain.json live_session", "brain.schema.json#/properties/live_session", manifest.LiveSessionModes(), `{"id": "a", "name": "A", "live_session": %s}`},

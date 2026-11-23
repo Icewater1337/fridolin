@@ -28,7 +28,7 @@ type Capabilities struct {
 	// Update lets the core replace the node's fridolin with its own
 	// version's build (update.go).
 	Update *UpdateCap `json:"update,omitempty"`
-	// Agent runs Claude Code or Codex sessions, and Terminal shells, in
+	// Agent runs Claude Code, Codex or Antigravity sessions, and Terminal shells, in
 	// granted folders: the workstation mode (workstation.go).
 	Agent    *WorkstationCap `json:"agent,omitempty"`
 	Terminal *WorkstationCap `json:"terminal,omitempty"`

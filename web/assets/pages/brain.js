@@ -42,7 +42,7 @@ import { agentOfChat } from '../lib/schedules.js';
  * @typedef {object} SettingsData
  * @property {BrainManifest} manifest
  * @property {boolean} drift
- * @property {{brain_model: string, brain_effort: string, disallowed_tools: string[]}} eff the inherited settings
+ * @property {{brain_model: string, brain_effort: string, agent_provider: string, disallowed_tools: string[]}} eff the inherited settings
  * @property {string[]} allowedGroups
  * @property {OtherBrain[]} others
  */
@@ -385,7 +385,7 @@ export default /** @satisfies {PageModule} */ ({
       settings.set({
         manifest: m,
         drift: b.status === 'drift',
-        eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', disallowed_tools: eff.disallowed_tools || [] },
+        eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', agent_provider: eff.agent_provider || '', disallowed_tools: eff.disallowed_tools || [] },
         allowedGroups: (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [],
         others: brains.flatMap((o) => (o.id && o.id !== id && o.manifest ? [{ id: o.id, name: o.name, manifest: { routing: o.manifest.routing, role: o.manifest.role || '' } }] : [])),
       });

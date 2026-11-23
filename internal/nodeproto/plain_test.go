@@ -27,7 +27,7 @@ func TestPlain(t *testing.T) {
 		"build Android apps there",
 		"keep Fridolin's encrypted backups in folders there",
 		"update Fridolin there to the core's version",
-		"run Claude Code or Codex sessions in /w — they can run any command there",
+		"run Claude Code, Codex or Antigravity sessions in /w — they can run any command there",
 		"open a terminal in /1, /2 and 2 more folders — anything you could type there",
 	}, "\n")
 	if got != want {
