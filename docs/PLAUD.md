@@ -120,7 +120,7 @@ phone is paired), or ask the core brain, which has `plaud_app_update` and
 
 1. Fridolin builds the app as above. The build's versionCode is past the
    build before and past what each phone runs; its versionName is the
-   source's (`0.8`). Fridolin keeps it with its SHA-256 and the certificate
+   source's (`0.9`). Fridolin keeps it with its SHA-256 and the certificate
    it is signed with (`<data_dir>/plaud/app/release.json`).
 2. At its check-ins (at most every 10 minutes, and at once when the app is
    opened or was just updated), the app asks for the release through the
@@ -257,9 +257,28 @@ While it is on:
 - The phone reads the answer with Android's text-to-speech, with markdown
   stripped, links read as "a link to example.com" and polls read as a list.
   It picks German or English for each answer, where the phone has that
-  voice. Music ducks meanwhile. A call stops it, and it goes on from the
-  same sentence after the call. **Stop** silences it and drops what waits;
-  **Skip** goes on to the next answer.
+  voice (else its default voice). It takes the audio focus only while it
+  speaks: music and videos duck meanwhile and are back to full volume as
+  soon as it is done. A call pauses it, and it goes on from the same
+  sentence after the call. An app that takes the audio for good (a video
+  you start) stops it and keeps the audio: the answer waits, from the
+  sentence it was in, until you unlock the phone, the next answer comes,
+  or **Skip**. **Stop** silences it and drops what waits; **Skip** goes on
+  to the next answer.
+- **When text-to-speech fails, the app starts it anew.** A sentence the
+  phone's text-to-speech does not take, reports an error for, or does not
+  finish within 15 seconds plus half a second a word (at most 2 minutes)
+  lets go of the audio, and is said again by a fresh text-to-speech
+  engine. After two failed tries the answer is dropped (WhatsApp has it,
+  unless `voice_quiet`), and the next one goes on. An engine that does not
+  start is tried again after 2 seconds, then longer, up to every 5
+  minutes, and at once when an answer comes.
+- The app's log (**Share log**) says, without the answer, why an answer is
+  not spoken right away: the phone locked, a call, another app holding
+  the audio or the focus denied, text-to-speech starting, failed or timed
+  out, no voice for the answer's language. Fridolin's log follows each
+  answer as far as the phone: sealed for it (with how many words), and
+  fetched (done, failed or unknown).
 - **On the lock screen** an answer waits until the phone is unlocked. The
   notification then says only *Answer ready, unlock to hear it*, never the
   text. The app's **Speak answers while the phone is locked** allows
