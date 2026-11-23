@@ -88,3 +88,22 @@ func TestFrideThreadsOnInstances(t *testing.T) {
 		t.Errorf("a save changed the instance: %v", err)
 	}
 }
+
+func TestFrideOrphans(t *testing.T) {
+	s, ctx := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db")), context.Background()
+	for _, o := range []FrideOrphan{{Thread: 3, Node: "abc", TaskID: "health"}, {Thread: 4, Node: "abc", Instance: "work", FrideThread: 9}} {
+		if err := s.AddFrideOrphan(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.FrideOrphans(ctx)
+	if err != nil || len(got) != 2 || got[0].TaskID != "health" || got[1].Instance != "work" || got[1].FrideThread != 9 || got[0].CreatedAt.IsZero() {
+		t.Fatalf("FrideOrphans = %+v, %v", got, err)
+	}
+	if err := s.DeleteFrideOrphan(ctx, got[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.FrideOrphans(ctx); len(got) != 1 || got[0].Thread != 4 {
+		t.Errorf("after delete: %+v", got)
+	}
+}
