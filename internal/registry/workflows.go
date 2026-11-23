@@ -226,6 +226,26 @@ func (g *Registry) SetUploadFolder(id, folder, mode string) error {
 	return err
 }
 
+// SetNodeRule sets brain id's node_policy rule for rule.Folder: a rule
+// that limits nothing removes it. The owner sets it, so it is approved
+// as it is saved.
+func (g *Registry) SetNodeRule(id string, rule manifest.NodeRule) error {
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
+		return g.updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
+			list := slices.DeleteFunc(slices.Clone(m.NodePolicy), func(r manifest.NodeRule) bool { return r.Folder == rule.Folder })
+			if rule.Storage != nil || len(rule.Tasks) > 0 || len(rule.Repos) > 0 {
+				list = append(list, rule)
+			}
+			m.NodePolicy = list
+			if err := m.Validate(); err != nil {
+				return apperr.New(apperr.Invalid, err.Error())
+			}
+			return nil
+		})
+	})
+	return err
+}
+
 func (g *Registry) AllowChat(dm bool, entry, brainID string) error {
 	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		if dm {

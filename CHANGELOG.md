@@ -10,6 +10,16 @@ for compatibility.
 
 ### Added
 
+- **Per-folder node policy.** brain.json's new `node_policy` says, per
+  folder and everything in it, where its copies may land (`storage`:
+  nodes, backup targets, `cloud`) and which nodes may run backups,
+  coding (FrIDE, agent sessions) and commands (`node_exec`, terminals)
+  on it; `repos` ties FrIDE repositories to a folder. Set it on the
+  Files page or from a brain (approved like any brain.json change).
+  Backups, FrIDE routing and instances, the workstation tools,
+  `node_exec` and the core move's pre-flight follow it, and never fall
+  back to a node it denies: the work waits or fails with the reason.
+  Without it nothing changes. [docs/FILES.md](docs/FILES.md#node-policy)
 - **FrIDE work leaves a node that is offline for an hour.** Work the core
   handed to FrIDE on a node, or to a FrIDE instance there, that has been
   offline longer than the new `fride.failover_minutes` (default 60; -1

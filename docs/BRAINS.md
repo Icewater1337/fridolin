@@ -230,6 +230,12 @@ one a newer version added, is logged by its path when the bridge reads the
 file; the brain loads without it, and the next edit in the dashboard drops
 it from the file.
 
+### Node policy
+
+`node_policy` limits, per folder and everything in it, where copies may
+land and which nodes may run backups, coding and commands on it:
+[FILES.md](FILES.md#node-policy). Without it nothing is limited.
+
 ### The fallback brain
 
 The brain marked `routing.default`, or without one the first brain in

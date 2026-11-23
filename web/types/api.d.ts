@@ -2636,6 +2636,31 @@ export interface FilesList {
   upload: FileUpload;
   /** The upload folder of the brain this folder lies in, for a reader who may change it. */
   rule?: UploadRule;
+  /** The folder's node policy (brain.json node_policy), for a reader who may change it. */
+  node_policy?: NodePolicy;
+}
+
+/** A folder's node policy: its own rule, and what limits it now. */
+export interface NodePolicy {
+  /** The folder, absolute. */
+  folder: string;
+  rule?: NodeRule;
+  /** By "storage", "backup", "coding", "exec": what limits it, where something does. */
+  effective: Record<string, NodeLimit>;
+}
+
+export interface NodeRule {
+  folder: string;
+  storage?: string[];
+  tasks?: Record<string, string[]>;
+  repos?: string[];
+}
+
+export interface NodeLimit {
+  nodes: string[];
+  /** The folder whose rule sets it. */
+  from: string;
+  brains: string;
 }
 
 export type FileUpload = '' | 'folder' | 'brain';

@@ -18,6 +18,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -254,6 +255,29 @@ func threadList(ts []store.FrideThread) string {
 	return strings.Join(ids, ", ")
 }
 
+// allowedOn reports whether the instance may run on v: its config lets
+// it, and the node policy lets coding in its repositories run there.
+func (i *frideInstances) allowedOn(ic config.FrideInstanceConfig, v nodes.View) bool {
+	if !allowedOn(ic, v) {
+		return false
+	}
+	repos := make([]string, 0, len(ic.Repos))
+	for _, u := range ic.Repos {
+		repos = append(repos, repoName(u))
+	}
+	_, deny := manifest.Denying(i.f.b.repoLimits(repos), nodeKeys(v)...)
+	return !deny
+}
+
+// repoName is the folder name a clone of the git URL u gets.
+func repoName(u string) string {
+	u = strings.TrimSuffix(strings.TrimRight(u, "/"), ".git")
+	if k := strings.LastIndexAny(u, "/:"); k >= 0 {
+		u = u[k+1:]
+	}
+	return u
+}
+
 // allowedOn reports whether the instance's config lets it run on v.
 func allowedOn(ic config.FrideInstanceConfig, v nodes.View) bool {
 	if len(ic.Nodes) == 0 {
@@ -360,7 +384,7 @@ func (i *frideInstances) hosts(name string, ic config.FrideInstanceConfig, views
 	var out []frideHost
 	tpl, lent := i.template(), i.lends(ic)
 	for _, v := range views {
-		if !hostReady(v, tpl, lent) || !allowedOn(ic, v) || pin != "" && v.ID != pin {
+		if !hostReady(v, tpl, lent) || !i.allowedOn(ic, v) || pin != "" && v.ID != pin {
 			continue
 		}
 		fh := v.Effective.FrideHost
@@ -386,7 +410,7 @@ func (i *frideInstances) hosts(name string, ic config.FrideInstanceConfig, views
 
 // noHost says why no node can start instance name; tpl is the template
 // the core sends, lent whether it lends its Claude token.
-func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin, tpl string, lent bool) string {
+func (i *frideInstances) noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin, tpl string, lent bool) string {
 	if pin != "" {
 		why := "is not in the registry"
 		if i := slices.IndexFunc(views, func(v nodes.View) bool { return v.ID == pin }); i >= 0 {
@@ -409,7 +433,7 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin,
 	}
 	var problems []string
 	for _, v := range views {
-		if v.Device != nodeproto.DeviceApproved || v.Effective.FrideHost == nil || !allowedOn(ic, v) {
+		if v.Device != nodeproto.DeviceApproved || v.Effective.FrideHost == nil || !i.allowedOn(ic, v) {
 			continue
 		}
 		switch {
@@ -426,6 +450,13 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin,
 	why := "no approved node offers FrIDE instances (fride_host)"
 	if len(ic.Nodes) > 0 {
 		why += " among " + strings.Join(ic.Nodes, ", ")
+	}
+	repos := make([]string, 0, len(ic.Repos))
+	for _, u := range ic.Repos {
+		repos = append(repos, repoName(u))
+	}
+	for _, l := range i.f.b.repoLimits(repos) {
+		why += " that the node policy allows for coding: " + l.Text()
 	}
 	if len(problems) > 0 {
 		why = "no node can start FrIDE instances now (" + strings.Join(problems, "; ") + ")"
@@ -555,7 +586,7 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	hosts := i.hosts(name, ic, views, pin, open)
 	i.tellNoLogin(noLoginOn(ic, views, i.lends(ic)))
 	if len(hosts) == 0 {
-		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin, i.template(), i.lends(ic))), false)
+		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, i.noHost(name, ic, views, pin, i.template(), i.lends(ic))), false)
 	}
 	spot, ok := placeFrideInstance(name, tries, hosts)
 	if !ok {

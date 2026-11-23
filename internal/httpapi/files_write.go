@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/files"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -99,6 +100,68 @@ type FilesHistoryResponse struct {
 type UploadRuleView struct {
 	Folder string `json:"folder"`
 	Mode   string `json:"mode"`
+}
+
+// NodePolicyView is, for the owner, the node policy (brain.json
+// node_policy, #760) of a folder: the rule set on the folder itself, if
+// any, and what limits it in effect, by dimension ("storage") and task
+// kind ("backup", "coding", "exec").
+type NodePolicyView struct {
+	Folder    string                   `json:"folder"`
+	Rule      *manifest.NodeRule       `json:"rule,omitempty"`
+	Effective map[string]NodeLimitView `json:"effective"`
+}
+
+// NodeLimitView is one limit in effect: the nodes it allows ([] none),
+// and the folder whose rule sets it. A dimension nothing limits is not
+// listed.
+type NodeLimitView struct {
+	Nodes  []string `json:"nodes"`
+	From   string   `json:"from"`
+	Brains string   `json:"brains"`
+}
+
+// nodePolicyRequest is PUT files/node-policy: the folder's own rule. A
+// list left out (null) does not limit; storage and tasks.* [] allow
+// nothing. All of them left out removes the rule.
+type nodePolicyRequest struct {
+	Root    string              `json:"root"`
+	Path    string              `json:"path"`
+	Storage *[]string           `json:"storage"`
+	Tasks   map[string][]string `json:"tasks"`
+	Repos   []string            `json:"repos"`
+}
+
+func (a *FilesAPI) setNodePolicy(w http.ResponseWriter, r *http.Request, s files.Scope) {
+	var req nodePolicyRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	root, ok := a.root(req.Root, s)
+	if !ok || root.Kind == files.KindMedia {
+		WriteErr(w, http.StatusNotFound, "no such brain or node folder")
+		return
+	}
+	rel, err := files.Clean(req.Path)
+	if err == nil && root.Hidden(rel, s) {
+		err = errors.New("choose a folder Fridolin shows")
+	}
+	if err == nil && root.Kind == files.KindBrain {
+		_, _, err = root.List(rel, s)
+	}
+	if err == nil && a.SetNodeRule == nil {
+		err = errors.New("this Fridolin cannot change brains")
+	}
+	if err == nil {
+		err = a.SetNodeRule(root, rel, manifest.NodeRule{Storage: req.Storage, Tasks: req.Tasks, Repos: req.Repos})
+	}
+	a.audited(s, root, FileChange{Action: "node-policy", Path: rel}, err)
+	if err != nil {
+		writeChangeErr(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }
 
 func (a *FilesAPI) audited(s files.Scope, root files.Root, c FileChange, err error) {

@@ -47,6 +47,10 @@ Content-Type: application/json
       "size": "<SIZE>"
     }
   ],
+  "node_policy": {
+    "effective": {},
+    "folder": "<HOME>/main"
+  },
   "path": "",
   "root": "brain:main",
   "truncated": false,

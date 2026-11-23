@@ -14,6 +14,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -150,6 +151,13 @@ func (w *workRuntime) place(kind, want, folder string) (nodes.View, string, erro
 	}
 	if !wc.AllowsFolder(folder) {
 		return v, "", fmt.Errorf("%s is not in a folder %s may use for %s; granted: %s", folder, v.Name, kind, strings.Join(wc.Roots, ", "))
+	}
+	task := manifest.TaskExec
+	if kind == "agent" {
+		task = manifest.TaskCoding
+	}
+	if err := w.b.checkFolderTask(task, folder, v); err != nil {
+		return v, "", err
 	}
 	return v, folder, nil
 }

@@ -345,7 +345,7 @@ func (s *vaultService) refreshLayout() {
 	for _, r := range cfg.BrainDirs {
 		refs = append(refs, vaultBrainRef{Dir: r.Path, Approved: r.Approved})
 	}
-	l := vaultLayoutOf(cfg, brains, vaultBrainBackups(loaded, refs, cfg.Backup.IncludeSecretFiles))
+	l := vaultLayoutOf(cfg, brains, vaultBrainBackups(loaded, refs, cfg.Backup.IncludeSecretFiles, cfg.Boot.Home))
 	prev := s.layout.Swap(&l)
 	s.noteSkipped(prev, l)
 }
