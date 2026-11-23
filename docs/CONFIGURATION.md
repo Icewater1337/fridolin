@@ -425,13 +425,16 @@ In the core's container:
 docker exec -it fridolin-core env HOME=/data/brains/main/antigravity agy
 ```
 
-agy prints a sign-in link; open it, sign in, and paste the code back if
-it asks. The bridge cannot see a login from outside (agy keeps it in the
-system keyring or in a file of its own), so the Overview shows that
-command once a run of the brain failed for want of one, and the chat is
-told to look there. On macOS the sandbox closes the keychain to brains,
-so a login agy keeps there is not visible to a sandboxed run; whether agy
-then finds one in its file store is not settled yet.
+agy offers Google OAuth; choose it, open the sign-in link it prints, sign
+in, and paste the code Google shows back into agy. Where there is no
+system keyring, as in the core's container, agy keeps the login in files
+of that home (`.gemini/antigravity-cli/antigravity-oauth-token` and
+`.config/antigravity/`), so it lasts across runs and restarts and stays
+with that one brain. On macOS agy keeps it in the keychain instead, which
+Fridolin's sandbox closes to brains, so a natively run bridge on macOS
+may need the API key below for sandboxed brains. The bridge cannot see a
+login from outside, so the Overview shows the sign-in command once a run
+of the brain failed for want of one, and the chat is told to look there.
 
 An alternative is a Gemini API key: `GEMINI_API_KEY` in the service
 environment, passed only to Antigravity runs, which then run with
