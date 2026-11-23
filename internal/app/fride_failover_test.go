@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -132,9 +133,10 @@ func TestFrideCloseAndMoveWhileNodeOffline(t *testing.T) {
 func TestFrideInstanceFailoverUnblocksTheInstance(t *testing.T) {
 	t.Parallel()
 	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
-	optionsOf(t).waits.frideFailoverUnit = 30 * time.Millisecond
+	optionsOf(t).waits.frideFailoverUnit = 10 * time.Millisecond
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
-	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"instances": {"work": {}}}}`)
+	// The failover is off until the instance is seen held on icebase.
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"failover_minutes": -1, "instances": {"work": {}}}}`)
 	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
 	addr := h.StartNodes()
 	icebase := h.fakeHostNode("icebase", addr, 32768, 30000, 6144)
@@ -157,6 +159,12 @@ func TestFrideInstanceFailoverUnblocksTheInstance(t *testing.T) {
 		t.Fatalf("fride_task while icebase is offline:\n%s", reply)
 	}
 	// …until the failover moves #1 off it, and #2 follows.
+	if _, err := h.b.cfgs.Update("", func(c *config.File) error {
+		c.Fride.FailoverMinutes = 1
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	h.WaitSent(harnessDM, "🔀 *FrIDE #1* moved from icebase/work to mini/work")
 	h.WaitSent(harnessDM, "🛠️ *FrIDE #2* went to mini/work now.")
 	for _, id := range []int64{1, 2} {
