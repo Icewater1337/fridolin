@@ -66,6 +66,84 @@ func TestFrideInstanceScripts(t *testing.T) {
 	}
 }
 
+// The prepare script writes a new instance's FrIDE config from the one
+// the node gives, and gives a config put back from history what it lacks
+// of it, keeping what it has.
+func TestFrideInstancePrepareConfig(t *testing.T) {
+	t.Parallel()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("no jq")
+	}
+	given, err := companionConfig(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepare := func(home, stdin string) map[string]any {
+		t.Helper()
+		c := exec.Command(sh, frideInstanceScript(frideInstancePrepare)[1:]...)
+		c.Env = append(os.Environ(), "HOME="+home)
+		c.Stdin = strings.NewReader(stdin)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		b, err := os.ReadFile(filepath.Join(home, "fride-companion", "home", "config.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg map[string]any
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	get := func(cfg map[string]any, keys ...string) any {
+		var v any = cfg
+		for _, k := range keys {
+			m, _ := v.(map[string]any)
+			v = m[k]
+		}
+		return v
+	}
+
+	home := t.TempDir()
+	cfg := prepare(home, string(given))
+	if cfg["name"] != "fridolin companion (instance)" || cfg["workspaceRoot"] != filepath.Join(home, "fride-companion", "workspaces") ||
+		get(cfg, "repos", "fridolin", "build") == nil || get(cfg, "review", "approvals", "normal") != 0.0 {
+		t.Errorf("a new instance's config: %v", cfg)
+	}
+
+	// An older config from history, which the owner changed.
+	home = t.TempDir()
+	writeTestFile(t, filepath.Join(home, "fride-companion", "home", "config.json"),
+		`{"version":1,"name":"mine","workspaceRoot":"/old/ws","baseFolders":["/old/repos"],"maxSlots":4,`+
+			`"review":{"approvals":{"normal":1}},"repos":{"fride":{"test":"make test"}},"companion":{"enabled":true,"claudeAllow":[]}}`)
+	cfg = prepare(home, string(given))
+	for _, c := range []struct {
+		keys []string
+		want any
+	}{
+		{[]string{"name"}, "mine"},
+		{[]string{"maxSlots"}, 4.0},
+		{[]string{"review", "approvals", "normal"}, 1.0},
+		{[]string{"review", "approvals", "risky"}, 0.0},
+		{[]string{"repos", "fride", "test"}, "make test"},
+		{[]string{"repos", "fride", "build"}, "go build ./..."},
+		{[]string{"repos", "fridolin", "build"}, "go build ./..."},
+		{[]string{"workspaceRoot"}, filepath.Join(home, "fride-companion", "workspaces")},
+	} {
+		if got := get(cfg, c.keys...); got != c.want {
+			t.Errorf("%s: %v, want %v", strings.Join(c.keys, "."), got, c.want)
+		}
+	}
+	if allow, _ := get(cfg, "companion", "claudeAllow").([]any); len(allow) != 0 {
+		t.Errorf("claudeAllow: %v, want the owner's empty list", allow)
+	}
+}
+
 func TestFrideRepoFrom(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{

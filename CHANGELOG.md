@@ -329,6 +329,21 @@ for compatibility.
 
 ### Changed
 
+- **FrIDE instances and the box's FrIDE run FrIDE 15ca58b** (was
+  aa7d94c, from 2026-10-30): stacked pull requests, task agents that
+  commit and push small steps, the orchestrator's own panels, and every
+  fix since. That FrIDE opens pull requests only through `fride pr`,
+  which runs a repository's `build` and `test` first, and waits for a
+  person's approval before a task is Done: the config the template and
+  the box's image bring (`container/fride/companion.json`) now sets
+  `build` and `test` for fridolin and fride and turns that wait off, so
+  the core can still close finished tasks. An instance's config from
+  before, put back when its sandbox is made anew, and a box's from an
+  older image gain those settings and keep their own. A native
+  companion needs the same two settings in its `config.json`
+  ([docs/NODES.md](docs/NODES.md#the-config)). An instance gets the new
+  FrIDE when its node rebuilds the template (`fridolin node fride host
+  setup`) and its sandbox is made anew.
 - **A brain's calendar writes follow the policy.** `fridolin calendar
   create` and `delete` are now refused in a run whose risk level is
   `read` and in a lockdown, as the bridge's own tools that write are. An

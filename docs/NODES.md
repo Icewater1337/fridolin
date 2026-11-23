@@ -1946,6 +1946,11 @@ more with the owner later (see FrIDE's SETUP.md).
       }
     }
   },
+  "repos": {
+    "fridolin": { "build": "go build ./...", "test": "go vet ./... && go test -short ./..." },
+    "fride": { "build": "go build ./...", "test": "go vet ./... && go test -short ./..." }
+  },
+  "review": { "approvals": { "normal": 0, "risky": 0 } },
   "companion": {
     "enabled": true,
     "claudePlugins": ["~/fride-companion/plugins/ponytail"],
@@ -1953,6 +1958,15 @@ more with the owner later (see FrIDE's SETUP.md).
   }
 }
 ```
+
+FrIDE's task agents open pull requests with `fride pr`, which runs the
+repository's `build` and `test` first and refuses a repository that has
+neither (FrIDE's docs/CONFIG.md, "pr"); `repos` gives fridolin and fride
+theirs. Add the same for each further repository the companion's agents
+change. `review.approvals` at zero turns off FrIDE's wait for a person's
+approval in its Review tab before a task is Done: nobody approves there,
+and without it the core's close of a finished task
+(`POST /api/companion/tasks/<id>/close`) is refused.
 
 `claudeAllow` lets every task agent merge its own pull request once CI is
 green, as the bug fixer asks: Claude Code's auto mode, which FrIDE's agents
@@ -2318,7 +2332,10 @@ clones of large repositories; the node gives it 20 minutes at most.
   box's ([container/fride/companion.json](../container/fride/companion.json),
   from the checkout a template was built from, else the template's own
   copy), with the VM's base folder and workspaces; Claude Code trusts
-  the workspaces.
+  the workspaces. A config put back from [History](#history) keeps what
+  it has and gains what it lacks of that one, key by key, so a setting a
+  newer FrIDE needs reaches an instance made anew; the box's FrIDE does
+  the same with its image's config at each start.
 
 A start of an instance that runs with the same memory only brings the
 network, tokens, login, identities and repositories up to date: the

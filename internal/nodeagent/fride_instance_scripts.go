@@ -14,26 +14,35 @@ const frideInstanceScriptPrefix = "# fride-instance: "
 
 // frideInstancePrepare makes FrIDE's folders, writes its config from
 // stdin, else from the template's own (/opt/fride/companion.json, which
-// the published template has), named for an instance (of one put back
-// from history, only its base folders and workspace root), with the VM's
-// own base folder and workspaces, marks ponytail's statusline offer as
-// made and the workspaces as trusted by Claude Code.
+// the published template has), named for an instance, with the VM's own
+// base folder and workspaces, marks ponytail's statusline offer as made
+// and the workspaces as trusted by Claude Code. A config put back from
+// history keeps what it has and gains what it lacks of that config, key
+// by key (jq's *), so that a setting a newer FrIDE needs reaches an
+// instance made anew.
 const frideInstancePrepare = `# fride-instance: prepare
 set -eu
 c="$HOME/fride-companion"
 h="$c/home"
 mkdir -p "$h" "$c/workspaces" "$c/repos" "$HOME/.claude"
 umask 077
-if [ -s "$h/config.json" ]; then
-	cp "$h/config.json" "$h/config.json.old"
-else
-	cat >"$h/config.json.old"
-	if [ ! -s "$h/config.json.old" ]; then
-		t=/opt/fride/companion.json
-		[ -s "$t" ] || { echo "the template has no FrIDE config ($t), and the node gave none: fridolin node fride host setup" >&2; exit 2; }
-		jq '.name = "fridolin companion (instance)"' "$t" >"$h/config.json.old"
-	fi
+t=/opt/fride/companion.json
+cat >"$h/config.json.new"
+if [ ! -s "$h/config.json.new" ] && [ -s "$t" ]; then
+	jq '.name = "fridolin companion (instance)"' "$t" >"$h/config.json.new"
 fi
+if [ -s "$h/config.json" ] && [ -s "$h/config.json.new" ]; then
+	jq -s '.[0] * .[1]' "$h/config.json.new" "$h/config.json" >"$h/config.json.old"
+elif [ -s "$h/config.json" ]; then
+	cp "$h/config.json" "$h/config.json.old"
+elif [ -s "$h/config.json.new" ]; then
+	cp "$h/config.json.new" "$h/config.json.old"
+else
+	rm -f "$h/config.json.new"
+	echo "the template has no FrIDE config ($t), and the node gave none: fridolin node fride host setup" >&2
+	exit 2
+fi
+rm -f "$h/config.json.new"
 jq --arg r "$c/repos" --arg w "$c/workspaces" '.baseFolders = [$r] | .workspaceRoot = $w' "$h/config.json.old" >"$h/config.json.tmp"
 mv "$h/config.json.tmp" "$h/config.json"
 rm -f "$h/config.json.old"
