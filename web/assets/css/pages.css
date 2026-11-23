@@ -367,6 +367,8 @@ blockquote.preview {
 .file-text { margin: 0; padding: 14px 16px; overflow: auto; max-height: 75dvh; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre; }
 .files-actions { display: flex; gap: 2px; justify-content: flex-end; white-space: nowrap; }
 .files-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.files-policy { margin: 0 0 12px; }
+.files-policy summary { cursor: pointer; font-weight: 600; }
 .file-edit .toolbar { margin: 12px 0 0; }
 .file-editor { display: block; width: 100%; min-height: 55dvh; font-family: var(--mono); font-size: 13px; }
 .file-history { margin: 0; padding-left: 18px; }

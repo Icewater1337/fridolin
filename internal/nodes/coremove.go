@@ -167,6 +167,9 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s: %s", rep.Target.Name, why))
 	}
 	s.moveSite(&rep)
+	if s.movePolicy != nil && rep.Target.ID != "" {
+		rep.Blocking = append(rep.Blocking, s.movePolicy(rep.Target.ID, rep.Target.Name)...)
+	}
 	// About 10 MB/s each way, plus stopping and starting.
 	secs := 2*rep.ExportBytes/(10<<20) + 120
 	rep.Outage = fmt.Sprintf("about %d to %d minutes", max(1, secs/60), max(2, 2*secs/60))

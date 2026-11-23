@@ -233,6 +233,73 @@ nowhere else, edits nothing, and renames and deletes nothing. You and a
 site admin upload into any writable folder, and to the brain in a
 `to_brain` one.
 
+## Node policy
+
+Each folder, and everything in it, can say which of your machines it may
+live on and which may work on it (#760). The default is no limit: any
+node, any target, any work. A rule is set on the Files page, in the
+folder (*Node policy*), or by a brain in its `brain.json`, which waits
+for your approval like every other change a brain makes to its
+manifest ([BRAINS.md](BRAINS.md#approval)):
+
+```json
+"node_policy": [
+  { "folder": "work",
+    "storage": ["icebase"],
+    "tasks": { "backup": ["icebase"], "coding": ["icebase", "mac-mini"] },
+    "repos": ["acme-api"] }
+]
+```
+
+| Key | Means | Left out |
+| --- | --- | --- |
+| `folder` | relative to the brain folder (`""` is all of it), or absolute: a folder on a node or on the core (`/Users/you/work`, `D:\Work`, `~/work` for the core's home). A node folder's rule, set on the Files page, goes into the core brain's `brain.json` | — |
+| `storage` | where copies may land: nodes (name or id), backup targets (name), and `cloud` (the vault's B2 tier and snapshots, the Drive backup, a core export) | anywhere |
+| `tasks.backup` | the backup targets or nodes, and `cloud`, that may take backups | anywhere |
+| `tasks.coding` | the nodes for FrIDE tasks and instances, and node agent sessions (`node_agent_run`) | anywhere |
+| `tasks.exec` | the nodes for `node_exec` with its `dir` in the folder, and terminals (`node_terminal_open`) | anywhere |
+| `repos` | FrIDE repositories, by folder name, that belong to the folder: work in them gets its `coding` nodes | none |
+
+A list allows what it names, compared without case; `[]` allows
+nothing (on the Files page: `none`). For each key the closest rule that
+sets it wins: `work/notes` with only `tasks.coding` set still keeps the
+`storage` of `work`. Two brains' rules for the same folder allow only
+what both allow.
+
+**Where it holds.** Wherever Fridolin picks a node or a target:
+
+- **Backups**: a folder or part of one that a target may not take stays
+  out of it: the cloud (snapshots, cold tier, Drive, a core export) and
+  each node target, named by its target name, its node's name or its
+  node's id. A backup must pass both `storage` and `tasks.backup`. A rule
+  below one that keeps a folder out cannot let part of it back in. The
+  backups follow the approved rules and those of `brain.json` on disk,
+  whichever keeps more out.
+- **FrIDE**: `fride_task`, `fride_move` and `fride_repo_add` only pick a
+  node whose `coding` list allows each repository named; a FrIDE
+  instance with such a repository only starts on one.
+- **Workstation**: `node_agent_run` (`coding`) and `node_terminal_open`
+  (`exec`) in a folder.
+- **`node_exec`** with a `dir` in the folder (`exec`). Without `dir` it is
+  not limited: the node's own working folder is not a folder Fridolin
+  knows.
+- **Moving the core**: the pre-flight blocks a move to a node that a
+  brain folder, or a folder in one, may not live on and that the move
+  would take along. A folder the policy keeps off the cloud stays home,
+  as `backup.exclude` does, and does not block.
+
+**Never a silent fallback.** Work no allowed node can take now fails
+with the reason (`node_exec`, the workstation) or waits for one, its chat
+told why (FrIDE, as when no node offers FrIDE). Each decision is a log
+line starting `node policy:` (`skipped mac-mini for coding in acme-api:
+coding may run only on icebase …`), and each change on the Files page an
+audit line of kind `file_change`, action `node-policy`.
+
+`PUT /api/files/node-policy` with `{"root", "path", "storage", "tasks",
+"repos"}` sets a folder's own rule (all left out removes it); a folder's
+listing says `node_policy`: the folder, its own `rule`, and the limits
+in `effective`, each with the folder whose rule sets it.
+
 ## Ask the brain, and links
 
 A brain's file has **Ask the brain**: it opens your WhatsApp chat with
@@ -281,6 +348,7 @@ The dashboard's routes, with its token or session like the rest of
 | `POST /api/files/move` | `{"root", "path", "to"}`: its new `path` |
 | `POST /api/files/delete` | `{"root", "path"}`: where in the trash it went, as `path` |
 | `PUT /api/files/upload-rule` | `{"root", "path", "mode"}`, mode `folder`, `brain` or `""`: the folder's rule in `brain.json` `files.uploads` |
+| `PUT /api/files/node-policy` | `{"root", "path", "storage", "tasks", "repos"}`: the folder's rule in `brain.json` `node_policy` ([Node policy](#node-policy)) |
 
 A folder's listing says what the reader may do there: `writable`,
 `upload` (`folder`, `brain` or `""`) and, for you, the `rule` it lies

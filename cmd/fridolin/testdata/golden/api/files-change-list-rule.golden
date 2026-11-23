@@ -23,6 +23,10 @@ Content-Type: application/json
       "size": 6
     }
   ],
+  "node_policy": {
+    "effective": {},
+    "folder": "<HOME>/main/docs"
+  },
   "path": "docs",
   "root": "brain:main",
   "rule": {

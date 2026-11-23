@@ -20,6 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -522,17 +523,22 @@ func (f *frideRuntime) frideNodes(want string, repos []string) []nodes.View {
 		}
 		out = append(out, v)
 	}
+	// Never a node the node policy keeps coding in these repos off.
+	out, _ = allowedForRepos(out, f.b.repoLimits(repos), repos)
 	return out
 }
 
 // noFrideNode says why no node can take work for want and repos.
-func noFrideNode(want string, repos []string) string {
+func (f *frideRuntime) noFrideNode(want string, repos []string) string {
 	why := "no online node offers FrIDE"
 	if want != "" {
 		why += fmt.Sprintf(" that is or is tagged %q", want)
 	}
 	if len(repos) > 0 {
 		why += " with " + strings.Join(repos, ", ")
+	}
+	for _, l := range f.b.repoLimits(repos) {
+		why += " that the node policy allows for coding: " + l.Text()
 	}
 	return why
 }
@@ -544,7 +550,7 @@ func noFrideNode(want string, repos []string) string {
 func (f *frideRuntime) place(ctx context.Context, t *store.FrideThread, skip string) (placed bool, why string) {
 	cands := slices.DeleteFunc(f.frideNodes(t.WantNode, t.Repos), func(v nodes.View) bool { return v.ID == skip })
 	if len(cands) == 0 {
-		return false, noFrideNode(t.WantNode, t.Repos)
+		return false, f.noFrideNode(t.WantNode, t.Repos)
 	}
 	type fit struct {
 		v   nodes.View
@@ -601,6 +607,10 @@ func (f *frideRuntime) placeOnInstance(ctx context.Context, t *store.FrideThread
 	if err != nil {
 		return false, err.Error(), s
 	}
+	if l, deny := manifest.Denying(f.b.repoLimits(t.Repos), s.NodeID, s.Node); deny {
+		log.Printf("node policy: FrIDE #%d not handed to the instance %s on %s: coding in %s may run %s", t.ID, t.Instance, s.Node, strings.Join(t.Repos, ", "), l.Text())
+		return false, fmt.Sprintf("the node policy lets coding in %s run %s, and the FrIDE instance %s runs on %s", strings.Join(t.Repos, ", "), l.Text(), t.Instance, s.Node), s
+	}
 	th, err := f.b.nodes.FrideTask(ctx, s.NodeID, nodeproto.FrideTaskParams{FrideOn: nodeproto.FrideOn{Instance: t.Instance}, Message: t.Message, Repos: t.Repos, Ref: "fridolin-" + strconv.FormatInt(t.ID, 10), Source: "fridolin"})
 	if err != nil {
 		return false, fmt.Sprintf("%s: %v", f.where(s.NodeID, t.Instance), err), s
@@ -630,9 +640,10 @@ func (f *frideRuntime) addRepo(ctx context.Context, a repoAddArgs) (string, erro
 	if a.Instance != "" {
 		return f.addRepoOn(ctx, a)
 	}
-	cands := f.frideNodes(a.Node, nil)
+	// The node need not have the repository yet: the policy alone limits.
+	cands, _ := allowedForRepos(f.frideNodes(a.Node, nil), f.b.repoLimits([]string{a.Name}), []string{a.Name})
 	if len(cands) == 0 {
-		return "", errors.New(noFrideNode(a.Node, nil))
+		return "", errors.New(f.noFrideNode(a.Node, []string{a.Name}))
 	}
 	for _, v := range cands {
 		if slices.Contains(v.Effective.Fride.Repos, a.Name) {
@@ -1083,8 +1094,11 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 		}
 	}
 	targets := f.frideNodes(want, nil)
+	// The work's repositories limit where it may move to, but need not be
+	// on the target already: the move brings them.
+	targets, _ = allowedForRepos(targets, f.b.repoLimits(t.Repos), t.Repos)
 	if len(targets) == 0 {
-		return "", errors.New(noFrideNode(want, nil))
+		return "", errors.New(f.noFrideNode(want, t.Repos))
 	}
 	target := targets[0]
 	if target.ID == t.Node {

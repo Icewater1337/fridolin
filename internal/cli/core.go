@@ -411,6 +411,7 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 // (#189); useApproved follows the approved manifests alone.
 func exportFolders(cfg *config.Settings, cfgPath string, useApproved bool) (brains []string, folders []coreexport.Folder, drifts []brainDrift) {
 	written := writtenBrainPaths(cfgPath)
+	policies := app.BrainDirPolicies(cfg.BrainDirs, app.HomeDir())
 	for _, b := range cfg.BrainDirs {
 		dir := app.AbsPath(b.Dir(app.HomeDir()))
 		brains = append(brains, dir)
@@ -420,7 +421,7 @@ func exportFolders(cfg *config.Settings, cfgPath string, useApproved bool) (brai
 		if d := manifest.DriftOf(dir, *b.Approved); d.Any() {
 			drifts = append(drifts, brainDrift{ID: b.Approved.ID, Dir: dir, Drift: d})
 		}
-		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles, useApproved)
+		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles, useApproved, policies...)
 		configured := b.Path
 		for _, w := range written {
 			if w != b.Path && fsx.ExpandHome(w, app.HomeDir()) == b.Path {

@@ -20,7 +20,7 @@ import { toast } from '../components/toast.js';
 import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
-/** @import { FileEntry, FileRoot, FileRootKind, FilesList, FilesSearch, FileUpload, UploadRule } from '../../types/api.js' */
+/** @import { FileEntry, FileRoot, FileRootKind, FilesList, FilesSearch, FileUpload, NodePolicy, NodeRule, UploadRule } from '../../types/api.js' */
 
 /**
  * A row of the folder's table: an entry, at its path in the root.
@@ -109,6 +109,84 @@ function ruleControl(rootId, path, rule, reload) {
     h('span.muted.small', 'Who may upload is set on the Site page, under Files and Wiki.'));
 }
 
+/** @type {[string, string, string][]} */
+const POLICY_FIELDS = [
+  ['storage', 'May live on', 'Where copies may land: nodes, backup targets, cloud'],
+  ['backup', 'Backups to', 'Backup targets or nodes, and cloud'],
+  ['coding', 'Coding on', 'Nodes for FrIDE and agent sessions'],
+  ['exec', 'Commands on', 'Nodes for node_exec and terminals'],
+];
+
+/**
+ * A list as the policy form shows it: names with commas, "none" for an
+ * empty list, "" for no limit.
+ * @param {string[] | undefined | null} list
+ */
+function policyText(list) {
+  if (!list) return '';
+  return list.length ? list.join(', ') : 'none';
+}
+
+/**
+ * The list a policy field says: null for no limit, [] for "none".
+ * @param {string} text
+ * @returns {string[] | null}
+ */
+function policyList(text) {
+  const t = text.trim();
+  if (!t) return null;
+  if (t.toLowerCase() === 'none') return [];
+  return t.split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * The folder's node policy (brain.json node_policy, #760): what limits it
+ * now, and its own rule, which the owner edits here.
+ * @param {string} rootId
+ * @param {string} path
+ * @param {NodePolicy} np
+ * @param {() => void} reload
+ */
+function policyControl(rootId, path, np, reload) {
+  /** @type {Partial<NodeRule>} */
+  const rule = np.rule || {};
+  /** @type {Record<string, HTMLInputElement>} */
+  const inputs = {};
+  const rows = POLICY_FIELDS.map(([key, label, hint]) => {
+    const own = key === 'storage' ? rule.storage : (rule.tasks || {})[key];
+    inputs[key] = textInput({ value: policyText(own), placeholder: 'anywhere', 'aria-label': label, title: hint });
+    const eff = np.effective[key];
+    const note = eff && eff.from !== np.folder
+      ? h('span.muted.small', `Now ${eff.nodes.length ? 'only ' + eff.nodes.join(', ') : 'nowhere'}, by the rule of ${eff.from}`) : null;
+    return h('label.files-rule', h('span.small', `${label}:`), inputs[key], note);
+  });
+  inputs.repos = textInput({ value: (rule.repos || []).join(', '), placeholder: 'none', 'aria-label': 'FrIDE repositories of this folder' });
+  const save = btn('Save node policy', {
+    small: true,
+    onClick: async () => {
+      /** @type {Record<string, string[]>} */
+      const tasks = {};
+      for (const [key] of POLICY_FIELDS.slice(1)) {
+        const l = policyList(inputs[key].value);
+        if (l) tasks[key] = l;
+      }
+      try {
+        await api('PUT', '/api/files/node-policy', { root: rootId, path, storage: policyList(inputs.storage.value), tasks, repos: policyList(inputs.repos.value) || [] });
+        toast('Saved', 'ok', { timeout: 1500 });
+        reload();
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+  });
+  return h('details.card.files-policy', { open: Boolean(np.rule) || Object.keys(np.effective).length > 0 },
+    h('summary', 'Node policy'),
+    h('p.muted.small', 'For this folder and everything in it: which machines it may live on and which may work on it. Names of nodes or backup targets, and cloud, with commas; empty for anywhere, none for nowhere. A folder inside one with a rule keeps that rule unless it sets its own.'),
+    rows,
+    h('label.files-rule', h('span.small', 'FrIDE repositories of this folder:'), inputs.repos),
+    save);
+}
+
 /**
  * @param {HTMLElement} header
  * @param {HTMLElement} box
@@ -169,6 +247,7 @@ function folderView(header, box, ctx, rootId, path) {
         }
         mount(actions, buttons);
         mount(ruleBox, r.writable && rootId.startsWith('brain:') && path ? ruleControl(rootId, path, r.rule, () => load('')) : null,
+          r.node_policy ? policyControl(rootId, path, r.node_policy, () => load('')) : null,
           r.upload === 'brain' ? h('p.muted.small', 'What you upload here goes to the brain, as a file sent on WhatsApp: it puts it where it belongs and tells you in its chat.') : null);
       }
       state.searching = Boolean(q);

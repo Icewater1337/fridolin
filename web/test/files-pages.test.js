@@ -284,3 +284,27 @@ test('a wiki page you may edit is edited as Markdown', async (t) => {
   assert.ok(calls.some((c) => c.path === '/api/files/view?root=brain%3Amain&path=wiki%2Findex.md&source=1'));
   assert.equal(root.querySelector('textarea.file-editor').value, '# Home\n');
 });
+
+test('a folder shows its node policy and saves its own rule', async (t) => {
+  const { root, calls } = await open(t, filesPage, { root: 'brain:main', path: 'work/notes' }, (path) => {
+    if (path === '/api/files/roots') return ROOTS;
+    if (path.startsWith('/api/files/list')) {
+      return {
+        root: 'brain:main', path: 'work/notes', truncated: false, writable: true, upload: '', entries: [],
+        node_policy: { folder: '/b/work/notes', effective: { storage: { nodes: ['icebase'], from: '/b/work', brains: 'main' } } },
+      };
+    }
+    if (path === '/api/files/node-policy') return { status: 'saved' };
+    return { status: 404, body: { error: 'no' } };
+  });
+  const policy = root.querySelector('.files-policy');
+  assert.ok(policy, 'the panel shows');
+  assert.match(policy.textContent, /only icebase, by the rule of \/b\/work/);
+  const field = (label) => policy.querySelectorAll('input').find((i) => i.getAttribute('aria-label') === label);
+  field('Coding on').value = 'icebase, mac-mini';
+  field('Commands on').value = 'none';
+  policy.querySelectorAll('button').find((b) => b.textContent.includes('Save node policy')).click();
+  await settle(10);
+  assert.deepEqual(calls.find((c) => c.path === '/api/files/node-policy').body,
+    { root: 'brain:main', path: 'work/notes', storage: null, tasks: { coding: ['icebase', 'mac-mini'], exec: [] }, repos: [] });
+});

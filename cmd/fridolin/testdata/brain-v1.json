@@ -173,5 +173,25 @@
       "days_ahead": 14,
       "max_minutes": 90
     }
-  }
+  },
+  "node_policy": [
+    {
+      "folder": "work",
+      "storage": [
+        "icebase"
+      ],
+      "tasks": {
+        "backup": [
+          "icebase"
+        ],
+        "coding": [
+          "icebase",
+          "mac-mini"
+        ]
+      },
+      "repos": [
+        "acme-api"
+      ]
+    }
+  ]
 }

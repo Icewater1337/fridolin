@@ -64,7 +64,7 @@ func newBrainBackupFixture(t *testing.T) brainBackupFixture {
 	f.cfg.MediaDir = filepath.Join(f.data, "media")
 	loaded := []vaultBrain{{ID: "a", Dir: f.a, Manifest: mA}, {ID: "personal", Dir: f.personal, Manifest: mP}, {ID: "off", Dir: f.off, Manifest: mO}}
 	refs := []vaultBrainRef{{Dir: f.a}, {Dir: f.personal}, {Dir: f.off}, {Dir: f.broken}}
-	f.layout = vaultLayoutOf(f.cfg, map[string]string{"a": f.a, "personal": f.personal, "off": f.off}, vaultBrainBackups(loaded, refs, false))
+	f.layout = vaultLayoutOf(f.cfg, map[string]string{"a": f.a, "personal": f.personal, "off": f.off}, vaultBrainBackups(loaded, refs, false, ""))
 	return f
 }
 
@@ -173,7 +173,7 @@ func TestVaultLayoutFollowsBackupSettings(t *testing.T) {
 	broken := filepath.Join(dir, "brains-folders", "broken")
 	writeFile(t, filepath.Join(broken, manifest.File), "{")
 	loaded := []vaultBrain{{ID: "personal", Dir: in, Manifest: m}, {ID: "other", Dir: other, Manifest: mo}, {ID: "broken", Dir: broken}}
-	l := vaultLayoutOf(cfg, map[string]string{"personal": in, "other": other, "broken": broken}, vaultBrainBackups(loaded, nil, false))
+	l := vaultLayoutOf(cfg, map[string]string{"personal": in, "other": other, "broken": broken}, vaultBrainBackups(loaded, nil, false, ""))
 	for rel, ignored := range map[string]bool{
 		"brains-folders/personal/memories/a.md":     false,
 		"brains-folders/personal/brain.json":        false,

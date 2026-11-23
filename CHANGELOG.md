@@ -10,6 +10,16 @@ for compatibility.
 
 ### Added
 
+- **Per-folder node policy.** brain.json's new `node_policy` says, per
+  folder and everything in it, where its copies may land (`storage`:
+  nodes, backup targets, `cloud`) and which nodes may run backups,
+  coding (FrIDE, agent sessions) and commands (`node_exec`, terminals)
+  on it; `repos` ties FrIDE repositories to a folder. Set it on the
+  Files page or from a brain (approved like any brain.json change).
+  Backups, FrIDE routing and instances, the workstation tools,
+  `node_exec` and the core move's pre-flight follow it, and never fall
+  back to a node it denies: the work waits or fails with the reason.
+  Without it nothing changes. [docs/FILES.md](docs/FILES.md#node-policy)
 - **Full access on a node for a trusted brain.** A node whose owner runs
   `fridolin node full-access on` there, and approves it, lets the brains
   that the core's new `nodes.full_access_brains` names (empty by default)
