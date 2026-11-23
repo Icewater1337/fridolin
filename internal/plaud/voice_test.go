@@ -233,6 +233,49 @@ func TestVoiceFailedRunSaysSoWithoutItsOutput(t *testing.T) {
 	}
 }
 
+func TestVoiceLogFollowsAnAnswerWithoutItsText(t *testing.T) {
+	p, _, rec, phone, enc := voiceTest(t, "")
+	logs := plaudServiceCaptureLog(t)
+	if _, err := voiceAsk(t, p, phone, enc, "dev_1", voiceTestRid, "Was steht morgen an?"); err != nil {
+		t.Fatal(err)
+	}
+	rec.ans("Morgen um neun: Zahnarzt.")
+	rec.done(nil)
+	if m, err := voiceFetch(t, p, phone, "dev_1", voiceTestRid); err != nil || m["state"] != voiceDone {
+		t.Fatalf("fetch = %v, %v", m, err)
+	}
+	if m, err := voiceFetch(t, p, phone, "dev_1", "q_never_asked_this_one"); err != nil || m["state"] != voiceUnknown {
+		t.Fatalf("fetch of an unknown question = %v, %v", m, err)
+	}
+	const failedRid = "q_fedcba9876543210"
+	if _, err := voiceAsk(t, p, phone, enc, "dev_1", failedRid, "Und dann?"); err != nil {
+		t.Fatal(err)
+	}
+	rec.done(errors.New("claude: secret stderr"))
+	if m, err := voiceFetch(t, p, phone, "dev_1", failedRid); err != nil || m["state"] != voiceFailed {
+		t.Fatalf("fetch of a failed question = %v, %v", m, err)
+	}
+	rec.ans("Zu spät.")
+
+	got := strings.Join(logs(), "\n")
+	for _, want := range []string{
+		"phone dev_1, voice question " + voiceTestRid + ": answer sealed for the phone, 4 words to speak",
+		"phone dev_1 fetched voice question " + voiceTestRid + ": done, with an answer to speak",
+		"phone dev_1 fetched voice question q_never_asked_this_one: unknown here",
+		"phone dev_1 fetched voice question " + failedRid + ": failed (the brain's run failed; the dashboard says why)",
+		"phone dev_1, voice question " + failedRid + ": the answer came after the question ended",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the log does not say %q:\n%s", want, got)
+		}
+	}
+	for _, secret := range []string{"Zahnarzt", "morgen", "secret", "spät"} {
+		if strings.Contains(got, secret) {
+			t.Errorf("the log holds %q:\n%s", secret, got)
+		}
+	}
+}
+
 func TestVoiceQuestionsAreRefused(t *testing.T) {
 	p, _, rec, phone, enc := voiceTest(t, "")
 	now := time.Now().Unix()

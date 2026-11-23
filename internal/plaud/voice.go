@@ -466,13 +466,25 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 	answer := func(text string) string {
 		spoken, chat := spokenAnswer(text)
 		reply, err := sealVoiceReply(c.Enc, rid, []byte(spoken), nil, nil)
+		settled := false
 		p.voice.end(key, func(q *voiceQuestion) {
+			settled = true
 			if err != nil {
 				q.state, q.err = voiceFailed, "the answer could not be encrypted for this phone"
 				return
 			}
 			q.state, q.reply = voiceDone, reply
 		})
+		// One line each, never the answer's text: the way to the phone's
+		// speaker can be followed in the log.
+		switch {
+		case !settled:
+			log.Printf("plaud: phone %s, voice question %s: the answer came after the question ended, not for the phone", c.Iss, rid)
+		case err != nil:
+			log.Printf("plaud: phone %s, voice question %s: the answer could not be encrypted for the phone: %v", c.Iss, rid, err)
+		default:
+			log.Printf("plaud: phone %s, voice question %s: answer sealed for the phone, %d words to speak", c.Iss, rid, len(strings.Fields(spoken)))
+		}
 		return chat
 	}
 	done := func(err error) {
@@ -518,12 +530,23 @@ func (p *Manager) voiceReply(assertion string, now time.Time) (map[string]any, e
 	for {
 		q, changed := p.voice.lookup(key, time.Now())
 		if q == nil {
+			log.Printf("plaud: phone %s fetched voice question %s: unknown here (asked before a restart, or over %s ago)", c.Iss, c.Rid, voiceKeep)
 			return map[string]any{"state": voiceUnknown}, nil
 		}
 		p.voice.mu.Lock()
-		out, state := q.answer(), q.state
+		out, state, msg := q.answer(), q.state, q.err
 		p.voice.mu.Unlock()
 		if state != voiceWaiting {
+			// Once per settled answer the phone fetches; the waiting polls
+			// before it say nothing.
+			switch {
+			case state == voiceDone && out["reply"] != nil:
+				log.Printf("plaud: phone %s fetched voice question %s: done, with an answer to speak", c.Iss, c.Rid)
+			case state == voiceDone:
+				log.Printf("plaud: phone %s fetched voice question %s: done, with nothing to speak", c.Iss, c.Rid)
+			default:
+				log.Printf("plaud: phone %s fetched voice question %s: %s (%s)", c.Iss, c.Rid, state, msg)
+			}
 			return out, nil
 		}
 		select {
