@@ -3,6 +3,7 @@ package outbound
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // FrideNews is FrIDE's news about a thread (its webhook, relayed by the
@@ -195,4 +196,21 @@ func FrideAgentNews(n FrideNews, brief string) string {
 	}
 	b.WriteString("FrIDE says:\n" + frideBody(n.Text))
 	return b.String()
+}
+
+// frideOffline says how long node has been offline; down 0 is unknown.
+func frideOffline(node string, down time.Duration) string {
+	if down <= 0 {
+		return node + " is offline"
+	}
+	return fmt.Sprintf("%s has been offline for %s", node, hoursMinutes(down))
+}
+
+// frideResumes says where moved work picks up: its pushed branch, or the
+// start when FrIDE had pushed none.
+func frideResumes(branch string) string {
+	if branch == "" {
+		return "it starts again from the brief: FrIDE had reported no branch"
+	}
+	return "it resumes from the last pushed commit of branch " + branch
 }

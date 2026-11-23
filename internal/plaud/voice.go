@@ -93,27 +93,154 @@ Answer for the ear: one to three short spoken sentences, the most important poin
 If the answer needs more detail than that, put the spoken sentences in a block of their own, [SPOKEN]like this[/SPOKEN], then write the details as usual after it, and say in the spoken part that the details are in WhatsApp. Only the block is read aloud; the details go to this chat.
 Either way, keep the transcript with your notes: file the attached .txt the way skills/plaud.md files recordings (without that skill, wherever your notes go). The recording is not shown in this chat; when it was spoken to you, do not mention filing it in your answer.]`
 
-// maxSpokenWords caps what the phone reads of an answer that came back
-// long anyway: it is cut at the last sentence that fits.
+// maxSpokenWords caps what the phone reads of a [SPOKEN] block that came
+// back long anyway: it is cut at the last sentence that fits. An answer
+// without a block that is longer than this is not read at all
+// (spokenFallback).
 const maxSpokenWords = 60
 
-var spokenRE = regexp.MustCompile(`(?s)\[SPOKEN\](.*?)\[/SPOKEN\]`)
+// maxOpeningWords is how long an opening sentence may be to be read before
+// spokenFallback's pointer to the chat.
+const maxOpeningWords = 25
+
+// The fallbacks an answer too structured or too long to read gets.
+// shortcut: English only, since takeVoice does not know the recording's
+// language; say it in that language once the site sends one.
+const (
+	spokenDetailsInChat = "The details are in WhatsApp."
+	spokenAnswerInChat  = "The answer is in WhatsApp."
+)
+
+var (
+	spokenRE = regexp.MustCompile(`(?s)\[SPOKEN\](.*?)\[/SPOKEN\]`)
+
+	mdFenceRE     = regexp.MustCompile("(?s)```.*?(```|$)")
+	mdListRE      = regexp.MustCompile(`^\s*([-*•+]|\d+[.)])\s+`)
+	mdHeadingRE   = regexp.MustCompile(`^\s*#{1,6}\s*`)
+	mdQuoteRE     = regexp.MustCompile(`^\s*>+\s*`)
+	mdTableSepRE  = regexp.MustCompile(`^[\s|:-]+$`)
+	mdLinkRE      = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	mdURLRE       = regexp.MustCompile(`(?:https?://|www\.)\S+`)
+	mdEmphasisRE  = regexp.MustCompile("\\*+|~~|`+")
+	mdUnderlineRE = regexp.MustCompile(`(^|[\s(])_+|_+([\s).,!?:;]|$)`)
+)
 
 // spokenAnswer splits a brain's answer to a voice question into what the
 // phone reads aloud and what the chat gets: the [SPOKEN] block and the
-// rest, or without one the whole answer for both. What is read is at most
-// maxSpokenWords, cut at a sentence's end.
+// rest, or without one the whole answer for both. A block is read cut to
+// maxSpokenWords at a sentence's end. Without one, the answer is read
+// without its markdown, URLs and emoji, unless it is a list, a table,
+// code or long: then spokenFallback is read instead.
 func spokenAnswer(text string) (spoken, chat string) {
-	chat = text
-	spoken = text
 	if m := spokenRE.FindStringSubmatchIndex(text); m != nil {
 		spoken = text[m[2]:m[3]]
 		chat = strings.TrimSpace(strings.TrimSpace(text[:m[0]]) + "\n\n" + strings.TrimSpace(text[m[1]:]))
 		if chat == "" {
 			chat = strings.TrimSpace(spoken)
 		}
+		return shortenSpoken(strings.TrimSpace(spoken), maxSpokenWords), chat
 	}
-	return shortenSpoken(strings.TrimSpace(spoken), maxSpokenWords), chat
+	plain := stripMarkdown(text)
+	if plain == "" || structuredAnswer(text) || len(strings.Fields(plain)) > maxSpokenWords {
+		return spokenFallback(text), text
+	}
+	return plain, text
+}
+
+// structuredAnswer reports whether an answer is made for reading, not
+// for the ear: a code block, a table or a list of three items or more.
+func structuredAnswer(text string) bool {
+	if strings.Contains(text, "```") {
+		return true
+	}
+	items := 0
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "|") && strings.Count(line, "|") >= 2 {
+			return true
+		}
+		if mdListRE.MatchString(line) {
+			items++
+		}
+	}
+	return items >= 3
+}
+
+// spokenFallback is what is read of an answer too structured or too long
+// to read: its opening sentence, when that is short prose, and that the
+// rest is in the chat.
+func spokenFallback(text string) string {
+	var para []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || mdListRE.MatchString(t) || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "```") {
+			break
+		}
+		if !mdHeadingRE.MatchString(t) {
+			para = append(para, t)
+		}
+	}
+	if s := firstSentence(stripMarkdown(strings.Join(para, "\n"))); s != "" {
+		if len(strings.Fields(s)) <= maxOpeningWords {
+			return s + " " + spokenDetailsInChat
+		}
+	}
+	return spokenAnswerInChat
+}
+
+// firstSentence is text up to its first sentence's end, or "" when it has
+// none.
+func firstSentence(text string) string {
+	for i, r := range text {
+		if end := i + utf8.RuneLen(r); sentenceEnd(text, end, r) {
+			return text[:end]
+		}
+	}
+	return ""
+}
+
+// stripMarkdown is text as it is said: without code blocks, markdown
+// marks, list bullets, table pipes, URLs (a link keeps its text) and
+// emoji, on one line.
+func stripMarkdown(text string) string {
+	text = mdFenceRE.ReplaceAllString(text, " ")
+	text = mdLinkRE.ReplaceAllString(text, "$1")
+	text = mdURLRE.ReplaceAllString(text, "")
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "|") && mdTableSepRE.MatchString(line) {
+			continue
+		}
+		line = mdHeadingRE.ReplaceAllString(line, "")
+		line = mdQuoteRE.ReplaceAllString(line, "")
+		line = mdListRE.ReplaceAllString(line, "")
+		lines = append(lines, strings.ReplaceAll(line, "|", " "))
+	}
+	text = mdEmphasisRE.ReplaceAllString(strings.Join(lines, "\n"), "")
+	text = mdUnderlineRE.ReplaceAllString(text, "$1$2")
+	text = strings.Map(func(r rune) rune {
+		if isEmoji(r) {
+			return -1
+		}
+		return r
+	}, text)
+	return strings.Join(strings.Fields(text), " ")
+}
+
+// isEmoji reports whether r is an emoji or a part of one. Symbols below
+// the arrows, such as ° and ©, stay: they are said.
+func isEmoji(r rune) bool {
+	switch {
+	case r == 0x200D, r == 0x20E3, r >= 0xFE00 && r <= 0xFE0F, r >= 0x1F3FB && r <= 0x1F3FF:
+		return true
+	}
+	return r >= 0x2190 && unicode.Is(unicode.So, r)
+}
+
+// sentenceEnd reports whether r, which ends at end in text, ends a
+// sentence: a full stop inside a number or a time is none.
+func sentenceEnd(text string, end int, r rune) bool {
+	return strings.ContainsRune(".!?…", r) && (end == len(text) || unicode.IsSpace(rune(text[end])))
 }
 
 // shortenSpoken is text cut to whole sentences of at most max words
@@ -127,7 +254,7 @@ func shortenSpoken(text string, max int) string {
 	start := 0
 	for i, r := range text {
 		end := i + utf8.RuneLen(r)
-		if !strings.ContainsRune(".!?…", r) || (end < len(text) && !unicode.IsSpace(rune(text[end]))) {
+		if !sentenceEnd(text, end, r) {
 			continue
 		}
 		sentence := text[start:end]

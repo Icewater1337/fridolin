@@ -581,6 +581,12 @@ frideMovedNotice
 	🚚 *FrIDE #3* moved from mini to laptop: task health continues there.
 frideMoveFailedNotice
 	⚠️ *FrIDE #3* did not move: laptop is offline
+frideFailoverNotice
+	🔀 *FrIDE #71* moved from icebase to mini (its thread 12 there): icebase has been offline for 49 h 5 min, and it resumes from the last pushed commit of branch feat/health. The task left on icebase is archived into the vault and removed there once it is back.
+frideFailoverNotice(no branch)
+	🔀 *FrIDE #71* moved from icebase to mini/work: icebase is offline, and it starts again from the brief: FrIDE had reported no branch. The task left on icebase is archived into the vault and removed there once it is back.
+frideFailoverWaitsNotice
+	⏳ *FrIDE #146* left icebase (icebase has been offline for 2 h) but waits: no other node can take it now (no online node offers FrIDE with api). Once one can, it resumes from the last pushed commit of branch feat/health, and I'll say so here.
 nodeAgentNewsMessage(question)
 	❓ *Agent #2* asks (on laptop, in /home/you/Projects/foo):
 

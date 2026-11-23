@@ -37,6 +37,9 @@ import (
 // first news or the first work, and stop with the bridge.
 type frideRuntime struct {
 	b *App
+	// born is when this core started: a node's time offline counts from
+	// then at the earliest (failover).
+	born time.Time
 
 	once   sync.Once
 	ctx    context.Context
@@ -76,7 +79,7 @@ type frideNews struct {
 
 func newFrideRuntime(b *App) *frideRuntime {
 	ctx, cancel := context.WithCancel(context.Background())
-	f := &frideRuntime{b: b, ctx: ctx, cancel: cancel, news: make(chan frideNews, 256), kick: make(chan struct{}, 1),
+	f := &frideRuntime{b: b, born: time.Now(), ctx: ctx, cancel: cancel, news: make(chan frideNews, 256), kick: make(chan struct{}, 1),
 		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}, lastErr: map[int64]string{}, sent: map[string]time.Time{}, stalled: map[int64]frideStall{}}
 	f.inst = newFrideInstances(f)
 	return f
@@ -186,6 +189,7 @@ func (f *frideRuntime) queueLoop() {
 		case <-t.C:
 		case <-f.kick:
 		}
+		f.failover()
 		f.retryQueued()
 	}
 }
@@ -583,7 +587,7 @@ func (f *frideRuntime) place(ctx context.Context, t *store.FrideThread, skip str
 		return 0
 	})
 	for _, c := range fits {
-		th, err := f.b.nodes.FrideTask(ctx, c.v.ID, nodeproto.FrideTaskParams{Message: t.Message, Repos: t.Repos, Ref: "fridolin-" + strconv.FormatInt(t.ID, 10), Source: "fridolin"})
+		th, err := f.b.nodes.FrideTask(ctx, c.v.ID, nodeproto.FrideTaskParams{Message: frideBrief(*t), Repos: t.Repos, Ref: frideRef(*t), Source: "fridolin"})
 		if err != nil {
 			reasons = append(reasons, c.v.Name+": "+err.Error())
 			continue
@@ -611,7 +615,7 @@ func (f *frideRuntime) placeOnInstance(ctx context.Context, t *store.FrideThread
 		log.Printf("node policy: FrIDE #%d not handed to the instance %s on %s: coding in %s may run %s", t.ID, t.Instance, s.Node, strings.Join(t.Repos, ", "), l.Text())
 		return false, fmt.Sprintf("the node policy lets coding in %s run %s, and the FrIDE instance %s runs on %s", strings.Join(t.Repos, ", "), l.Text(), t.Instance, s.Node), s
 	}
-	th, err := f.b.nodes.FrideTask(ctx, s.NodeID, nodeproto.FrideTaskParams{FrideOn: nodeproto.FrideOn{Instance: t.Instance}, Message: t.Message, Repos: t.Repos, Ref: "fridolin-" + strconv.FormatInt(t.ID, 10), Source: "fridolin"})
+	th, err := f.b.nodes.FrideTask(ctx, s.NodeID, nodeproto.FrideTaskParams{FrideOn: nodeproto.FrideOn{Instance: t.Instance}, Message: frideBrief(*t), Repos: t.Repos, Ref: frideRef(*t), Source: "fridolin"})
 	if err != nil {
 		return false, fmt.Sprintf("%s: %v", f.where(s.NodeID, t.Instance), err), s
 	}
@@ -927,7 +931,7 @@ func (f *frideRuntime) reply(ctx context.Context, id int64, text string) (string
 	name := f.where(t.Node, t.Instance)
 	f.inst.touch(t.Instance)
 	if t.FrideThread == 0 {
-		msg := fmt.Sprintf("%s\n\n(This continues task %s, which was moved here.)", text, t.TaskID)
+		msg := fmt.Sprintf("%s\n\n(This continues task %s, which was moved here.)\n\n%s", text, t.TaskID, frideCommitRule)
 		th, err := f.b.nodes.FrideTask(ctx, t.Node, nodeproto.FrideTaskParams{FrideOn: nodeproto.FrideOn{Instance: t.Instance}, Message: msg, Ref: fmt.Sprintf("fridolin-%d-%d", t.ID, time.Now().UnixNano()), Source: "fridolin"})
 		if err != nil {
 			return "", err
@@ -1074,6 +1078,20 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 	unlock()
 	if err != nil {
 		return "", err
+	}
+	if t.State == store.FrideSent && t.Node != "" {
+		if _, off := f.offlineFor(t.Node); off {
+			// Its node cannot hand it over: it resumes from its pushed
+			// branch (an instance's work on its instance elsewhere).
+			if t.Instance == "" && len(f.frideNodes(want, t.Repos)) == 0 {
+				return "", errors.New(f.noFrideNode(want, t.Repos))
+			}
+			text, err := f.failoverThread(ctx, id, want, "core brain")
+			if text == "" && err == nil {
+				err = fmt.Errorf("FrIDE #%d changed while it was being moved; try again", id)
+			}
+			return text, err
+		}
 	}
 	if t.Instance != "" {
 		return "", fmt.Errorf("FrIDE #%d is work of the FrIDE instance %s, and stays on it: an instance's work does not move to another node or instance", id, t.Instance)
@@ -1231,6 +1249,11 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 		// nothing to archive, and it no longer keeps its instance where
 		// it is, which need not be reachable for that.
 		return f.drop(ctx, id, t)
+	}
+	if _, off := f.offlineFor(t.Node); off && t.Node != "" {
+		// Its node cannot close it now: closed here, and there once it
+		// is back (failover's orphans).
+		return f.detach(ctx, t)
 	}
 	if why := f.reachable(ctx, t); why != "" {
 		return "", errors.New(why)

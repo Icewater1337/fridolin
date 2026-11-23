@@ -344,22 +344,38 @@ func TestVoiceSpokenBlockIsReadAndTheRestGoesToTheChat(t *testing.T) {
 
 func TestSpokenAnswer(t *testing.T) {
 	long := strings.Repeat("This sentence has exactly seven words here. ", 12)
-	for _, c := range []struct{ in, spoken, chat string }{
-		{"Kurz und gut.", "Kurz und gut.", "Kurz und gut."},
-		{"[SPOKEN] Only this. [/SPOKEN]", "Only this.", "Only this."},
-		{"Intro.\n[SPOKEN]Said.[/SPOKEN]\nDetails.", "Said.", "Intro.\n\nDetails."},
-		// Long without a block: whole sentences up to 60 words.
-		{long, strings.TrimSpace(strings.Repeat("This sentence has exactly seven words here. ", 8)), long},
+	list := "Here is what is on:\n\n" + strings.Repeat("- **Item** with `code`\n", 23)
+	for _, c := range []struct{ name, in, spoken, chat string }{
+		{"short prose", "Kurz und gut.", "Kurz und gut.", "Kurz und gut."},
+		{"block", "[SPOKEN] Only this. [/SPOKEN]", "Only this.", "Only this."},
+		{"block and details", "Intro.\n[SPOKEN]Said.[/SPOKEN]\nDetails.", "Said.", "Intro.\n\nDetails."},
+		{"block keeps its list", "[SPOKEN]Three things.[/SPOKEN]\n- a\n- b\n- c", "Three things.", "- a\n- b\n- c"},
+		{"bold and code", "The build is **green**, run `make check` and _then_ push.", "The build is green, run make check and then push.", "The build is **green**, run `make check` and _then_ push."},
+		{"heading and two bullets", "## Today\n- Dentist at nine.\n* Call at two.", "Today Dentist at nine. Call at two.", "## Today\n- Dentist at nine.\n* Call at two."},
+		{"link and URL", "See [the docs](https://example.com/a) or https://example.com/b now.", "See the docs or now.", "See [the docs](https://example.com/a) or https://example.com/b now."},
+		{"emoji", "Done ✅ 🎉 and 👍🏽, it is 20 °C.", "Done and , it is 20 °C.", "Done ✅ 🎉 and 👍🏽, it is 20 °C."},
+		{"only a URL", "https://example.com", spokenAnswerInChat, "https://example.com"},
+		// A long list is not read: its opening ends in a colon, no sentence.
+		{"long list", list, spokenAnswerInChat, list},
+		{"list after a sentence", "Three meetings this week. **Details:**\n1. Mon\n2. Tue\n3. Wed", "Three meetings this week. " + spokenDetailsInChat, "Three meetings this week. **Details:**\n1. Mon\n2. Tue\n3. Wed"},
+		{"table", "Prices:\n| a | b |\n|---|---|\n| 1 | 2 |", spokenAnswerInChat, "Prices:\n| a | b |\n|---|---|\n| 1 | 2 |"},
+		{"code block", "Run this.\n```\nmake check\n```", "Run this. " + spokenDetailsInChat, "Run this.\n```\nmake check\n```"},
+		// Long prose: its first sentence, and where the rest is.
+		{"long prose", long, "This sentence has exactly seven words here. " + spokenDetailsInChat, long},
 	} {
 		spoken, chat := spokenAnswer(c.in)
 		if spoken != c.spoken || chat != c.chat {
-			t.Errorf("spokenAnswer(%.40q) = %q, %q; want %q, %q", c.in, spoken, chat, c.spoken, c.chat)
+			t.Errorf("%s: spokenAnswer(%.40q) = %q, %q; want %q, %q", c.name, c.in, spoken, chat, c.spoken, c.chat)
 		}
 	}
-	// One endless sentence is cut at 60 words.
+	// One endless sentence without a block has no opening to read.
 	words := strings.TrimSpace(strings.Repeat("word ", 100))
-	if s, _ := spokenAnswer(words); len(strings.Fields(s)) != maxSpokenWords || !strings.HasSuffix(s, "…") {
+	if s, _ := spokenAnswer(words); s != spokenAnswerInChat {
 		t.Errorf("an endless sentence: %q", s)
+	}
+	// One in a block is cut at 60 words.
+	if s, _ := spokenAnswer("[SPOKEN]" + words + "[/SPOKEN]"); len(strings.Fields(s)) != maxSpokenWords || !strings.HasSuffix(s, "…") {
+		t.Errorf("an endless spoken block: %q", s)
 	}
 	// A full stop inside a number or a time is no sentence's end.
 	if s := shortenSpoken("It costs 3.50 francs. "+long, 10); s != "It costs 3.50 francs." {

@@ -251,3 +251,65 @@ func (s *Store) FrideNews(ctx context.Context, thread int64) ([]FrideNewsItem, e
 	}
 	return out, rows.Err()
 }
+
+// The fride_orphans table keeps the work a thread left on a node that was
+// offline (docs/NODES.md, "Failover"): its task, or FrIDE's thread there
+// when it had no task yet. Once that node answers again the core closes
+// the task, archives it into the vault and removes it there, so that the
+// agent there does not go on beside the one that took the work over.
+
+// migrateV15 adds fride_orphans.
+func migrateV15(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE fride_orphans (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		thread       INTEGER NOT NULL,             -- fride_threads.id it was part of
+		node         TEXT NOT NULL,
+		instance     TEXT NOT NULL DEFAULT '',
+		fride_thread INTEGER NOT NULL DEFAULT 0,   -- FrIDE's thread there, 0 for none
+		task_id      TEXT NOT NULL DEFAULT '',
+		created_at   DATETIME NOT NULL
+	)`)
+	return err
+}
+
+// FrideOrphan is one row of fride_orphans.
+type FrideOrphan struct {
+	ID          int64
+	Thread      int64
+	Node        string
+	Instance    string
+	FrideThread int
+	TaskID      string
+	CreatedAt   time.Time
+}
+
+// AddFrideOrphan records work left on a node.
+func (s *Store) AddFrideOrphan(ctx context.Context, o FrideOrphan) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO fride_orphans (thread, node, instance, fride_thread, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		o.Thread, o.Node, o.Instance, o.FrideThread, o.TaskID, time.Now().UTC())
+	return err
+}
+
+// FrideOrphans lists the work left on nodes, oldest first.
+func (s *Store) FrideOrphans(ctx context.Context) ([]FrideOrphan, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, thread, node, instance, fride_thread, task_id, created_at FROM fride_orphans ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FrideOrphan
+	for rows.Next() {
+		var o FrideOrphan
+		if err := rows.Scan(&o.ID, &o.Thread, &o.Node, &o.Instance, &o.FrideThread, &o.TaskID, &o.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+// DeleteFrideOrphan forgets work left on a node, once it is cleaned up.
+func (s *Store) DeleteFrideOrphan(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM fride_orphans WHERE id = ?`, id)
+	return err
+}

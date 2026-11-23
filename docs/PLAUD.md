@@ -229,8 +229,12 @@ While it is on:
   answer needs more, the brain writes the spoken part in a
   `[SPOKEN]…[/SPOKEN]` block and the details after it, saying the details
   are in WhatsApp. Only the block is read aloud, and the details go to the
-  chat without it. An answer that comes back long anyway is read only up
-  to the last whole sentence within 60 words.
+  chat without it. A block that comes back long anyway is read only up
+  to the last whole sentence within 60 words. An answer without a block
+  is read without its markdown, links, URLs and emoji; one that is a
+  list, a table or code, or longer than 60 words, is not read: the phone
+  says its opening sentence, when that is short, and "The details are in
+  WhatsApp." (in English, whatever the question's language).
 - **Neither the question nor the recording goes to WhatsApp.** The brain is
   told to keep a question with its notes, as a voice question with the
   day's date, the way its `skills/plaud.md` files recordings (without that

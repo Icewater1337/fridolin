@@ -18,6 +18,27 @@ type FrideConfig struct {
 	// nodes, by name: each a whole FrIDE in a Docker Sandbox of its own,
 	// for one trust domain (docs/NODES.md, "FrIDE instances").
 	Instances map[string]FrideInstanceConfig `json:"instances,omitempty"`
+	// FailoverMinutes moves work off a node that has been offline this
+	// long to another that can take it (docs/NODES.md, "Failover"): 0
+	// takes FrideFailoverDefault, -1 never moves it.
+	FailoverMinutes int `json:"failover_minutes,omitempty"`
+}
+
+// FrideFailoverDefault is how long a node with FrIDE work is offline
+// before the work moves elsewhere, in minutes, when the config does not
+// say.
+const FrideFailoverDefault = 60
+
+// Failover is how long a node is offline before its work moves, in
+// minutes; 0 means never.
+func (f FrideConfig) Failover() int {
+	switch {
+	case f.FailoverMinutes < 0:
+		return 0
+	case f.FailoverMinutes == 0:
+		return FrideFailoverDefault
+	}
+	return f.FailoverMinutes
 }
 
 // FrideInstanceConfig is one FrIDE instance.
