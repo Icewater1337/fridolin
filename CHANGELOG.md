@@ -417,6 +417,23 @@ for compatibility.
 
 ### Fixed
 
+- **Plaud Sync no longer keeps other apps quiet, and speaks voice answers
+  again.** When the phone's text-to-speech stopped answering under the
+  long-running app (its service died or was updated), the app waited
+  forever for a sentence that was never said: no answer was spoken again,
+  and the audio focus it held kept videos and music ducked until Plaud
+  Sync was force-stopped. A video that took the audio was also ducked
+  again two seconds later. The app now takes the audio focus only while
+  it speaks and lets go as soon as it is quiet. A sentence that is not
+  said (refused, an error, or no word within 15 seconds plus half a
+  second a word) gets a fresh text-to-speech engine and one more try;
+  then the answer is dropped and the next one goes on. An app that takes
+  the audio for good keeps it: the answer goes on from its sentence after
+  an unlock, with the next answer, or Skip. The app's log says why an
+  answer waits, and Fridolin's log follows each answer to the phone.
+  Build the app again (0.9) on the Plaud card so the phone updates.
+  [docs/PLAUD.md](docs/PLAUD.md#voice-mode)
+
 - **FrIDE instance work no longer waits for good on a node that is online
   but cannot run the instance.** The failover only looked at offline
   nodes: when icebase came back with its sandboxes not ready (sbx not
