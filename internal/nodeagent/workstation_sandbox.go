@@ -51,6 +51,9 @@ func detectSandbox() string {
 var providerState = map[string][]string{
 	nodeproto.ProviderClaude: {".claude", ".claude.json", ".config/claude", "Library/Caches/claude-cli-nodejs", ".cache/claude-cli-nodejs", ".cache/claude"},
 	nodeproto.ProviderCodex:  {".codex"},
+	// agy keeps its settings, conversations and, without a keyring, its
+	// login under ~/.gemini.
+	nodeproto.ProviderAntigravity: {".gemini"},
 }
 
 // sandboxPlan is what a session may write besides its folder.

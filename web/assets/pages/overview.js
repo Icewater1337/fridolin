@@ -19,6 +19,20 @@ import { showActivity } from '../components/activity-item.js';
 /** @import { PageModule } from '../app/page.js' */
 /** @import { ActivityEntry, Brain, HousekeepingCounts, HousekeepingFinding, HousekeepingStatus, SandboxStatus, Status, WhatsAppStatus } from '../../types/api.js' */
 
+/** The agent CLI card's title, by agent_provider. */
+const CLI_TITLES = /** @type {Record<string, string>} */ ({ claude: 'Claude CLI', codex: 'Codex CLI', antigravity: 'Antigravity CLI (agy)' });
+
+/**
+ * cliOf is the status of the CLI agent_provider names, when it is not
+ * Claude's.
+ * @param {Status} s
+ */
+function cliOf(s) {
+  if (s.agent_provider === 'codex') return s.codex;
+  if (s.agent_provider === 'antigravity') return s.antigravity;
+  return undefined;
+}
+
 export default /** @satisfies {PageModule} */ ({
   title: 'Overview',
   render(root, ctx) {
@@ -156,12 +170,12 @@ export default /** @satisfies {PageModule} */ ({
 
     // ── cards ──
     /** @param {Status} s */
-    const renderClaude = (s) => paint(claudeCard, { ...(s.agent_provider === 'codex' ? s.codex : s.claude), provider: s.agent_provider || 'claude' }, (c) => [
-      h('div.card-head', h('div.card-title', icon('terminal'), h('h2', c.provider === 'codex' ? 'Codex CLI' : 'Claude CLI')), c.found ? pill('Found', 'ok') : pill('Not found', 'bad')),
+    const renderClaude = (s) => paint(claudeCard, { ...(cliOf(s) || s.claude), provider: s.agent_provider || 'claude' }, (c) => [
+      h('div.card-head', h('div.card-title', icon('terminal'), h('h2', CLI_TITLES[c.provider] || 'Claude CLI')), c.found ? pill('Found', 'ok') : pill('Not found', 'bad')),
       h('div.card-body',
         c.path ? h('p', mono(c.path)) : null,
         c.version ? h('p.muted', c.version) : null,
-        !c.found ? h('p.muted', 'Install the CLI and log in with ', h('code.mono', c.provider), ', or point ', h('a', { href: '#/settings/claude' }, 'Settings → AI mode'), ' at the right binary.') : null),
+        !c.found ? h('p.muted', 'Install the CLI and log in with ', h('code.mono', c.provider === 'antigravity' ? 'agy' : c.provider), ', or point ', h('a', { href: '#/settings/claude' }, 'Settings → AI mode'), ' at the right binary.') : null),
     ]);
 
     /** @param {Status} s */

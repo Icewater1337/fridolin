@@ -64,6 +64,14 @@ ARG LITESTREAM_VERSION=0.5.18
 ARG GH_VERSION=2.104.0
 # renovate: datasource=github-releases depName=cloudflare/cloudflared
 ARG CLOUDFLARED_VERSION=2026.11.0
+# Google's Antigravity CLI (agy), for brains on agent_provider or provider
+# "antigravity". Its installer (antigravity.google/cli/install.sh) reads
+# https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_<amd64|arm64>.json,
+# whose version, url (AGY_BUILD is the folder's number) and sha512 these
+# are; the archive holds the binary "antigravity". No Renovate source: bump
+# them from the two manifests by hand.
+ARG AGY_VERSION=1.5.14
+ARG AGY_BUILD=5302690847260672
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
@@ -78,12 +86,16 @@ RUN set -eu; \
              rclone_sha=b00f00b3266c3764413afe599d3ec316f6f43b3e0ea8a0bc1d186d2133e46df7; \
              ls_arch=x86_64; ls_sha=d3687b9fd0f2e9426bbd3da828429ff3f1dfc5c9b74d54fdf028e4ee510e7dea; \
              gh_sha=98cb101ad87dbbd3f6b2f2bfcbd43197ccd07643140121d8a9cfaa91eadbc24e; \
-             cf_sha=51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd ;; \
+             cf_sha=51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd; \
+             agy_path=linux-x64/cli_linux_x64; \
+             agy_sha=83311d3f354567612dc16c1ae2ea9b503d6f6833aa4e138d39aa229da3f3bb99b0e4d7cca0bce4796b0060d6a51d8113eb7449ed5dc0e7900bf217107ea5bff9 ;; \
       arm64) restic_sha=a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465; \
              rclone_sha=ee169016675e23a69d77240565133ff7dbc9b33d16fa8f7053d4af39f1eaeb78; \
              ls_arch=arm64; ls_sha=922a09e6a7ac67f2095571894dc6382e94e1dd4cdd9674883ddf1a8e74ab982d; \
              gh_sha=cb34cefc6f4e77b90731374a2b737516bb8f3033c6ca46aa949e5344f68069e3; \
-             cf_sha=abe54a006acf9faf2d19ee9d953cb0d0804e92f59c5382a162e57b84d086f56f ;; \
+             cf_sha=abe54a006acf9faf2d19ee9d953cb0d0804e92f59c5382a162e57b84d086f56f; \
+             agy_path=linux-arm/cli_linux_arm64; \
+             agy_sha=c9b29bba475f63a1a80161ae93ba72b221c7a586d9851e4d0061546704bab66d6b2760b25d716d191724fc7564f3246456ee151e28aa37af48dbcd72bdc6c463 ;; \
       *) echo "unsupported architecture ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     fetch restic.bz2 "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2"; \
@@ -100,7 +112,10 @@ RUN set -eu; \
     tar -xzf gh.tar.gz "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh"; install -m 0755 "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh; \
     fetch cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${TARGETARCH}"; \
     echo "${cf_sha}  cloudflared" | sha256sum -c -; \
-    install -m 0755 cloudflared /usr/local/bin/cloudflared
+    install -m 0755 cloudflared /usr/local/bin/cloudflared; \
+    fetch agy.tar.gz "https://storage.googleapis.com/antigravity-public/antigravity-cli/${AGY_VERSION}-${AGY_BUILD}/${agy_path}.tar.gz"; \
+    echo "${agy_sha}  agy.tar.gz" | sha512sum -c -; \
+    tar -xzf agy.tar.gz antigravity; install -m 0755 antigravity /usr/local/bin/agy; rm -f agy.tar.gz antigravity
 
 # ── the Python brains' tools run ──────────────────────────────────────────
 # A venv at /opt/fridolin/venv, first on PATH, so `python3 script.py` and
@@ -172,7 +187,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /usr/local/bin/restic /usr/local/bin/rclone /usr/local/bin/litestream \
-     /usr/local/bin/gh /usr/local/bin/cloudflared /usr/local/bin/
+     /usr/local/bin/gh /usr/local/bin/cloudflared /usr/local/bin/agy /usr/local/bin/
 COPY --from=python /opt/fridolin/venv /opt/fridolin/venv
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -182,7 +197,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
  && ln -s ../lib/node_modules/@plaud-ai/cli/dist/index.js /usr/local/bin/plaud \
  && claude --version && codex --version && plaud --help >/dev/null \
- && gh --version && cloudflared --version && /opt/fridolin/venv/bin/yt-dlp --version
+ && gh --version && cloudflared --version && /opt/fridolin/venv/bin/yt-dlp --version \
+ && HOME=/tmp/agy-version AGY_CLI_DISABLE_AUTO_UPDATE=true agy --version && rm -rf /tmp/agy-version
 
 # The binary with tools/ next to it, as `fridolin service install` lays
 # out an install: brains get them as $FRIDOLIN_BIN and $FRIDOLIN_TOOLS_DIR.

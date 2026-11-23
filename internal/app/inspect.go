@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -94,10 +96,13 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 	// Claude planted in a brain's PATH folder must not be selected.
 	SetBridgePATH(cfg)
 	fmt.Fprintf(w, "Config OK: %s\n", path)
-	if cfg.AgentProvider == "codex" {
+	switch cfg.AgentProvider {
+	case config.ProviderCodex:
 		st := CodexInfo(nil, cfg.CodexPath, cfg.ChildEnvPassthrough)
 		fmt.Fprintf(w, "  codex:     %s (found: %t, %s), model %s, effort %s\n", st.Path, st.Found, st.Version, cfg.CodexModel, cfg.CodexEffort)
-	} else {
+	case config.ProviderAntigravity:
+		fmt.Fprintf(w, "  agy:       %s\n", antigravitySummary(cfg))
+	case config.ProviderClaude:
 		fmt.Fprintf(w, "  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
 	}
 	fmt.Fprintf(w, "  data dir:  %s\n", cfg.DataDir)
@@ -124,9 +129,11 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 	for _, s := range specs {
 		m := s.Manifest
 		fmt.Fprintf(w, "  brain %-14s → %s (dms=%v default=%v groups=%v)\n", m.ID, s.Dir, m.Routing.HandlesDMs, m.Routing.Default, m.Routing.Groups)
-		fmt.Fprintf(w, "    web: %s\n", webTools(settingsFor(cfg, s), s.Dir))
+		bs := settingsFor(cfg, s)
+		fmt.Fprintf(w, "    provider: %s\n", providerCheckSummary(cfg, bs, m))
+		fmt.Fprintf(w, "    web: %s\n", webTools(bs, s.Dir))
 		if m.LiveSession == manifest.LiveSessionOwnerDM {
-			fmt.Fprintf(w, "    live session: %s\n", liveCheckSummary(cfg))
+			fmt.Fprintf(w, "    live session: %s\n", liveCheckSummary(cfg, bs.Provider))
 		}
 	}
 	for _, is := range issues {
@@ -215,11 +222,37 @@ func claudeSummary(path string, passthrough []string) string {
 	return s
 }
 
+// providerCheckSummary is what check says of the CLI brain m runs on,
+// with s its settings: the provider, and whether its brain.json or
+// agent_provider chose it. A brain on another provider than the bridge's
+// says where its CLI is.
+func providerCheckSummary(cfg *config.Settings, s *brain.Settings, m manifest.Manifest) string {
+	from := "agent_provider"
+	if m.Provider != "" {
+		from = "brain.json"
+	}
+	out := string(s.Provider) + " (" + from + ")"
+	if s.Provider == manifest.ProviderAntigravity && cfg.AgentProvider != manifest.ProviderAntigravity {
+		out += ", " + antigravitySummary(cfg)
+	}
+	return out
+}
+
+// antigravitySummary is what check says of agy.
+func antigravitySummary(cfg *config.Settings) string {
+	st := AntigravityInfo(nil, cfg.AntigravityPath, cfg.Home, cfg.ChildEnvPassthrough)
+	model, effort := cmp.Or(cfg.AntigravityModel, "agy's default"), cmp.Or(cfg.AntigravityEffort, "agy's default")
+	if !st.Found {
+		return st.Path + " — not found, so its brains cannot run; model " + model + ", effort " + effort
+	}
+	return fmt.Sprintf("%s (%s), model %s, effort %s", st.Path, cmp.Or(st.Version, "no version"), model, effort)
+}
+
 // liveCheckSummary is what check says of a brain that asks for a live
 // session: whether the bridge's settings allow one. Whether one runs is
 // the running bridge's to say (the brain's page in the dashboard).
-func liveCheckSummary(cfg *config.Settings) string {
-	if why := liveBlocker(string(cfg.AgentProvider), cfg.DangerouslySkipPermissions, cfg.InheritClaudeUserConfig); why != "" {
+func liveCheckSummary(cfg *config.Settings, provider manifest.Provider) string {
+	if why := liveBlocker(provider, cfg.DangerouslySkipPermissions, cfg.InheritClaudeUserConfig); why != "" {
 		return "owner_dm, but none starts: " + why + "; every message runs claude -p"
 	}
 	return "owner_dm (your direct messages; the brain's page in the dashboard shows whether it is up)"

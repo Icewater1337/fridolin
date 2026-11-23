@@ -39,12 +39,14 @@ type RecallRequest struct {
 }
 
 // brainGlobals is the runtime-owned snapshot projected by the command. Its
-// defaults contain no per-brain manifest or prompt selection. The two Codex
-// values remain distinct because that provider ignores Claude overrides.
+// defaults contain no per-brain manifest or prompt selection. The Codex and
+// Antigravity values remain distinct because those providers ignore Claude
+// overrides.
 type Globals struct {
-	Defaults                Settings
-	CodexModel, CodexEffort string
-	RunLimit                int
+	Defaults                            Settings
+	CodexModel, CodexEffort             string
+	AntigravityModel, AntigravityEffort string
+	RunLimit                            int
 }
 
 // mergeBrainSettings applies only the manifest's run overrides. It reads no
@@ -66,8 +68,15 @@ func MergeSettings(g Globals, sp manifest.Spec) *Settings {
 	s.DisallowedTools = append([]string(nil), tools...)
 	s.OTPMarkers = append([]string(nil), g.Defaults.OTPMarkers...)
 	s.EnvPassthrough = append([]string(nil), g.Defaults.EnvPassthrough...)
-	if s.Provider == "codex" {
+	// A brain's own provider wins over agent_provider; a brain.json's
+	// model and effort are Claude's.
+	s.Provider = manifest.ProviderOf(g.Defaults.Provider, m)
+	switch s.Provider {
+	case manifest.ProviderCodex:
 		s.Model, s.Effort = g.CodexModel, g.CodexEffort
+	case manifest.ProviderAntigravity:
+		s.Model, s.Effort = g.AntigravityModel, g.AntigravityEffort
+	case manifest.ProviderClaude:
 	}
 	return &s
 }

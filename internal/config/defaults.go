@@ -67,6 +67,10 @@ func resolveFile(file *File, paths Paths, goos string) (*File, error) {
 	if cfg.CodexEffort == "" {
 		cfg.CodexEffort = "high"
 	}
+	if cfg.AntigravityPath == "" {
+		cfg.AntigravityPath = "agy"
+	}
+	cfg.AntigravityPath = fsx.ExpandHome(cfg.AntigravityPath, home)
 	cfg.DataDir, _ = ResolveDataDir(cfg.DataDir, paths)
 	if cfg.DBPath == "" {
 		cfg.DBPath = filepath.Join(cfg.DataDir, "bridge.db")

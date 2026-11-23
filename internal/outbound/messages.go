@@ -97,12 +97,14 @@ const (
 // CLI's stderr, with local paths and sandbox denials, and in a group every
 // member would read it.
 const (
-	ChatErrCodexNotSignedIn = "🔑 Codex is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again."
-	ChatErrCodexLimit       = "⏳ Codex's usage limit is reached for now. Try again later."
-	ChatErrNotSignedIn      = "🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again."
-	ChatErrLimit            = "⏳ Claude's usage limit is reached for now. Try again later."
-	ChatErrTimeout          = "⌛ That took too long and was stopped. Try again, perhaps with a smaller request."
-	ChatErrGeneric          = "❌ Something went wrong — details on the bridge dashboard."
+	ChatErrCodexNotSignedIn       = "🔑 Codex is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again."
+	ChatErrCodexLimit             = "⏳ Codex's usage limit is reached for now. Try again later."
+	ChatErrAntigravityNotSignedIn = "🔑 Antigravity is not signed in for this brain. See the bridge dashboard for its sign-in command, then send your message again."
+	ChatErrAntigravityLimit       = "⏳ Antigravity's usage limit is reached for now. Try again later."
+	ChatErrNotSignedIn            = "🔑 Claude is not signed in on the bridge machine. Run `claude` there once and log in, then send your message again."
+	ChatErrLimit                  = "⏳ Claude's usage limit is reached for now. Try again later."
+	ChatErrTimeout                = "⌛ That took too long and was stopped. Try again, perhaps with a smaller request."
+	ChatErrGeneric                = "❌ Something went wrong — details on the bridge dashboard."
 )
 
 // ChatErrSandbox is what a chat is told about a run its sandbox kept from
@@ -115,6 +117,10 @@ func ChatErrClaude(msg string) string { return "❌ Claude: " + textx.Truncate(m
 
 // ChatErrCodex is Codex's own short account, shown only in a direct chat.
 func ChatErrCodex(msg string) string { return "❌ Codex: " + textx.Truncate(msg, 300) }
+
+// ChatErrAntigravity is agy's own short account, shown only in a direct
+// chat.
+func ChatErrAntigravity(msg string) string { return "❌ Antigravity: " + textx.Truncate(msg, 300) }
 
 // BuildChatError is what a build chat on the Site's Build page shows for
 // a message the builder brain could not take.

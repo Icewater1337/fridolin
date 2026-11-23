@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // The web tools of a brain's runs (#405), as fridolin check says them. In
@@ -28,6 +30,9 @@ import (
 //     only comes from a permissions.allow rule in those settings (#410).
 //
 // Codex has one web search, off when disallowed_tools names either.
+// Antigravity has a web search nothing turns off, and URL fetching, which
+// WebFetch in disallowed_tools denies, as does running without
+// dangerously_skip_permissions.
 // What your own settings allow, with inherit_claude_user_config, is not
 // looked at.
 
@@ -39,11 +44,15 @@ func webTools(s *brain.Settings, dir string) string {
 		blockedBy = "blocked by the brain's disallowed_tools in brain.json"
 	}
 	blocked := func(tool string) bool { return slices.Contains(s.DisallowedTools, tool) }
-	if s.Provider == "codex" {
+	switch s.Provider {
+	case manifest.ProviderCodex:
 		if blocked("WebSearch") || blocked("WebFetch") {
 			return "none (Codex's web search is " + blockedBy + ")"
 		}
 		return "Codex's web search"
+	case manifest.ProviderAntigravity:
+		return antigravityWebTools(s, blocked, blockedBy)
+	case manifest.ProviderClaude:
 	}
 	allow, deny, err := claudePermissions(dir)
 	if err != nil {
@@ -117,4 +126,18 @@ func claudePermissions(dir string) (allow, deny []string, err error) {
 		deny = append(deny, settings.Permissions.Deny...)
 	}
 	return allow, deny, nil
+}
+
+// antigravityWebTools is webTools for a brain on Antigravity.
+func antigravityWebTools(s *brain.Settings, blocked func(string) bool, blockedBy string) string {
+	if err := claudecli.ValidateAntigravityTools(s.DisallowedTools); err != nil {
+		return "none: its runs are refused (" + err.Error() + ")"
+	}
+	switch {
+	case blocked("WebFetch"):
+		return "agy's web search (fetching URLs is " + blockedBy + ")"
+	case !s.Dangerously:
+		return "agy's web search (fetching URLs needs dangerously_skip_permissions)"
+	}
+	return "agy's web search and URL fetching"
 }

@@ -26,9 +26,11 @@ func settingsFor(cfg *config.Settings, sp manifest.Spec) *brain.Settings {
 func brainGlobalsOf(cfg *config.Settings, timeoutUnit time.Duration) brain.Globals {
 	return brain.Globals{
 		CodexModel: cfg.CodexModel, CodexEffort: cfg.CodexEffort, RunLimit: cfg.MaxConcurrentRuns,
+		AntigravityModel: cfg.AntigravityModel, AntigravityEffort: cfg.AntigravityEffort,
 		Defaults: brain.Settings{
-			ClaudePath: cfg.ClaudePath, Provider: string(cfg.AgentProvider), CodexPath: cfg.CodexPath,
-			Model: cfg.BrainModel, Effort: cfg.BrainEffort,
+			ClaudePath: cfg.ClaudePath, Provider: cfg.AgentProvider, CodexPath: cfg.CodexPath,
+			AntigravityPath: cfg.AntigravityPath,
+			Model:           cfg.BrainModel, Effort: cfg.BrainEffort,
 			DisallowedTools: append([]string(nil), cfg.DisallowedTools...),
 			Dangerously:     cfg.DangerouslySkipPermissions, InheritUser: cfg.InheritClaudeUserConfig,
 			OTPGuard: cfg.OTPGuard, OTPMarkers: append([]string(nil), cfg.OTPMarkers...),

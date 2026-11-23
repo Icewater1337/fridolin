@@ -430,6 +430,7 @@ func New(opts Options) (_ *App, err error) {
 		},
 		ExtraArgs:  func(id string) []string { return b.site.BuilderArgs(id) },
 		CodexSetup: func(id string) ([]string, []string, string, error) { return b.site.CodexBuilder(id) },
+		SiteSetup:  func(id string) ([]string, []string, string, error) { return b.site.BuilderServer(id) },
 		RunEnv:     b.brainRunEnv,
 		Recall:     b.recall,
 		Hydrate:    func(ctx context.Context, id string, paths []string) { b.vault.hydrate(ctx, id, paths) },

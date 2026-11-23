@@ -48,6 +48,7 @@ type agentSession struct {
 	ended        time.Time
 	stopping     bool     // stop is killing the turn to end the session
 	resume       string   // the provider's own session or thread
+	agyText      string   // an Antigravity step's text so far
 	allowed      []string // tools the owner allowed (no sandbox)
 	pendingAllow []string // tools the last turn was refused
 	cancelTurn   context.CancelFunc
@@ -82,9 +83,11 @@ func (a *Agent) agentStart(eff nodeproto.Capabilities, p nodeproto.AgentStartPar
 		provider = nodeproto.ProviderClaude
 	case nodeproto.ProviderCodex:
 		provider = nodeproto.ProviderCodex
+	case nodeproto.ProviderAntigravity:
+		provider = nodeproto.ProviderAntigravity
 	case "":
 		if len(providers) == 0 {
-			return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "neither claude nor codex is installed on this node")
+			return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "none of claude, codex and agy is installed on this node")
 		}
 		provider = providers[0]
 	default:

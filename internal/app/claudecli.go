@@ -1,11 +1,15 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // ClaudeInfo finds the CLI and its version. The version is cached until the
@@ -51,6 +55,34 @@ func (b *App) codexInfo(cfg *config.Settings) claudecli.Status {
 	return cliInfo(&b.cliVersions, b.env, cfg.CodexPath, cfg.ChildEnvPassthrough, codexChild)
 }
 
+// AntigravityInfo is ClaudeInfo for agy, which a bare antigravity_path
+// also finds in ~/.local/bin, where its installer puts it.
+func AntigravityInfo(env Environment, path, home string, passthrough []string) claudecli.Status {
+	return cliInfo(&cliVersions, env, agyPath(path, home), passthrough, antigravityChild)
+}
+
+// antigravityInfo is AntigravityInfo for the bridge.
+func (b *App) antigravityInfo(cfg *config.Settings) claudecli.Status {
+	return cliInfo(&b.cliVersions, b.env, agyPath(cfg.AntigravityPath, b.cfgs.Boot().Home), cfg.ChildEnvPassthrough, antigravityChild)
+}
+
+// agyPath is path, or, when it is a bare name the PATH does not have,
+// the program of that name in home's ~/.local/bin, where agy's installer
+// puts it and a service's PATH often misses it.
+func agyPath(path, home string) string {
+	if path == "" {
+		path = "agy"
+	}
+	if _, err := exec.LookPath(path); err == nil || home == "" || filepath.Base(path) != path {
+		return path
+	}
+	c := filepath.Join(home, ".local", "bin", path)
+	if st, err := os.Stat(c); err == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
+		return c
+	}
+	return path
+}
+
 // resolveAgentBinary is the absolute path of the agent CLI a run starts,
 // found from the configured path on the bridge's own PATH (not the
 // brain's, which a brain may change). The sandboxes need it absolute:
@@ -58,10 +90,15 @@ func (b *App) codexInfo(cfg *config.Settings) claudecli.Status {
 // profile allows it by path. A config that names the CLI bare ("claude",
 // "codex") is the default, and what a native install moved into the
 // container keeps once its Mac-only paths are dropped.
-func resolveAgentBinary(provider, path string) (string, error) {
+func resolveAgentBinary(provider manifest.Provider, path, home string) (string, error) {
 	name, setting := "claude", "claude_path"
-	if provider == "codex" {
+	switch provider {
+	case manifest.ProviderCodex:
 		name, setting = "codex", "codex_path"
+	case manifest.ProviderAntigravity:
+		name, setting = "agy", "antigravity_path"
+		path = agyPath(cmp.Or(path, name), home)
+	case manifest.ProviderClaude:
 	}
 	if path == "" {
 		path = name

@@ -21,7 +21,8 @@ type WorkstationCap struct {
 	Roots []string `json:"roots"`
 	// AllowHome lets a root be the node's home folder itself.
 	AllowHome bool `json:"allow_home,omitempty"`
-	// Providers are the agent CLIs the node found ("claude", "codex"),
+	// Providers are the agent CLIs the node found ("claude", "codex",
+	// "antigravity"),
 	// and Sandbox how the node confines a session ("sandbox-exec",
 	// "bwrap", or "none"): what the node reports, not what it is approved
 	// for.
@@ -31,8 +32,9 @@ type WorkstationCap struct {
 
 // Agent providers and sandboxes a node reports.
 const (
-	ProviderClaude = "claude"
-	ProviderCodex  = "codex"
+	ProviderClaude      = "claude"
+	ProviderCodex       = "codex"
+	ProviderAntigravity = "antigravity"
 
 	SandboxExec  = "sandbox-exec"
 	SandboxBwrap = "bwrap"
@@ -69,7 +71,7 @@ func (w *WorkstationCap) Check(name string) error {
 		}
 	}
 	for _, p := range w.Providers {
-		if p != ProviderClaude && p != ProviderCodex {
+		if !KnownProvider(p) {
 			return fmt.Errorf("%s: no provider %q", name, p)
 		}
 	}
@@ -175,11 +177,22 @@ var TerminalMethods = []string{MethodTerminalOpen, MethodTerminalSend, MethodTer
 // session: a lockdown refuses them, and stops what runs.
 var WorkstationStarts = []string{MethodAgentStart, MethodAgentReply, MethodTerminalOpen, MethodTerminalSend}
 
+// KnownProvider reports whether p is an agent provider a node may report
+// and run.
+func KnownProvider(p string) bool {
+	switch p {
+	case ProviderClaude, ProviderCodex, ProviderAntigravity:
+		return true
+	}
+	return false
+}
+
 // AgentStartParams starts a session in Folder with Prompt.
 type AgentStartParams struct {
 	Folder string `json:"folder"`
 	Prompt string `json:"prompt"`
-	// Provider is "claude" or "codex"; "" is the node's first.
+	// Provider is "claude", "codex" or "antigravity"; "" is the node's
+	// first.
 	Provider string `json:"provider,omitempty"`
 	// Model is the provider's model; "" is the node's own default.
 	Model string `json:"model,omitempty"`
@@ -198,7 +211,7 @@ func (p AgentStartParams) Check() error {
 		return errors.New("the prompt is empty")
 	case len(p.Prompt) > MaxAgentPrompt || !utf8.ValidString(p.Prompt):
 		return fmt.Errorf("the prompt must be UTF-8 and at most %d bytes", MaxAgentPrompt)
-	case p.Provider != "" && p.Provider != ProviderClaude && p.Provider != ProviderCodex:
+	case p.Provider != "" && !KnownProvider(p.Provider):
 		return fmt.Errorf("no provider %q", p.Provider)
 	case len(p.Model) > 128 || strings.ContainsAny(p.Model, " \t\r\n\x00") || strings.HasPrefix(p.Model, "-"):
 		return fmt.Errorf("model %q", p.Model)

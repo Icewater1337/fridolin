@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // SetupChecks are the checks of the machine and of the config the bridge
@@ -26,6 +28,7 @@ func SetupChecks(loginVars []string) []Check {
 		{ID: "claude", Title: "Claude CLI", Required: true, Applies: claudeMode, Run: checkClaudeCLI},
 		{ID: "claude-login", Title: "Claude login for sandboxed brains", Required: true, Applies: claudeMode, Run: checkClaudeLogin(loginVars)},
 		{ID: "codex", Title: "Codex CLI", Required: true, Applies: codexMode, Run: checkCodexCLI},
+		{ID: "antigravity", Title: "Antigravity CLI (agy)", Required: true, Applies: antigravityMode, Run: checkAntigravityCLI},
 		{ID: "agent-path", Title: "agent CLI by absolute path", Required: true, Run: checkAgentPath},
 		{ID: "tailscale", Title: "Tailscale", Needed: "M1", Applies: OnHost, Run: checkTailscale},
 		{ID: "tailscale-authkey", Title: "Tailscale auth key in host secrets", Needed: "M1", Applies: OnHost, Run: checkSecrets(tailscaleAuthKeySecret)},
@@ -61,12 +64,61 @@ const (
 	diskFailBytes = 2 << 30
 )
 
+// claudeMode, codexMode and antigravityMode say whether a brain runs on
+// that CLI: by agent_provider, or by its approved brain.json's provider.
 func claudeMode(env *Env) bool {
-	return env.Config == nil || env.Config.AgentProvider != "codex"
+	return env.Config == nil || usesProvider(env.Config, config.ProviderClaude)
 }
 
 func codexMode(env *Env) bool {
-	return env.Config != nil && env.Config.AgentProvider == "codex"
+	return env.Config != nil && usesProvider(env.Config, config.ProviderCodex)
+}
+
+func antigravityMode(env *Env) bool {
+	return env.Config != nil && usesProvider(env.Config, config.ProviderAntigravity)
+}
+
+// usesProvider reports whether cfg's brains run on p, or, with none yet,
+// whether agent_provider is p.
+func usesProvider(cfg *config.Settings, p config.Provider) bool {
+	if cfg.AgentProvider == p {
+		return true
+	}
+	for _, ref := range cfg.BrainDirs {
+		if ref.Approved != nil && manifest.ProviderOf(cfg.AgentProvider, *ref.Approved) == p {
+			return true
+		}
+	}
+	return false
+}
+
+// agyInstall is how agy is installed (antigravity.google/docs/cli).
+const agyInstall = "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+
+// lookAgy finds agy as a run does: on PATH, else, for a bare name, in
+// ~/.local/bin, where its installer puts it.
+func lookAgy(env *Env) (string, error) {
+	path := env.Config.AntigravityPath
+	resolved, err := env.LookPath(path)
+	if err == nil || env.Home == "" || filepath.Base(path) != path {
+		return resolved, err
+	}
+	if r, lerr := env.LookPath(filepath.Join(env.Home, ".local", "bin", path)); lerr == nil {
+		return r, nil
+	}
+	return "", err
+}
+
+func checkAntigravityCLI(ctx context.Context, env *Env) Result {
+	resolved, err := lookAgy(env)
+	if err != nil {
+		return Result{Status: Fail, Detail: env.Config.AntigravityPath + " not found, and a brain runs on antigravity, so it cannot run", Fix: agyInstall}
+	}
+	out, err := env.Run(ctx, resolved, "--version")
+	if version := firstLine(out); err == nil && version != "" {
+		return Result{Status: OK, Detail: fmt.Sprintf("%s (%s)", resolved, version)}
+	}
+	return Result{Status: Warn, Detail: resolved + ": `--version` gave no answer", Fix: agyInstall}
 }
 
 func checkConfigLoads(_ context.Context, env *Env) Result {
@@ -251,14 +303,20 @@ func checkCodexCLI(ctx context.Context, env *Env) Result {
 // bubblewrap refuses a bare name. exec.LookPath finds executables only.
 func checkAgentPath(_ context.Context, env *Env) Result {
 	key, path := "claude_path", "claude"
+	look := func() (string, error) { return env.LookPath(path) }
 	if env.Config != nil {
 		path = env.Config.ClaudePath
-		if codexMode(env) {
+		switch env.Config.AgentProvider {
+		case config.ProviderCodex:
 			key, path = "codex_path", env.Config.CodexPath
+		case config.ProviderAntigravity:
+			key, path = "antigravity_path", env.Config.AntigravityPath
+			look = func() (string, error) { return lookAgy(env) }
+		case config.ProviderClaude:
 		}
 	}
 	fix := "set " + key + " in " + env.ConfigPath + " to the CLI's absolute path"
-	resolved, err := env.LookPath(path)
+	resolved, err := look()
 	if err != nil {
 		return Result{Status: Fail, Detail: fmt.Sprintf("%s %q is no executable on PATH, so every run is refused", key, path), Fix: fix}
 	}

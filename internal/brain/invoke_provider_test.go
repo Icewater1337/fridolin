@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
@@ -28,7 +29,7 @@ func TestStopWhileOutputIsHeld(t *testing.T) {
 			mgr, d, home := queueTestManager(t, 30000, "")
 			br := mgr.Get("a")
 			settings := *br.settings.Load()
-			settings.Provider, settings.CodexPath = provider, settings.ClaudePath
+			settings.Provider, settings.CodexPath = manifest.Provider(provider), settings.ClaudePath
 			br.settings.Store(&settings)
 			setsidChildren(t, home, "stdout")
 			if _, _, _, err := mgr.Submit(dm("long task")); err != nil {
@@ -108,7 +109,7 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 				const answer = "The recorded answer"
 				br := mgr.Get("a")
 				settings := *br.settings.Load()
-				settings.Provider = provider
+				settings.Provider = manifest.Provider(provider)
 				settings.CodexPath = settings.ClaudePath // the same fake prints either stream below
 				var output string
 				if provider == "codex" {
@@ -212,7 +213,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 			mgr, d, home := queueTestManager(t, 30000, "")
 			br := mgr.Get("a")
 			settings := *br.settings.Load()
-			settings.Provider, settings.CodexPath = provider, settings.ClaudePath
+			settings.Provider, settings.CodexPath = manifest.Provider(provider), settings.ClaudePath
 			br.settings.Store(&settings)
 			pidLog := filepath.Join(home, "run-pids")
 			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pidLog)

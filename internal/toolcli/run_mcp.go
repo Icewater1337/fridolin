@@ -25,7 +25,10 @@ const runMCPInstructions = "Fridolin's own tools for this run. Which you have de
 // over stdio (the bridge puts it in the run's --mcp-config). It serves the
 // tools the bridge gives the run, asking the bridge with the run's own
 // token from FRIDOLIN_BRAIN_TOKEN_FILE: the run is who the token says,
-// whatever --run claims, which only has to match it.
+// whatever --run claims, which only has to match it. Without --run it
+// serves the run FRIDOLIN_RUN_ID names: the Antigravity CLI starts the
+// server from a brain's mcp_config.json, the same file for every run of
+// the brain, and passes it the run's environment.
 func RunMCP(ctx context.Context, args []string, stdin io.Reader, t IO) int {
 	fs := flag.NewFlagSet("fridolin mcp", flag.ContinueOnError)
 	fs.SetOutput(t.Stderr)
@@ -36,6 +39,9 @@ func RunMCP(ctx context.Context, args []string, stdin io.Reader, t IO) int {
 			return 0
 		}
 		return 2
+	}
+	if *run == "" {
+		*run = t.Getenv("FRIDOLIN_RUN_ID")
 	}
 	if *run == "" || fs.NArg() > 0 {
 		fmt.Fprintln(t.Stderr, "usage: fridolin mcp --run ID [--live] (a brain's run starts it; it speaks MCP on stdin and stdout)")

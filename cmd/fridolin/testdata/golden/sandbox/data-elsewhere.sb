@@ -132,6 +132,7 @@
 (deny file-read* (literal "<ROOT>/db/bridge.db-journal"))
 (deny file-write* (literal "<ROOT>/db/bridge.db-journal"))
 (deny file-write* (literal "<ROOT>/data/brains/main"))
+(deny file-write* (literal "<ROOT>/data/brains/main/antigravity"))
 (deny file-write* (literal "<ROOT>/data/brains/main/cache"))
 (deny file-write* (literal "<ROOT>/data/brains/main/claude"))
 (deny file-write* (literal "<ROOT>/data/brains/main/codex"))

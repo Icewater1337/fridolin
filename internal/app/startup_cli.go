@@ -5,18 +5,22 @@ import (
 	"log"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
-// LogAgentCLI says at startup which CLI brains run, Claude Code's or in
-// Codex mode Codex's, and warns when it is missing or too old, so a log
-// excerpt shows it next to the bridge's own version.
+// LogAgentCLI says at startup which CLI brains run, Claude Code's, or in
+// Codex or Antigravity mode that CLI's, and warns when it is missing or
+// too old, so a log excerpt shows it next to the bridge's own version.
 func (b *App) LogAgentCLI() {
 	cfg := b.cfgs.Get()
-	if cfg.AgentProvider == "codex" {
+	switch cfg.AgentProvider {
+	case config.ProviderCodex:
 		logCodexCLI(cfg.CodexPath, b.codexInfo(cfg))
-		return
+	case config.ProviderAntigravity:
+		logCLI("Antigravity CLI", "Settings → AI mode", cfg.AntigravityPath, b.antigravityInfo(cfg))
+	case config.ProviderClaude:
+		logClaudeCLI(cfg.ClaudePath, b.claudeInfo(cfg))
 	}
-	logClaudeCLI(cfg.ClaudePath, b.claudeInfo(cfg))
 }
 
 // logClaudeCLI writes the startup line for the Claude CLI at path, found
