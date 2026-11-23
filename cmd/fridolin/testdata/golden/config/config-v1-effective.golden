@@ -101,6 +101,7 @@
     "WebFetch"
   ],
   "fride": {
+    "failover_minutes": 90,
     "instances": {
       "work": {
         "core_login": true,

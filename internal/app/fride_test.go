@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,14 @@ import (
 // fakeFrideNode is frideNode with a fake FrIDE, which needs no FrIDE
 // checkout: the flow of TestFrideGate where it does not.
 func (h *harness) fakeFrideNode(name, addr string, ff *testutil.FakeFride) (string, string) {
+	h.t.Helper()
+	id, dir, _ := h.stoppableFrideNode(name, addr, ff)
+	return id, dir
+}
+
+// stoppableFrideNode is fakeFrideNode, with the func that takes the node
+// offline.
+func (h *harness) stoppableFrideNode(name, addr string, ff *testutil.FakeFride) (string, string, func()) {
 	h.t.Helper()
 	t := h.t
 	w := h.Do("POST", "/api/nodes/join-code", map[string]any{})
@@ -38,15 +47,7 @@ func (h *harness) fakeFrideNode(name, addr string, ff *testutil.FakeFride) (stri
 	if _, err := nodeagent.PairFride(context.Background(), nodeagent.FridePairOptions{Dir: dir, URL: ff.URL, Code: ff.NewCode()}); err != nil {
 		t.Fatal(err)
 	}
-	agent, err := nodeagent.Load(dir, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent.Logf, agent.HeartbeatEvery, agent.FrideCheckEvery = t.Logf, 100*time.Millisecond, 100*time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { _ = agent.Run(ctx); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
+	agent, stop := h.runFakeAgent(dir)
 	h.WaitFor(name+" offering FrIDE", func() bool {
 		n, err := h.b.nodes.Registry().Get(j.ID)
 		return err == nil && h.b.nodes.Online(j.ID) && n.Declared.Fride != nil
@@ -57,7 +58,24 @@ func (h *harness) fakeFrideNode(name, addr string, ff *testutil.FakeFride) (stri
 		}
 	}
 	h.WaitFor(name+" approved", func() bool { return agent.State().Approved.Fride != nil })
-	return j.ID, dir
+	return j.ID, dir, stop
+}
+
+// runFakeAgent runs the node agent of dir until stop, or the test, ends
+// it: stop takes the node offline, as a machine that shut down.
+func (h *harness) runFakeAgent(dir string) (*nodeagent.Agent, func()) {
+	h.t.Helper()
+	agent, err := nodeagent.Load(dir, "test")
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	agent.Logf, agent.HeartbeatEvery, agent.FrideCheckEvery = h.t.Logf, 100*time.Millisecond, 100*time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = agent.Run(ctx); close(done) }()
+	stop := sync.OnceFunc(func() { cancel(); <-done })
+	h.t.Cleanup(stop)
+	return agent, stop
 }
 
 // The core's side of FrIDE against two fake FrIDEs: placement by FrIDE's

@@ -10,6 +10,18 @@ for compatibility.
 
 ### Added
 
+- **FrIDE work leaves a node that is offline for an hour.** Work the core
+  handed to FrIDE on a node, or to a FrIDE instance there, that has been
+  offline longer than the new `fride.failover_minutes` (default 60; -1
+  never) moves to another node that can take it (the same instance on
+  another node for instance work), and resumes there from its pushed
+  branch; the chat hears it once, or once that no node can take it yet.
+  What it left on the offline node is closed, archived into the vault and
+  removed there once that node is back. Waiting work that an instance's
+  open thread on an offline node held back now starts. `fride_close`,
+  `fride_move` and `!move` work while the node is offline. Every brief
+  tells FrIDE to commit and push small steps as it goes (and FrIDE's own
+  agent instructions do). [docs/NODES.md](docs/NODES.md#failover)
 - **Full access on a node for a trusted brain.** A node whose owner runs
   `fridolin node full-access on` there, and approves it, lets the brains
   that the core's new `nodes.full_access_brains` names (empty by default)

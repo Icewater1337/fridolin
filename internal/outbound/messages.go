@@ -541,6 +541,22 @@ func FridePlacedNotice(thread int64, node string) string {
 	return fmt.Sprintf("🛠️ *FrIDE #%d* went to %s now.", thread, node)
 }
 
+// FrideFailoverNotice says thread's work left node from, offline for
+// down, for to, where FrIDE took it as its thread (0 when not known yet).
+func FrideFailoverNotice(thread int64, from string, down time.Duration, to string, toThread int, branch string) string {
+	there := to
+	if toThread > 0 {
+		there = fmt.Sprintf("%s (its thread %d there)", to, toThread)
+	}
+	return fmt.Sprintf("🔀 *FrIDE #%d* moved from %s to %s: %s, and %s. The task left on %s is archived into the vault and removed there once it is back.", thread, from, there, frideOffline(from, down), frideResumes(branch), from)
+}
+
+// FrideFailoverWaitsNotice says thread's work left node from, offline for
+// down, but no other node can take it now, and why.
+func FrideFailoverWaitsNotice(thread int64, from string, down time.Duration, why, branch string) string {
+	return fmt.Sprintf("⏳ *FrIDE #%d* left %s (%s) but waits: no other node can take it now (%s). Once one can, %s, and I'll say so here.", thread, from, frideOffline(from, down), why, frideResumes(branch))
+}
+
 // FrideMoveUsage answers a !move that names no thread and node.
 const FrideMoveUsage = "🚚 Use `!move <thread> <node>` to move FrIDE's work to another node, e.g. `!move 3 laptop`."
 
