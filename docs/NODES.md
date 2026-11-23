@@ -1391,10 +1391,17 @@ once the node is back, as after a failover.
 
 Work on a node that has been offline longer than
 `fride.failover_minutes` (default 60, -1 never;
-[CONFIGURATION.md](CONFIGURATION.md#fridefailover_minutes)) moves. The
-queue looks every 30 seconds; a node's time offline counts from when it
-was last heard from, or from the core's own start when that is later.
-Each thread sent to such a node, its own FrIDE's or an instance's:
+[CONFIGURATION.md](CONFIGURATION.md#fridefailover_minutes)) moves, and
+so does an instance's work on a node that is online but has not been
+able to run that instance as long: its sandboxes are not ready (sbx not
+signed in, say), it no longer offers `fride_host`, or the instance's
+start there fails. The queue looks every 30 seconds. A node's time
+offline counts from when it was last heard from, which the registry
+keeps across the core's restarts; a core that just started first gives
+its nodes five minutes (at most `fride.failover_minutes`) to connect
+again. The time an instance could not run counts from when this core
+first saw it so. Each thread sent to such a node, its own FrIDE's or an
+instance's:
 
 - leaves the node on the core alone (the node need not answer): its
   task there, or FrIDE's thread when it had no task yet, is recorded in
@@ -1410,8 +1417,12 @@ Each thread sent to such a node, its own FrIDE's or an instance's:
   why, and later that it went somewhere. Work that waits is in the queue
   like any other.
 
-Once the old node answers again, the core closes what each thread left
-there, archives it into the vault as `vault/workspaces/<task>.fride.tar.gz`
+`fride_close` does not wait for that: it closes such a thread on the
+core at once ("FrIDE #71 is closed here while …"), and what it left on
+the node is cleaned up as below.
+
+Once the old node answers again (and, for an instance, runs it there),
+the core closes what each thread left there, archives it into the vault as `vault/workspaces/<task>.fride.tar.gz`
 and removes it, so that its agent does not go on beside the new one; a
 FrIDE thread that never became a task is forgotten once FrIDE says it
 ended. Commits pushed by then are on the branch the new node continues.

@@ -37,8 +37,9 @@ import (
 // first news or the first work, and stop with the bridge.
 type frideRuntime struct {
 	b *App
-	// born is when this core started: a node's time offline counts from
-	// then at the earliest (failover).
+	// born is when this core started: the failover gives its nodes a
+	// moment to connect again after it, and counts a node it never heard
+	// from as offline since then.
 	born time.Time
 
 	once   sync.Once
@@ -65,6 +66,11 @@ type frideRuntime struct {
 
 	// inst are the FrIDE instances (fride_instances.go).
 	inst *frideInstances
+
+	// stuck is when each instance (node/instance) was first seen unable
+	// to run on the node its work is on (stranded).
+	stuckMu sync.Mutex
+	stuck   map[string]time.Time
 }
 
 type frideStall struct {
@@ -80,7 +86,8 @@ type frideNews struct {
 func newFrideRuntime(b *App) *frideRuntime {
 	ctx, cancel := context.WithCancel(context.Background())
 	f := &frideRuntime{b: b, born: time.Now(), ctx: ctx, cancel: cancel, news: make(chan frideNews, 256), kick: make(chan struct{}, 1),
-		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}, lastErr: map[int64]string{}, sent: map[string]time.Time{}, stalled: map[int64]frideStall{}}
+		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}, lastErr: map[int64]string{}, sent: map[string]time.Time{}, stalled: map[int64]frideStall{},
+		stuck: map[string]time.Time{}}
 	f.inst = newFrideInstances(f)
 	return f
 }
@@ -1080,9 +1087,10 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 		return "", err
 	}
 	if t.State == store.FrideSent && t.Node != "" {
-		if _, off := f.offlineFor(t.Node); off {
-			// Its node cannot hand it over: it resumes from its pushed
-			// branch (an instance's work on its instance elsewhere).
+		if _, stuck := f.stranded(t); stuck {
+			// Its node cannot hand it over (offline, or unable to run its
+			// instance): it resumes from its pushed branch (an instance's
+			// work on its instance elsewhere).
 			if t.Instance == "" && len(f.frideNodes(want, t.Repos)) == 0 {
 				return "", errors.New(f.noFrideNode(want, t.Repos))
 			}
@@ -1250,10 +1258,11 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 		// it is, which need not be reachable for that.
 		return f.drop(ctx, id, t)
 	}
-	if _, off := f.offlineFor(t.Node); off && t.Node != "" {
-		// Its node cannot close it now: closed here, and there once it
-		// is back (failover's orphans).
-		return f.detach(ctx, t)
+	if s, stuck := f.stranded(t); stuck {
+		// Its node cannot close it now (offline, or unable to run its
+		// instance): closed here, and there once it can (failover's
+		// orphans).
+		return f.detach(ctx, t, s)
 	}
 	if why := f.reachable(ctx, t); why != "" {
 		return "", errors.New(why)
