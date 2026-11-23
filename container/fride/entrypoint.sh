@@ -71,7 +71,17 @@ serve) ;;
 esac
 
 mkdir -p "$FRIDE_HOME" "$HOME/repos" "$HOME/.claude"
-[ -e "$FRIDE_HOME/config.json" ] || cp /opt/fride/companion.json "$FRIDE_HOME/config.json"
+cfg="$FRIDE_HOME/config.json"
+if [ ! -e "$cfg" ]; then
+	cp /opt/fride/companion.json "$cfg"
+# A config from an older image keeps what it has and gains what it lacks
+# of this image's, key by key, so that a setting a newer FrIDE needs
+# reaches the box; one jq cannot read stays as it is.
+elif jq -s '.[0] * .[1]' /opt/fride/companion.json "$cfg" >"$cfg.tmp" 2>/dev/null; then
+	mv "$cfg.tmp" "$cfg"
+else
+	rm -f "$cfg.tmp"
+fi
 # ponytail's offer to change the statusline is taken as made (docs/NODES.md,
 # "Ponytail for every agent"); /workspaces is trusted for Claude Code, as
 # the owner confirms it once on a native node.
