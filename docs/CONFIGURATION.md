@@ -1931,6 +1931,13 @@ scheduled agent handed to FrIDE never posts to a chat: its news goes to
 the agent, which answers FrIDE itself and reports only what matters
 ([BRAINS.md](BRAINS.md#scheduled-agents)).
 
+### `fride.failover_minutes`
+
+How long a node that has FrIDE work is offline before that work moves to
+another node that can take it, in minutes: `0` (default) is 60, `-1`
+never, at most 10080 (a week). The work resumes there from its pushed
+branch ([NODES.md](NODES.md#failover)).
+
 ### `fride.instances`
 
 The FrIDE instances the core brain may start on its nodes, by name:

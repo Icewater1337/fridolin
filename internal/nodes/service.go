@@ -90,6 +90,10 @@ type Options struct {
 	// Either may be nil.
 	OnMoveStopping func(MoveRecord)
 	Site           func() *MoveSite
+	// MovePolicy names what the node policy (#760) has against moving
+	// the core to the node with this id and name: folders that would go
+	// along and may not live there. Each blocks the move; nil for none.
+	MovePolicy func(id, name string) []string
 }
 
 // Service is the node port and the registry behind it.
@@ -138,6 +142,7 @@ type Service struct {
 	onMove        func(MoveRecord)
 	onStopping    func(MoveRecord)
 	site          func() *MoveSite
+	movePolicy    func(id, name string) []string
 	movePollEvery time.Duration
 	// progs are the lists of programs sent to nodes (programs.go).
 	progs     programsState
@@ -167,7 +172,7 @@ func New(opts Options) (*Service, error) {
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
 		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, sandboxBin: map[string]time.Time{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove, onTSOn: opts.OnTailscaleOn,
-		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, onStopping: opts.OnMoveStopping, site: opts.Site, movePollEvery: opts.MovePoll,
+		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, onStopping: opts.OnMoveStopping, site: opts.Site, movePolicy: opts.MovePolicy, movePollEvery: opts.MovePoll,
 	}
 	s.resumeMoves()
 	return s, nil

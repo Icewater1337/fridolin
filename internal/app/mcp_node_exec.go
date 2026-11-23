@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/audit"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -359,6 +360,12 @@ func (b *App) callNodeExec(ctx context.Context, c mcpCaller, raw json.RawMessage
 	v, err := b.execNode(args.Node)
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
+	}
+	if args.Dir != "" {
+		if err := b.checkFolderTask(manifest.TaskExec, args.Dir, v); err != nil {
+			b.auditExec(c, v, args.Argv, false, store.Approval{}, "refused: "+err.Error(), 0)
+			return mcp.ErrorResult(err.Error() + ". Do not run it on another node or without dir; tell the owner."), nil
+		}
 	}
 	full := b.fullAccess(c, v, nodeproto.MethodExec)
 	var why string

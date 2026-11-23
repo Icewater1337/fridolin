@@ -68,8 +68,16 @@ func (r *ownerCommandRate) allowN(command string, limit int, now time.Time) bool
 }
 
 // ownerCommand answers command (one of pipeline.OwnerCommands) with args
-// from m.
-func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string) string {
+// from m, and returns what the command started, which runs once the reply
+// is sent (pipeline.Workflow.Owner).
+func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string) (string, func()) {
+	ctx, then := withAfterReply(context.Background())
+	return b.ownerReply(ctx, m, command, args), then
+}
+
+// ownerReply is ownerCommand's reply; what it starts goes through ctx
+// (goAfterReply).
+func (b *App) ownerReply(ctx context.Context, m brainruntime.Inbound, command string, args []string) string {
 	by := m.Sender
 	if n, err := chat.PhoneNumber(m.Sender); err == nil {
 		by = n
@@ -93,13 +101,12 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 	case "!dashboard":
 		return b.dashboardCommand(record)
 	case "!movecore":
-		return b.moveCoreCommand(args, record)
+		return b.moveCoreCommand(ctx, args, record)
 	case "!unblock":
 		return b.unblockCommand(args, record)
 	case "!undo":
 		return b.undoCommand(args, by, record)
 	}
-	ctx := context.Background()
 	approve := command == "!approve"
 	switch len(args) {
 	case 0:
@@ -281,4 +288,42 @@ func (b *App) unblockCommand(args []string, record func(id, outcome string)) str
 	}
 	record(masked, "unblocked")
 	return outboundmsg.UnblockedReply(number)
+}
+
+// afterReplyKey keys the follow-ups an owner command started in its ctx.
+type afterReplyKey struct{}
+
+// afterReply holds them until the command's reply is sent.
+type afterReply struct {
+	mu sync.Mutex
+	fs []func()
+}
+
+// withAfterReply returns a ctx that collects what goAfterReply is handed,
+// and the func that starts it all, each on a goroutine of its own.
+func withAfterReply(ctx context.Context) (context.Context, func()) {
+	q := &afterReply{}
+	return context.WithValue(ctx, afterReplyKey{}, q), func() {
+		q.mu.Lock()
+		fs := q.fs
+		q.fs = nil
+		q.mu.Unlock()
+		for _, f := range fs {
+			go f()
+		}
+	}
+}
+
+// goAfterReply runs f on a goroutine: once the reply is sent, when ctx
+// came from an owner command (withAfterReply), so that what f tells the
+// chat follows the reply instead of racing it (#752); at once otherwise,
+// as for a poll vote, which has no reply.
+func goAfterReply(ctx context.Context, f func()) {
+	if q, ok := ctx.Value(afterReplyKey{}).(*afterReply); ok {
+		q.mu.Lock()
+		q.fs = append(q.fs, f)
+		q.mu.Unlock()
+		return
+	}
+	go f()
 }

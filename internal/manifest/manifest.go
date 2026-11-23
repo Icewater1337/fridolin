@@ -111,6 +111,10 @@ type Manifest struct {
 	// not in allowed_numbers and carry the conversation with them
 	// (docs/BRAINS.md, "Errands"); nil, the default, does not.
 	Errands *Errands `json:"errands,omitempty"`
+	// NodePolicy limits, per folder and everything inside it, where its
+	// copies may land and which nodes may run which work on it
+	// (nodepolicy.go); nil limits nothing.
+	NodePolicy []NodeRule `json:"node_policy,omitempty"`
 }
 
 // Errands is brain.json's "errands": how Fridolin introduces itself when
@@ -658,6 +662,9 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("brain %q: %w", m.ID, err)
 		}
 	}
+	if err := validateNodePolicy(m.NodePolicy); err != nil {
+		return fmt.Errorf("brain %q: %w", m.ID, err)
+	}
 	if err := m.validateSchedules(); err != nil {
 		return err
 	}
@@ -707,6 +714,12 @@ func (m Manifest) Normalized() Manifest {
 	m.Grants = grants
 	if len(m.Schedules) == 0 {
 		m.Schedules = nil
+	}
+	if len(m.NodePolicy) == 0 {
+		m.NodePolicy = nil
+	} else {
+		m.NodePolicy = slices.Clone(m.NodePolicy)
+		slices.SortFunc(m.NodePolicy, func(a, b NodeRule) int { return strings.Compare(a.Folder, b.Folder) })
 	}
 	if m.Files != nil {
 		if len(m.Files.Uploads) == 0 {

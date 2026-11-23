@@ -1358,6 +1358,13 @@ history of the brain that started the work as FrIDE's, so its next run
 sees what FrIDE asked. FrIDE says `done` at its next look at a closed
 task, every 15 seconds.
 
+**Briefs.** Every brief the core hands FrIDE (`fride_task`, a
+scheduled agent's work such as the bug fixer's, an instance's work) ends
+with the rule to commit each small, self-contained step and push it to
+the task branch as it goes, so that a node that goes away loses minutes
+of work. FrIDE's own guide for each task's agent and its orchestrator
+say the same.
+
 **Moving.** `!move <thread> <node>` in a direct chat, or `fride_move`:
 the task is exported from the node it is on with its agents stopped,
 kept in the vault as `vault/workspaces/moves/<task>.bundle`, imported on the
@@ -1365,7 +1372,8 @@ target (as `<task>-moved` when the id is taken there; its agent is
 reopened if it was running) and removed from the source. The thread
 keeps its number. A moved task has no FrIDE thread on its new node
 until the next `fride_reply`, which starts one there naming the task;
-news of the source's old thread is dropped.
+news of the source's old thread is dropped. A move from a node that is
+offline goes as a failover (below), at once.
 
 **Closing.** `fride_close` closes the task in FrIDE (the rationale is
 written, agents and stack stop), exports it into the vault as
@@ -1375,7 +1383,38 @@ with the vault running, it is uploaded to the cold tier right away; checks
 that the archive is a whole gzip'd tar, and only then removes the
 workspace on the node with `DELETE /api/tasks/<task>?force=1` (force:
 the rationale and any uncommitted work are in the archive). The branch
-stays in the repositories.
+stays in the repositories. A thread whose node is offline is closed on
+the core at once; what it left there is closed, archived and removed
+once the node is back, as after a failover.
+
+### Failover
+
+Work on a node that has been offline longer than
+`fride.failover_minutes` (default 60, -1 never;
+[CONFIGURATION.md](CONFIGURATION.md#fridefailover_minutes)) moves. The
+queue looks every 30 seconds; a node's time offline counts from when it
+was last heard from, or from the core's own start when that is later.
+Each thread sent to such a node, its own FrIDE's or an instance's:
+
+- leaves the node on the core alone (the node need not answer): its
+  task there, or FrIDE's thread when it had no task yet, is recorded in
+  `bridge.db` (`fride_orphans`);
+- goes to another node that can take it, as new work does (the same
+  matching, repositories and memory check; `want_node` still holds),
+  or to its instance, which then starts on another node it may run on,
+  with a brief that says to continue the existing branch from its last
+  pushed commit instead of starting over (without a branch FrIDE
+  reported, it starts from the brief);
+- tells its chat once: "🔀 FrIDE #71 moved from icebase to mini (its
+  thread 12 there) …", or that it waits because no node can take it,
+  why, and later that it went somewhere. Work that waits is in the queue
+  like any other.
+
+Once the old node answers again, the core closes what each thread left
+there, archives it into the vault as `vault/workspaces/<task>.fride.tar.gz`
+and removes it, so that its agent does not go on beside the new one; a
+FrIDE thread that never became a task is forgotten once FrIDE says it
+ended. Commits pushed by then are on the branch the new node continues.
 
 **Adding a repository.** `fride_repo_add` takes the online nodes with
 `fride` approved that match `node`; when one's FrIDE lists the

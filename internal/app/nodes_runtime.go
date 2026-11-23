@@ -39,7 +39,7 @@ func newNodes(b *App) (*nodes.Service, error) {
 		}
 	}
 	return nodes.New(nodes.Options{
-		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: onDeclare, OnJoin: b.nodeJoined, OnMove: b.coreMoveEnded, OnMoveStopping: b.coreMoveStopping, Site: b.moveSite,
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: onDeclare, OnJoin: b.nodeJoined, OnMove: b.coreMoveEnded, OnMoveStopping: b.coreMoveStopping, Site: b.moveSite, MovePolicy: b.movePolicyProblems,
 		// A node that connects takes the programs of its command agents,
 		// and its FrIDE its git identities.
 		// A node with FrIDE instances may run some from before the core

@@ -10,6 +10,28 @@ for compatibility.
 
 ### Added
 
+- **Per-folder node policy.** brain.json's new `node_policy` says, per
+  folder and everything in it, where its copies may land (`storage`:
+  nodes, backup targets, `cloud`) and which nodes may run backups,
+  coding (FrIDE, agent sessions) and commands (`node_exec`, terminals)
+  on it; `repos` ties FrIDE repositories to a folder. Set it on the
+  Files page or from a brain (approved like any brain.json change).
+  Backups, FrIDE routing and instances, the workstation tools,
+  `node_exec` and the core move's pre-flight follow it, and never fall
+  back to a node it denies: the work waits or fails with the reason.
+  Without it nothing changes. [docs/FILES.md](docs/FILES.md#node-policy)
+- **FrIDE work leaves a node that is offline for an hour.** Work the core
+  handed to FrIDE on a node, or to a FrIDE instance there, that has been
+  offline longer than the new `fride.failover_minutes` (default 60; -1
+  never) moves to another node that can take it (the same instance on
+  another node for instance work), and resumes there from its pushed
+  branch; the chat hears it once, or once that no node can take it yet.
+  What it left on the offline node is closed, archived into the vault and
+  removed there once that node is back. Waiting work that an instance's
+  open thread on an offline node held back now starts. `fride_close`,
+  `fride_move` and `!move` work while the node is offline. Every brief
+  tells FrIDE to commit and push small steps as it goes (and FrIDE's own
+  agent instructions do). [docs/NODES.md](docs/NODES.md#failover)
 - **Antigravity (Gemini) as a third AI provider (#749).** `agent_provider`
   takes `"antigravity"`, which runs brains on Google's Antigravity CLI
   (`agy`), with `antigravity_path` (default `agy`, also found in
@@ -394,6 +416,12 @@ for compatibility.
   [docs/PLAUD.md](docs/PLAUD.md#without-plauds-cloud-the-phone-app)
 
 ### Fixed
+
+- **A voice answer without a `[SPOKEN]` block no longer reads markdown
+  aloud.** The phone read the first 60 words as they were, with `**`,
+  `#`, bullets and backticks. Now it reads the answer without markdown,
+  links, URLs and emoji, and of a list, a table, code or a long answer
+  only its short opening sentence and "The details are in WhatsApp."
 
 - **A node finds Claude Code in `~/.local/bin`.** The node service's PATH
   leaves out the folder Claude Code's native installer uses, so

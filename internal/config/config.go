@@ -734,6 +734,9 @@ func (c *File) Validate(goos string) error {
 	if !validFrideNews[c.Fride.News] {
 		return fmt.Errorf("fride.news must be %q or %q, not %q", FrideNewsQuiet, FrideNewsAll, c.Fride.News)
 	}
+	if c.Fride.FailoverMinutes < -1 || c.Fride.FailoverMinutes > 10080 {
+		return fmt.Errorf("fride.failover_minutes: -1 (never), 0 (%d) or up to 10080", FrideFailoverDefault)
+	}
 	if err := validateFrideInstances(c.Fride.Instances); err != nil {
 		return err
 	}

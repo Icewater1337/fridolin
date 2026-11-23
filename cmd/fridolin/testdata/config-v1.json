@@ -219,6 +219,7 @@
   },
   "fride": {
     "news": "all",
+    "failover_minutes": 90,
     "instances": {
       "work": {
         "description": "work repositories",

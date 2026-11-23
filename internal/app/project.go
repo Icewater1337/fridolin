@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // AccessPolicy is the application's read-only projection from a config snapshot.
@@ -33,12 +35,24 @@ func BackupSettings(settings *config.Settings) backup.Settings {
 	return s
 }
 
-func BackupTarget(br *brain.Brain, notify func(context.Context, *brain.Brain, string) error) backup.Target {
+// BackupTarget is the Drive backup of br; others are the other brains,
+// whose node_policy may name br's folders too.
+func BackupTarget(br *brain.Brain, notify func(context.Context, *brain.Brain, string) error, others ...*brain.Brain) backup.Target {
 	t := backup.Target{ID: br.ID(), Dir: br.Dir(), WaitIdle: br.WaitIdle, Settings: func() backup.TargetSettings {
 		m := br.Manifest()
 		// The Drive backup is the cloud: a folder that does not go there,
-		// and node_only paths, stay out of it.
-		return backup.TargetSettings{Name: m.Name, Enabled: m.Backup.Cloud(), Exclude: m.Backup.CloudExcludes()}
+		// node_only paths, and what the node policy keeps off the cloud
+		// stay out of it.
+		refs := []vaultBrainRef{{Dir: br.Dir(), Approved: &m}}
+		for _, o := range others {
+			if o != br {
+				om := o.Manifest()
+				refs = append(refs, vaultBrainRef{Dir: o.Dir(), Approved: &om})
+			}
+		}
+		b := brainBackup{ID: br.ID(), Dir: filepath.Clean(AbsPath(br.Dir())), policies: backupPolicies(refs, HomeDir())}
+		all, _, denied := b.policyDenied(manifest.TargetCloud)
+		return backup.TargetSettings{Name: m.Name, Enabled: m.Backup.Cloud() && !all, Exclude: append(m.Backup.CloudExcludes(), denied...)}
 	}}
 	if notify != nil {
 		t.Notify = func(ctx context.Context, text string) error { return notify(ctx, br, text) }
@@ -49,7 +63,7 @@ func BackupTarget(br *brain.Brain, notify func(context.Context, *brain.Brain, st
 func BackupTargets(brains []*brain.Brain, notify func(context.Context, *brain.Brain, string) error) []backup.Target {
 	targets := make([]backup.Target, 0, len(brains))
 	for _, br := range brains {
-		targets = append(targets, BackupTarget(br, notify))
+		targets = append(targets, BackupTarget(br, notify, brains...))
 	}
 	return targets
 }

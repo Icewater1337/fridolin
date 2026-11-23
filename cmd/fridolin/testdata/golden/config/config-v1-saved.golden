@@ -248,7 +248,8 @@
         "idle_stop_minutes": 45,
         "core_login": true
       }
-    }
+    },
+    "failover_minutes": 90
   },
   "connections": {
     "openai": {

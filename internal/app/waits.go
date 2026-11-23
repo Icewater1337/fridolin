@@ -34,6 +34,8 @@ type waits struct {
 	// frideRetry is how often waiting work is offered to the nodes again,
 	// besides whenever a node's FrIDE comes up.
 	frideRetry time.Duration
+	// frideFailoverUnit is what one of fride.failover_minutes is.
+	frideFailoverUnit time.Duration
 	// frideGather is how long the relay gathers FrIDE's news before it
 	// sends any, so that one text a node sends for several threads at
 	// once goes out once; frideRepeat is how long after that the same
@@ -111,6 +113,7 @@ func defaultWaits() waits {
 		runWaitDelay:        5 * time.Second,
 		runTimeoutUnit:      time.Minute,
 		frideRetry:          30 * time.Second,
+		frideFailoverUnit:   time.Minute,
 		frideGather:         3 * time.Second,
 		frideRepeat:         time.Minute,
 		frideStallRepeat:    6 * time.Hour,

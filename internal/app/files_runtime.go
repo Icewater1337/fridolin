@@ -29,6 +29,7 @@ func (b *App) newFilesAPI() *httpapi.FilesAPI {
 		Roots: b.fileRoots, Wiki: b.wikis, Nodes: nodeFiles{b}, Audit: b.auditFile, Tickets: b.fileTickets,
 		Commit: b.commitFiles, Inbox: b.fileInbox, HandOff: b.handOffUpload, History: b.fileHistory,
 		SetUploadRule: b.registry.SetUploadFolder,
+		NodePolicy:    b.filesNodePolicy, SetNodeRule: b.setFilesNodeRule,
 	}
 }
 

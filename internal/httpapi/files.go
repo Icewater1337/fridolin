@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/files"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/wiki"
 )
 
@@ -42,6 +43,11 @@ type FilesAPI struct {
 	// SetUploadRule sets how a folder of a brain takes uploads (brain.json
 	// files.uploads): files.UploadFolder, files.UploadBrain or "".
 	SetUploadRule func(brain, folder, mode string) error
+	// NodePolicy is the node policy of folder rel of root, for the owner;
+	// SetNodeRule sets the folder's own rule (rule.Folder is filled in).
+	// nil for none.
+	NodePolicy  func(root files.Root, rel string) *NodePolicyView
+	SetNodeRule func(root files.Root, rel string, rule manifest.NodeRule) error
 	// History reads the changes made to a path of root, newest first.
 	History func(root files.Root, path string) ([]FileChange, error)
 	// Now is the clock of the trash's folder names; nil is time.Now.
@@ -90,6 +96,9 @@ type FilesListResponse struct {
 	// Rule is the upload folder of the brain this folder lies in, for a
 	// reader who may change it.
 	Rule *UploadRuleView `json:"rule,omitempty"`
+	// NodePolicy is the folder's node policy, for a reader who may
+	// change it.
+	NodePolicy *NodePolicyView `json:"node_policy,omitempty"`
 }
 
 // FilesSearchResponse is what a search by name found.
@@ -188,6 +197,7 @@ func (a *FilesAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/files/move", own(a.move))
 	mux.HandleFunc("POST /api/files/delete", own(a.remove))
 	mux.HandleFunc("PUT /api/files/upload-rule", own(a.setUploadRule))
+	mux.HandleFunc("PUT /api/files/node-policy", own(a.setNodePolicy))
 }
 
 // SiteHandler serves the same reads to the site process, for the account
@@ -367,6 +377,9 @@ func (a *FilesAPI) list(w http.ResponseWriter, r *http.Request, s files.Scope) {
 		if folder, mode := root.UploadFolderOf(rel); mode != "" {
 			out.Rule = &UploadRuleView{Folder: folder, Mode: mode}
 		}
+	}
+	if s.Write && root.Kind != files.KindMedia && a.NodePolicy != nil {
+		out.NodePolicy = a.NodePolicy(root, rel)
 	}
 	WriteJSON(w, http.StatusOK, out)
 }

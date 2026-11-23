@@ -437,10 +437,18 @@ func (r *targetRun) paths(kind string) (paths, excludes []string, err error) {
 	})
 	data := r.tg.IncludeDataDir && kind == snapshotNightly
 	excludes = append(excludes, l.secretExcludes()...)
+	keys := []string{r.tg.Node}
+	if n, err := r.t.nodes.Registry().Get(r.tg.Node); err == nil {
+		keys = append(keys, n.Name)
+	}
 	for _, id := range ids {
 		dir := l.absBrainDirs[id]
 		b, known := l.backups[dir]
-		patterns, ok := b.toNode(r.tg.Name)
+		patterns, ok := b.toNode(r.tg.Name, keys...)
+		if _, chosen := b.nodes[r.tg.Name]; known && !ok && chosen && !b.Unreadable {
+			_, why, _ := b.policyDenied(append(keys, r.tg.Name)...)
+			r.t.log.Info("node policy: skipped the backup target for a brain folder", "target", r.tg.Name, "brain", id, "backups_may_go", why)
+		}
 		if !known || !ok {
 			excludes = append(excludes, backup.ResticPath(dir))
 			continue
@@ -682,7 +690,7 @@ func (t *targetService) Views() []targetView {
 		v.Problem = t.problem(tg)
 		v.Ready = v.Problem == ""
 		for _, b := range l.backups {
-			if _, ok := b.toNode(tg.Name); ok {
+			if _, ok := b.toNode(tg.Name, tg.Node, v.NodeName); ok {
 				v.Brains = append(v.Brains, b.ID)
 			}
 		}

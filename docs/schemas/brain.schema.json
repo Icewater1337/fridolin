@@ -142,6 +142,31 @@
         }
       }
     },
+    "node_policy": {
+      "type": ["array", "null"],
+      "maxItems": 64,
+      "description": "Per folder and everything inside it: where copies may land and which nodes may run which work on it (docs/FILES.md, Node policy). For each dimension the closest rule that sets it wins; nothing limits a folder no rule covers.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["folder"],
+        "properties": {
+          "folder": {"type": "string", "maxLength": 4096, "description": "Relative to the brain folder (\"\" for all of it), or an absolute path: a folder on a node or the core, or ~/ for the core's home."},
+          "storage": {"type": ["array", "null"], "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 128}, "description": "Where copies may land: nodes by name or id, backup targets by name, and cloud. Left out: anywhere; []: nowhere off its machine."},
+          "tasks": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "By kind, the nodes that may run that work on the folder; a kind left out runs anywhere, [] nowhere.",
+            "properties": {
+              "backup": {"type": ["array", "null"], "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 128}, "description": "Backup targets or nodes, and cloud."},
+              "coding": {"type": ["array", "null"], "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 128}, "description": "Nodes for FrIDE tasks and instances, and node agent sessions."},
+              "exec": {"type": ["array", "null"], "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 128}, "description": "Nodes for node_exec with its dir in the folder, and terminals."}
+            }
+          },
+          "repos": {"type": ["array", "null"], "maxItems": 64, "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,100}$"}, "description": "FrIDE repositories, by folder name, that belong to this folder: work in them gets its coding nodes."}
+        }
+      }
+    },
     "schedules": {
       "type": "array",
       "maxItems": 50,

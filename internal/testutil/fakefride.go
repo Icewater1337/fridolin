@@ -162,6 +162,16 @@ func (f *FakeFride) Task(id string) (exists bool, status string) {
 	return false, ""
 }
 
+// Message is the brief thread was started with.
+func (f *FakeFride) Message(thread int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if th := f.threads[thread]; th != nil {
+		return th.Message
+	}
+	return ""
+}
+
 // Replies are the answers a thread got.
 func (f *FakeFride) Replies(thread int) []string {
 	f.mu.Lock()
