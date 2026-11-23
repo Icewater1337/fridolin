@@ -1072,6 +1072,9 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 		if _, off := f.offlineFor(t.Node); off {
 			// Its node cannot hand it over: it resumes from its pushed
 			// branch (an instance's work on its instance elsewhere).
+			if t.Instance == "" && len(f.frideNodes(want, t.Repos)) == 0 {
+				return "", errors.New(noFrideNode(want, t.Repos))
+			}
 			text, err := f.failoverThread(ctx, id, want, "core brain")
 			if text == "" && err == nil {
 				err = fmt.Errorf("FrIDE #%d changed while it was being moved; try again", id)

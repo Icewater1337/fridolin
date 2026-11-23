@@ -102,6 +102,10 @@ func TestFrideCloseAndMoveWhileNodeOffline(t *testing.T) {
 	if !strings.Contains(reply, "FrIDE #2 is closed here while laptop is offline. Branch feat/docs keeps what was pushed.") {
 		t.Fatalf("fride_close while offline:\n%s", reply)
 	}
+	reply = h.coreSays("move it nowhere", step("fride_move", `{"thread":1,"node":"nowhere"}`))
+	if !strings.Contains(reply, `[core:fride_move failed] no online node offers FrIDE that is or is tagged "nowhere" with api`) {
+		t.Fatalf("fride_move to no node while offline:\n%s", reply)
+	}
 	miniFride.SetCanStart(true)
 	reply = h.coreSays("move the health work", step("fride_move", `{"thread":1,"node":"`+mini+`"}`))
 	if !strings.Contains(reply, "🔀 *FrIDE #1* moved from laptop to mini (its thread 1 there)") || !strings.Contains(reply, "branch feat/health") {
