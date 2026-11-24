@@ -530,15 +530,20 @@ func TestBridgeV1Fixture(t *testing.T) {
 
 // Reopening through the shared pool must not alter the paired device or the
 // independent whatsmeow schema version. Legacy application rows remain usable.
+// The first open may run whatsmeow's own upgrades of its schema (a newer
+// whatsmeow than the one that wrote the fixture), which only move it forward
+// and keep it readable by the build that wrote it; reopening then changes
+// nothing.
 func TestSharedStoreReopensV1Fixture(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	loadSQL(t, dbPath, fixture(t, "bridge-v1.sql"))
 	db := testStoreSQL(t, dbPath)
-	var version, compat int
-	if err := db.QueryRow(`SELECT version, compat FROM whatsmeow_version`).Scan(&version, &compat); err != nil {
+	var fixtureVersion, version, compat int
+	if err := db.QueryRow(`SELECT version, compat FROM whatsmeow_version`).Scan(&fixtureVersion, &compat); err != nil {
 		t.Fatal(err)
 	}
+	version = -1
 	for range 2 {
 		s := openTestStore(t, dbPath)
 		device, err := s.Container.GetFirstDevice(t.Context())
@@ -554,6 +559,14 @@ func TestSharedStoreReopensV1Fixture(t *testing.T) {
 		var gotVersion, gotCompat int
 		if err := db.QueryRow(`SELECT version, compat FROM whatsmeow_version`).Scan(&gotVersion, &gotCompat); err != nil {
 			t.Fatal(err)
+		}
+		if version < 0 {
+			// The first open: only whatsmeow's own upgrades may have run.
+			if gotVersion < fixtureVersion || gotCompat > fixtureVersion {
+				t.Fatalf("device schema %d/%d -> %d/%d: went back, or the build that wrote it can no longer open it",
+					fixtureVersion, compat, gotVersion, gotCompat)
+			}
+			version, compat = gotVersion, gotCompat
 		}
 		if gotVersion != version || gotCompat != compat {
 			t.Fatalf("device schema changed: %d/%d -> %d/%d", version, compat, gotVersion, gotCompat)
