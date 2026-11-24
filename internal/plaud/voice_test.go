@@ -426,6 +426,28 @@ func TestSpokenAnswer(t *testing.T) {
 	}
 }
 
+// stripMarkdown takes only real markdown away: a lone * between numbers,
+// a number with a dot opening a line, and # without a space stay (#774).
+func TestStripMarkdownKeepsNumbers(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"3*4 is 12, and 2*5 is 10.", "3*4 is 12, and 2*5 is 10."},
+		{"24. Dezember ist Heiligabend.", "24. Dezember ist Heiligabend."},
+		{"#1 priority is sleep.", "#1 priority is sleep."},
+		{"It is **really** *quite* good.", "It is really quite good."},
+		{"## Today\nAll fine.", "Today All fine."},
+		{"1. Mon\n2) Tue", "Mon Tue"},
+		{"- one\n* two\n• three\n+ four", "one two three four"},
+	} {
+		if got := stripMarkdown(c.in); got != c.want {
+			t.Errorf("stripMarkdown(%q) = %q; want %q", c.in, got, c.want)
+		}
+	}
+	// A lone numbered line is no list, so the answer is read as it is.
+	if s, _ := spokenAnswer("24. Dezember ist Heiligabend."); s != "24. Dezember ist Heiligabend." {
+		t.Errorf("spoken %q", s)
+	}
+}
+
 const voiceTestPinName = "2026-10-18_10-00-00"
 
 // voicePin sends transcript as the app sends a recording from the pin in
