@@ -114,14 +114,18 @@ const (
 var (
 	spokenRE = regexp.MustCompile(`(?s)\[SPOKEN\](.*?)\[/SPOKEN\]`)
 
-	mdFenceRE     = regexp.MustCompile("(?s)```.*?(```|$)")
-	mdListRE      = regexp.MustCompile(`^\s*([-*•+]|\d+[.)])\s+`)
-	mdHeadingRE   = regexp.MustCompile(`^\s*#{1,6}\s*`)
-	mdQuoteRE     = regexp.MustCompile(`^\s*>+\s*`)
-	mdTableSepRE  = regexp.MustCompile(`^[\s|:-]+$`)
-	mdLinkRE      = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
-	mdURLRE       = regexp.MustCompile(`(?:https?://|www\.)\S+`)
-	mdEmphasisRE  = regexp.MustCompile("\\*+|~~|`+")
+	mdFenceRE    = regexp.MustCompile("(?s)```.*?(```|$)")
+	mdListRE     = regexp.MustCompile(`^\s*([-*•+]|\d+[.)])\s+`)
+	mdBulletRE   = regexp.MustCompile(`^\s*[-*•+]\s+`)
+	mdHeadingRE  = regexp.MustCompile(`^\s*#{1,6}\s+`)
+	mdQuoteRE    = regexp.MustCompile(`^\s*>+\s*`)
+	mdTableSepRE = regexp.MustCompile(`^[\s|:-]+$`)
+	mdLinkRE     = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	mdURLRE      = regexp.MustCompile(`(?:https?://|www\.)\S+`)
+	mdEmphasisRE = regexp.MustCompile("~~|`+")
+	mdBoldRE     = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	// The * of an italic pair has no word character outside it, so 3*4*5 stays.
+	mdItalicRE    = regexp.MustCompile(`(^|[^\w*])\*([^*\s][^*]*)\*([^\w*]|$)`)
 	mdUnderlineRE = regexp.MustCompile(`(^|[\s(])_+|_+([\s).,!?:;]|$)`)
 )
 
@@ -154,12 +158,14 @@ func structuredAnswer(text string) bool {
 		return true
 	}
 	items := 0
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	isItem := listItems(lines)
+	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "|") && strings.Count(line, "|") >= 2 {
 			return true
 		}
-		if mdListRE.MatchString(line) {
+		if isItem[i] {
 			items++
 		}
 	}
@@ -171,9 +177,11 @@ func structuredAnswer(text string) bool {
 // rest is in the chat.
 func spokenFallback(text string) string {
 	var para []string
-	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	isItem := listItems(lines)
+	for i, line := range lines {
 		t := strings.TrimSpace(line)
-		if t == "" || mdListRE.MatchString(t) || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "```") {
+		if t == "" || isItem[i] || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "```") {
 			break
 		}
 		if !mdHeadingRE.MatchString(t) {
@@ -207,16 +215,22 @@ func stripMarkdown(text string) string {
 	text = mdLinkRE.ReplaceAllString(text, "$1")
 	text = mdURLRE.ReplaceAllString(text, "")
 	var lines []string
-	for _, line := range strings.Split(text, "\n") {
+	all := strings.Split(text, "\n")
+	isItem := listItems(all)
+	for i, line := range all {
 		if strings.Contains(line, "|") && mdTableSepRE.MatchString(line) {
 			continue
 		}
 		line = mdHeadingRE.ReplaceAllString(line, "")
 		line = mdQuoteRE.ReplaceAllString(line, "")
-		line = mdListRE.ReplaceAllString(line, "")
+		if isItem[i] {
+			line = mdListRE.ReplaceAllString(line, "")
+		}
 		lines = append(lines, strings.ReplaceAll(line, "|", " "))
 	}
-	text = mdEmphasisRE.ReplaceAllString(strings.Join(lines, "\n"), "")
+	text = mdBoldRE.ReplaceAllString(strings.Join(lines, "\n"), "$1")
+	text = mdItalicRE.ReplaceAllString(text, "$1$2$3")
+	text = mdEmphasisRE.ReplaceAllString(text, "")
 	text = mdUnderlineRE.ReplaceAllString(text, "$1$2")
 	text = strings.Map(func(r rune) rune {
 		if isEmoji(r) {
@@ -225,6 +239,17 @@ func stripMarkdown(text string) string {
 		return r
 	}, text)
 	return strings.Join(strings.Fields(text), " ")
+}
+
+// listItems reports which lines are list items: a bulleted line, and a
+// numbered one next to another list line, so a lone "24. Dezember" is no list.
+func listItems(lines []string) []bool {
+	looks := func(i int) bool { return i >= 0 && i < len(lines) && mdListRE.MatchString(lines[i]) }
+	items := make([]bool, len(lines))
+	for i, l := range lines {
+		items[i] = mdBulletRE.MatchString(l) || looks(i) && (looks(i-1) || looks(i+1))
+	}
+	return items
 }
 
 // isEmoji reports whether r is an emoji or a part of one. Symbols below
