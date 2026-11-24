@@ -180,6 +180,10 @@ const maxStreamLine = 8 << 20
 // output) is skipped, and fails the turn only if no result arrives.
 func (s *agentSession) parse(r interface{ Read([]byte) (int, error) }) turnResult {
 	var res turnResult
+	// An agy step a stopped or failed turn left unfinished is not this turn's text.
+	s.mu.Lock()
+	s.agyText = ""
+	s.mu.Unlock()
 	br := bufio.NewReaderSize(r, 64<<10)
 	var line []byte
 	skipped := false

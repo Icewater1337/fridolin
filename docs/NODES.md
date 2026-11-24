@@ -2705,7 +2705,7 @@ yes in a lockdown is a no.
 | --- | --- | --- |
 | macOS | under `sandbox-exec` with a profile of its own: writes only in its folder, its temp folder and the provider's own state; the denied places above unreadable | `claude --dangerously-skip-permissions` (Codex: its own sandbox off; agy: `--dangerously-skip-permissions`), since the sandbox holds it |
 | Linux | under bubblewrap (`bwrap`), the same confinement, where `bwrap` runs | as on macOS; without a working `bwrap`, as on Windows |
-| Windows | without a sandbox | Claude Code's own permission checks (`--permission-mode acceptEdits`: edits in the folder), and what they refuse goes to the owner as an approval poll; Codex with `--sandbox workspace-write`; agy with `--mode accept-edits` and its own rules |
+| Windows | without a sandbox | Claude Code's own permission checks (`--permission-mode acceptEdits`: edits in the folder), and what they refuse goes to the owner as an approval poll; Codex with `--sandbox workspace-write`; agy with `--mode accept-edits` and its own rules, where an action they refuse fails the turn and is named, since agy cannot be given allowed actions |
 
 The node reports which it uses (`sandbox` on the Nodes page and in each
 session); a terminal runs in the same sandbox, or as an ordinary shell of

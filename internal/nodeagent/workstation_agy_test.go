@@ -43,11 +43,11 @@ func TestAgyParse(t *testing.T) {
 		`{"event":"step_update","step_update":{"conversation_id":"c-9","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Lo"}}`,
 		`{"event":"step_update","step_update":{"conversation_id":"c-9","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"oking."}}`,
 		`{"event":"step_update","step_update":{"conversation_id":"c-9","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command"}}`,
-		`{"event":"result","result":{"conversation_id":"c-9","status":"SUCCESS","response":"Fixed it.","denied_actions":["command(rm -rf x)"]}}`,
+		`{"event":"result","result":{"conversation_id":"c-9","status":"SUCCESS","response":"Fixed it."}}`,
 	}, "\n") + "\n"
 	s := &agentSession{a: &Agent{Logf: t.Logf}, id: "s1", provider: nodeproto.ProviderAntigravity}
 	res := s.parse(strings.NewReader(stream))
-	if !res.finished || res.text != "Fixed it." || res.resume != "c-9" || res.errMsg != "" || !slices.Equal(res.denied, []string{"command(rm -rf x)"}) {
+	if !res.finished || res.text != "Fixed it." || res.resume != "c-9" || res.errMsg != "" || len(res.denied) != 0 {
 		t.Errorf("turn = %+v", res)
 	}
 	if len(s.events) != 2 || s.events[0].Text != "Looking." || s.events[1].Text != "run_command" {
@@ -71,5 +71,27 @@ func TestAgyIsFoundAsAgy(t *testing.T) {
 	}
 	if _, err := (&Agent{AgentPaths: map[string]string{}}).agentPath(nodeproto.ProviderAntigravity); !errors.Is(err, exec.ErrNotFound) {
 		t.Errorf("missing agy: %v", err)
+	}
+}
+
+// agy cannot be given allowed actions, so a refused one fails the turn,
+// naming it, instead of asking the owner a question that cannot work (#773).
+func TestAgyDeniedActionFailsTheTurn(t *testing.T) {
+	t.Parallel()
+	s := &agentSession{a: &Agent{Logf: t.Logf}, id: "s1", provider: nodeproto.ProviderAntigravity, sandbox: nodeproto.SandboxNone}
+	res := s.parse(strings.NewReader(`{"event":"result","result":{"status":"SUCCESS","response":"Could not.","denied_actions":["command(foo)","command(bar)"]}}` + "\n"))
+	if len(res.denied) != 0 || !strings.Contains(res.errMsg, "command(foo), command(bar)") {
+		t.Errorf("turn = %+v", res)
+	}
+}
+
+// A turn cut off mid-step leaves no text for the next turn (#773).
+func TestAgyTextClearedPerTurn(t *testing.T) {
+	t.Parallel()
+	s := &agentSession{a: &Agent{Logf: t.Logf}, id: "s1", provider: nodeproto.ProviderAntigravity}
+	s.parse(strings.NewReader(`{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"stale "}}` + "\n"))
+	res := s.parse(strings.NewReader(`{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"fresh"}}` + "\n"))
+	if res.text != "fresh" {
+		t.Errorf("text = %q", res.text)
 	}
 }
