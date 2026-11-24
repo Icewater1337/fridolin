@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,8 @@ func TestShelf(t *testing.T) {
 	if err != nil || filepath.Dir(p) != s.Dir {
 		t.Errorf("Path(%q) = %q, %v", name, p, err)
 	}
-	if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o600 {
+	// Windows has no Unix permission bits: os.Stat reports 0666 there.
+	if st, err := os.Stat(p); err != nil || runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("the blob: %v, %v", st, err)
 	}
 	for _, bad := range []string{"", "../x", "a/b", ".hidden", "/etc/passwd"} {

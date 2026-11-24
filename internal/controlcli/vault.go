@@ -69,6 +69,9 @@ func DashboardCall(cfg *config.Settings, command, method, path string, body, out
 		}
 		return fmt.Errorf("the bridge refused: %s", e.Error)
 	}
+	if out == nil {
+		return nil
+	}
 	if raw, ok := out.(*json.RawMessage); ok {
 		*raw = append((*raw)[:0], data...)
 		return nil
