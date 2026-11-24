@@ -306,7 +306,9 @@ func (ss *session) fail() {
 	defer ss.mu.Unlock()
 	ss.gone = true
 	for id, ch := range ss.pending {
-		ch <- nodeproto.Response{Error: nodeproto.Errorf(nodeproto.CodeUnavailable, "the node disconnected")}
+		e := nodeproto.Errorf(nodeproto.CodeUnavailable, "the node disconnected")
+		e.Cause = errDisconnected
+		ch <- nodeproto.Response{Error: e}
 		delete(ss.pending, id)
 	}
 }
@@ -719,6 +721,10 @@ var ErrCall = errors.New("refused")
 // errNotSent marks a CodeUnavailable from Call whose request never left the
 // core, so the node cannot have acted on it.
 var errNotSent = errors.New("not sent")
+
+// errDisconnected marks a CodeUnavailable from Call whose node went away
+// after the request was sent: the node may have acted on it.
+var errDisconnected = errors.New("disconnected before it answered")
 
 func notSent(format string, args ...any) *nodeproto.Error {
 	e := nodeproto.Errorf(nodeproto.CodeUnavailable, format, args...)

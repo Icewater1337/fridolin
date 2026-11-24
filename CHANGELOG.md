@@ -432,6 +432,12 @@ for compatibility.
 
 ### Fixed
 
+- **A box update is no longer reported refused when the box drops before
+  it answers.** The box keeps the core's request before it answers, and
+  its updater may recreate the node before the answer leaves; the core
+  recorded "the box refused the update: the node disconnected" although
+  the update went ahead. It now waits for the box as after an answer
+  (#769).
 - **Plaud Sync no longer keeps other apps quiet, and speaks voice answers
   again.** When the phone's text-to-speech stopped answering under the
   long-running app (its service died or was updated), the app waited
