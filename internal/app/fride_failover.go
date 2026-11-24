@@ -40,8 +40,12 @@ func frideBrief(t store.FrideThread) string {
 
 // frideRef is the ref thread t's brief goes to FrIDE with: the same ref
 // again returns the thread FrIDE started, so work that resumes after a
-// failover gets one of its own.
+// failover gets one of its own, also on the node it left (#772).
 func frideRef(t store.FrideThread) string {
+	if t.Failovers > 0 {
+		return fmt.Sprintf("fridolin-%d-failover-%d", t.ID, t.Failovers)
+	}
+	// compat: a thread that failed over before failovers were counted.
 	if t.Branch != "" {
 		return fmt.Sprintf("fridolin-%d-resume-%d", t.ID, time.Now().UnixNano())
 	}
@@ -230,6 +234,7 @@ func (f *frideRuntime) failoverThread(ctx context.Context, id int64, want, by st
 	// Queued and on no node: the instance is no longer held on old, and
 	// the queue takes the thread should the placement below fail.
 	t.State, t.Node, t.FrideThread, t.TaskID, t.FrideStatus = store.FrideQueued, "", 0, "", ""
+	t.Failovers++
 	if err := f.b.store.SaveFrideThread(ctx, t); err != nil {
 		return "", err
 	}
@@ -322,6 +327,9 @@ func (f *frideRuntime) cleanOrphans() {
 func (f *frideRuntime) cleanOrphan(ctx context.Context, o store.FrideOrphan) (bool, error) {
 	where := f.where(o.Node, o.Instance)
 	task := o.TaskID
+	if live, err := f.liveOrphan(ctx, o, task); live || err != nil {
+		return live, err
+	}
 	if task == "" {
 		st, err := f.b.nodes.FrideStatusOn(ctx, o.Node, o.Instance, o.FrideThread)
 		if pe, ok := errors.AsType[*nodeproto.Error](err); ok && (pe.Code == nodeproto.CodeNotFound || strings.Contains(pe.Message, "404")) {
@@ -333,6 +341,9 @@ func (f *frideRuntime) cleanOrphan(ctx context.Context, o store.FrideOrphan) (bo
 		task = st.Thread.TaskID
 		if task == "" {
 			return droppable(st.Thread.Status) && st.Thread.Status != "queued", nil
+		}
+		if live, err := f.liveOrphan(ctx, o, task); live || err != nil {
+			return live, err
 		}
 	}
 	if _, err := f.b.nodes.FrideCloseOn(ctx, o.Node, o.Instance, task); err != nil {
@@ -352,4 +363,25 @@ func (f *frideRuntime) cleanOrphan(ctx context.Context, o store.FrideOrphan) (bo
 	}
 	log.Printf("fride: what FrIDE #%d left on %s, task %s, is archived in the vault as %s (%d bytes) and removed there", o.Thread, where, task, f.vaultRel(path), size)
 	return true, nil
+}
+
+// liveOrphan reports whether a thread that is not closed has o's work
+// (FrIDE's thread there, or task) on o's node and instance again, as work
+// placed back on the node it left can: o is then done with, and that
+// work is not closed or removed under it (#772).
+func (f *frideRuntime) liveOrphan(ctx context.Context, o store.FrideOrphan, task string) (bool, error) {
+	threads, err := f.b.store.FrideThreads(ctx, "")
+	if err != nil {
+		return false, err
+	}
+	for _, t := range threads {
+		if t.State == store.FrideClosed || t.Node != o.Node || t.Instance != o.Instance {
+			continue
+		}
+		if o.FrideThread != 0 && t.FrideThread == o.FrideThread || task != "" && t.TaskID == task {
+			log.Printf("fride: what FrIDE #%d left on %s is FrIDE #%d's live work now; it stays there", o.Thread, f.where(o.Node, o.Instance), t.ID)
+			return true, nil
+		}
+	}
+	return false, nil
 }

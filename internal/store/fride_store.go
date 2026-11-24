@@ -73,19 +73,22 @@ type FrideThread struct {
 	FrideStatus string
 	Archive     string
 	Rationale   string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Failovers counts the times the work left a node that could not
+	// serve it; each placement after one sends FrIDE a ref of its own.
+	Failovers int
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // ErrNoFrideThread is a thread number fride_threads does not have.
 var ErrNoFrideThread = errors.New("no such FrIDE thread")
 
-const frideColumns = `id, chat_jid, brain, message, repos, want_node, node, instance, fride_thread, task_id, branch, state, fride_status, archive, rationale, created_at, updated_at`
+const frideColumns = `id, chat_jid, brain, message, repos, want_node, node, instance, fride_thread, task_id, branch, state, fride_status, archive, rationale, failovers, created_at, updated_at`
 
 func scanFride(row interface{ Scan(...any) error }) (FrideThread, error) {
 	var t FrideThread
 	var repos string
-	err := row.Scan(&t.ID, &t.Chat, &t.Brain, &t.Message, &repos, &t.WantNode, &t.Node, &t.Instance, &t.FrideThread, &t.TaskID, &t.Branch, &t.State, &t.FrideStatus, &t.Archive, &t.Rationale, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.Chat, &t.Brain, &t.Message, &repos, &t.WantNode, &t.Node, &t.Instance, &t.FrideThread, &t.TaskID, &t.Branch, &t.State, &t.FrideStatus, &t.Archive, &t.Rationale, &t.Failovers, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return t, ErrNoFrideThread
 	}
@@ -114,8 +117,8 @@ func (s *Store) AddFrideThread(ctx context.Context, t FrideThread) (int64, error
 // branch, state, status and archive. The instance stays what
 // AddFrideThread recorded.
 func (s *Store) SaveFrideThread(ctx context.Context, t FrideThread) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE fride_threads SET node = ?, fride_thread = ?, task_id = ?, branch = ?, state = ?, fride_status = ?, archive = ?, rationale = ?, updated_at = ? WHERE id = ?`,
-		t.Node, t.FrideThread, t.TaskID, t.Branch, t.State, t.FrideStatus, t.Archive, t.Rationale, time.Now().UTC(), t.ID)
+	res, err := s.db.ExecContext(ctx, `UPDATE fride_threads SET node = ?, fride_thread = ?, task_id = ?, branch = ?, state = ?, fride_status = ?, archive = ?, rationale = ?, failovers = ?, updated_at = ? WHERE id = ?`,
+		t.Node, t.FrideThread, t.TaskID, t.Branch, t.State, t.FrideStatus, t.Archive, t.Rationale, t.Failovers, time.Now().UTC(), t.ID)
 	if err != nil {
 		return err
 	}
@@ -269,6 +272,13 @@ func migrateV15(tx *sql.Tx) error {
 		task_id      TEXT NOT NULL DEFAULT '',
 		created_at   DATETIME NOT NULL
 	)`)
+	return err
+}
+
+// migrateV16 counts a thread's failovers, so that work placed back on
+// the node it left gets a FrIDE thread of its own there (#772).
+func migrateV16(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE fride_threads ADD COLUMN failovers INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 
