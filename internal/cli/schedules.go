@@ -161,7 +161,7 @@ func schedulesCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "%s/%s %sd\n", brain, name, strings.TrimSuffix(sub, "e"))
+		fmt.Fprintf(stdout, "%s/%s %sd\n", brain, name, sub)
 		return 0
 	case "run":
 		var r scheduleRun
