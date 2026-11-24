@@ -100,6 +100,10 @@ func TestFrideInstancePrepareConfig(t *testing.T) {
 		}
 		return cfg
 	}
+	// The script runs in the instance's Linux VM, where FrIDE reads the
+	// config, so it writes slash paths; on Windows the test's sh (MSYS)
+	// gives $HOME as C:/…, never with backslashes.
+	vmPath := func(elem ...string) string { return filepath.ToSlash(filepath.Join(elem...)) }
 	get := func(cfg map[string]any, keys ...string) any {
 		var v any = cfg
 		for _, k := range keys {
@@ -111,7 +115,7 @@ func TestFrideInstancePrepareConfig(t *testing.T) {
 
 	home := t.TempDir()
 	cfg := prepare(home, string(given))
-	if cfg["name"] != "fridolin companion (instance)" || cfg["workspaceRoot"] != filepath.Join(home, "fride-companion", "workspaces") ||
+	if cfg["name"] != "fridolin companion (instance)" || cfg["workspaceRoot"] != vmPath(home, "fride-companion", "workspaces") ||
 		get(cfg, "repos", "fridolin", "build") == nil || get(cfg, "review", "approvals", "normal") != 0.0 {
 		t.Errorf("a new instance's config: %v", cfg)
 	}
@@ -133,7 +137,7 @@ func TestFrideInstancePrepareConfig(t *testing.T) {
 		{[]string{"repos", "fride", "test"}, "make test"},
 		{[]string{"repos", "fride", "build"}, "go build ./..."},
 		{[]string{"repos", "fridolin", "build"}, "go build ./..."},
-		{[]string{"workspaceRoot"}, filepath.Join(home, "fride-companion", "workspaces")},
+		{[]string{"workspaceRoot"}, vmPath(home, "fride-companion", "workspaces")},
 	} {
 		if got := get(cfg, c.keys...); got != c.want {
 			t.Errorf("%s: %v, want %v", strings.Join(c.keys, "."), got, c.want)
