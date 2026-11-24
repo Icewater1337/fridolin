@@ -28,7 +28,7 @@ const (
 	// from for this long.
 	DefaultTerminalIdle = 30 * time.Minute
 	// DefaultAgentMaxRuntime stops a session that ran this long in all.
-	DefaultAgentMaxRuntime = 2 * time.Hour
+	DefaultAgentMaxRuntime = 24 * time.Hour
 	// terminalBuffer is the output a terminal keeps for reading, bytes.
 	terminalBuffer = 1 << 20
 	// terminalDrainGrace is how long a terminal waits for the end of its

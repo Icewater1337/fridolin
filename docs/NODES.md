@@ -2676,7 +2676,8 @@ capability, and a node that adds a folder waits for the owner again.
 | `terminal` | `terminal.open`, `terminal.send`, `terminal.read`, `terminal.resize`, `terminal.close`, `terminal.list` | a shell in a folder on a pseudo-terminal (a PTY on macOS and Linux, ConPTY on Windows), its output kept (1 MiB) to be read from an offset |
 
 At most 8 sessions of each kind run on a node; a terminal nobody used for
-30 minutes is closed, and a session that ran for 2 hours is stopped.
+30 minutes is closed, and a session that ran for 24 hours is stopped (`"agent_max_runtime": "48h"` in
+`node.json` changes that; a Go duration).
 
 ### Agent sessions
 

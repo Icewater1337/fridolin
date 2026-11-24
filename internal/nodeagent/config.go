@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -57,6 +58,9 @@ type Config struct {
 	// from the state dir's own fridolin (OwnBinary). Empty: the machine's
 	// node, fridolin-node.
 	Service string `json:"service,omitempty"`
+	// AgentMaxRuntime is how long an agent session may run in all, a Go
+	// duration ("48h"); empty is DefaultAgentMaxRuntime (24h).
+	AgentMaxRuntime string `json:"agent_max_runtime,omitempty"`
 	// FrideHost tunes fride_host, which the agent declares once `fridolin
 	// node fride host setup` ran (fride_instances.go); nil for defaults.
 	FrideHost *FrideHostConfig `json:"fride_host,omitempty"`
@@ -110,6 +114,11 @@ func (c Config) Check() error {
 	}
 	if err := c.FrideHost.Check(); err != nil {
 		return err
+	}
+	if c.AgentMaxRuntime != "" {
+		if d, err := time.ParseDuration(c.AgentMaxRuntime); err != nil || d <= 0 {
+			return fmt.Errorf("agent_max_runtime: %q is not a positive duration like 24h", c.AgentMaxRuntime)
+		}
 	}
 	if c.Service != "" && !serviceNameRe.MatchString(c.Service) {
 		return fmt.Errorf("service: %q is not a service name (a-z, 0-9 and -, at most 32)", c.Service)
