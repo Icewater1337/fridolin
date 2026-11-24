@@ -98,6 +98,10 @@ func (s *agentSession) agyEvent(line []byte, res *turnResult) {
 		if strings.TrimSpace(r.Response) != "" {
 			res.text = r.Response
 		}
-		res.denied = append(res.denied, r.DeniedActions...)
+		if len(r.DeniedActions) > 0 {
+			// agy takes no allowed actions on its command line, so asking
+			// the owner to allow one could never take effect (#773).
+			res.errMsg = "agy's permission rules refused " + strings.Join(r.DeniedActions, ", ") + "; the node cannot allow them for agy"
+		}
 	}
 }
