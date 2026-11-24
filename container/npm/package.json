@@ -3,7 +3,7 @@
   "private": true,
   "description": "The npm CLIs of the core image (container/Dockerfile), installed with npm ci from package-lock.json",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.325",
+    "@anthropic-ai/claude-code": "2.1.326",
     "@openai/codex": "0.169.0",
     "@plaud-ai/cli": "0.3.15"
   }
