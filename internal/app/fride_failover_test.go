@@ -247,3 +247,85 @@ func countContaining(texts []string, substr string) int {
 	}
 	return n
 }
+
+// #772: work that fails over before it has a branch and goes back to the
+// node it left gets a FrIDE thread of its own there, not its old one,
+// whose task the orphan cleanup then closes and removes.
+func TestFrideFailoverBackToItsNodeGetsANewThread(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
+	optionsOf(t).waits.frideFailoverUnit = 10 * time.Millisecond
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	laptopFride := testutil.StartFakeFride(t, "api")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"news": "all"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	laptop, laptopDir, stopLaptop := h.stoppableFrideNode("laptop", addr, laptopFride)
+
+	h.coreSays("add a health endpoint", step("fride_task", `{"message":"Add a health endpoint","repos":["api"]}`))
+	laptopFride.Start(1, "health", "")
+	h.WaitFor("FrIDE #1 on its task", func() bool {
+		th, err := h.b.store.GetFrideThread(t.Context(), 1)
+		return err == nil && th.TaskID == "health" && th.Branch == ""
+	})
+
+	stopLaptop()
+	h.WaitSent(harnessDM, "⏳ *FrIDE #1* left laptop")
+	h.runFakeAgent(laptopDir)
+	h.WaitFor("FrIDE #1 back on the laptop", func() bool {
+		th, err := h.b.store.GetFrideThread(t.Context(), 1)
+		return err == nil && th.State == store.FrideSent && th.Node == laptop
+	})
+	h.WaitFor("the orphan done with", func() bool {
+		o, err := h.b.store.FrideOrphans(t.Context())
+		return err == nil && len(o) == 0
+	})
+	th, err := h.b.store.GetFrideThread(t.Context(), 1)
+	if err != nil || th.FrideThread == 1 || th.Failovers != 1 {
+		t.Fatalf("FrIDE #1 back on the laptop has its old FrIDE thread: %+v, %v", th, err)
+	}
+	if th.TaskID != "" {
+		if exists, _ := laptopFride.Task(th.TaskID); !exists {
+			t.Errorf("the live task %s was removed", th.TaskID)
+		}
+	}
+}
+
+// #772: the orphan cleanup never closes or removes work a live thread
+// has on that node and instance (its FrIDE thread or task): it drops the
+// orphan without touching FrIDE.
+func TestFrideOrphanOfLiveWorkIsDroppedNotClosed(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"failover_minutes": -1, "instances": {"work": {}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	icebase := h.fakeHostNode("icebase", addr, 32768, 30000, 6144)
+	h.coreSays("fix it", step("fride_task", `{"message":"Fix it","instance":"work"}`))
+	icebase.emit(nodeproto.FrideEvent{Instance: "work", Event: "started", ThreadID: 1, TaskID: "fix", Status: "active"})
+	h.WaitFor("FrIDE #1 on its task", func() bool {
+		th, err := h.b.store.GetFrideThread(t.Context(), 1)
+		return err == nil && th.TaskID == "fix" && th.FrideThread == 1
+	})
+
+	// What an earlier failover recorded, now the live work again: by
+	// FrIDE's thread, and by task.
+	for _, o := range []store.FrideOrphan{
+		{Thread: 1, Node: icebase.ID, Instance: "work", FrideThread: 1},
+		{Thread: 1, Node: icebase.ID, Instance: "work", FrideThread: 9, TaskID: "fix"},
+	} {
+		if err := h.b.store.AddFrideOrphan(t.Context(), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.WaitFor("the orphans dropped", func() bool {
+		o, err := h.b.store.FrideOrphans(t.Context())
+		return err == nil && len(o) == 0
+	})
+	for _, m := range []string{nodeproto.MethodFrideClose, nodeproto.MethodFrideDelete} {
+		if icebase.calledWith(m, "work") {
+			t.Errorf("the live task got %s", m)
+		}
+	}
+}
