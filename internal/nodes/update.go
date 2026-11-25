@@ -502,11 +502,18 @@ func (s *Service) runBoxUpdate(ctx context.Context, n *Node, key ed25519.Private
 	before := s.sessions[n.ID]
 	s.mu.Unlock()
 	var res nodeproto.BoxUpdateResult
-	if err := s.Call(ctx, n.ID, nodeproto.MethodUpdateBox, p, &res); err != nil {
+	switch err := s.Call(ctx, n.ID, nodeproto.MethodUpdateBox, p, &res); {
+	case errors.Is(err, errDisconnected):
+		// The box writes the request before it answers, and its updater
+		// may take it and recreate the node before the answer leaves
+		// (#769): wait for it as after an answer.
+		s.logf("nodes: %s (%s) disconnected before it answered the request for %s; the core waits for it as if it kept it", n.Name, n.ID, p.Version)
+	case err != nil:
 		return fmt.Errorf("the box refused the update: %w", err)
+	default:
+		s.logf("nodes: %s (%s) keeps the request for %s (%s); its updater picks it up within %d minutes", n.Name, n.ID, p.Version, p.NodeImage, res.UpdaterMinutes)
 	}
 	s.setUpdate(n.ID, func(u *UpdateStatus, _ time.Time) { u.State = UpdateRestarting })
-	s.logf("nodes: %s (%s) keeps the request for %s (%s); its updater picks it up within %d minutes", n.Name, n.ID, p.Version, p.NodeImage, res.UpdaterMinutes)
 	return s.awaitUpdatedWithin(ctx, n.ID, before, boxUpdateWait(res.UpdaterMinutes), n.Version)
 }
 

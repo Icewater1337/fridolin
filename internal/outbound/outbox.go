@@ -445,13 +445,16 @@ func (o *Outbox) sendNote(ctx context.Context, m Link, r *store.OutboxRow, p sto
 }
 
 // giveUp stops trying r, logs why and keeps the fact for the dashboard.
+//
+// Its files go first, so that a reply the store shows given up on has
+// none left. Should keeping the fact fail, the row still waits and the
+// next round gives it up again, this time for want of its file.
 func (o *Outbox) giveUp(ctx context.Context, r store.OutboxRow, why string) {
 	log.Printf("outbox: giving up on a reply to %s after %d attempts: %s", r.Chat, r.Attempts, why)
+	o.dropFiles(r)
 	if err := o.store.OutboxGiveUp(ctx, r.ID, why, o.now()); err != nil && ctx.Err() == nil {
 		log.Printf("outbox: %v", err)
-		return
 	}
-	o.dropFiles(r)
 }
 
 // isConnected reports whether m can send now.

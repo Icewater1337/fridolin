@@ -2,7 +2,9 @@ package nodes
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
@@ -119,4 +121,76 @@ func TestBoxUpdateWait(t *testing.T) {
 			t.Errorf("boxUpdateWait(%d) = %s, want %s", c.minutes, got, c.want)
 		}
 	}
+}
+
+// A box whose connection ends after it got the update request and before
+// its answer reached the core (the updater took the request and recreated
+// the node at once, or the network dropped) may keep the request: the
+// core waits for it as after an answer, instead of recording a refusal
+// the box never made (#769).
+func TestABoxThatDisconnectsBeforeItAnswersIsWaitedFor(t *testing.T) {
+	conns := make(<-chan string)
+	svc := serveNodes(t, func(s *Service) {
+		conns = connected(s)
+		s.version = "v2"
+		s.boxImages = func(context.Context, string) (string, string, error) {
+			return "ghcr.io/owner/fridolin-core@sha256:" + strings.Repeat("1", 64), "ghcr.io/owner/fridolin-fride@sha256:" + strings.Repeat("2", 64), nil
+		}
+	})
+	code, _, err := svc.NewJoinCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := nodeproto.DeviceIDFor(key.Public().(ed25519.PublicKey))
+	ws := dialAsNodeWith(t, svc.Addr(), key, code, nodeproto.Capabilities{Host: true, Update: &nodeproto.UpdateCap{Box: true}})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	asked := make(chan struct{})
+	go func() {
+		for {
+			env, err := readEnvelope(ctx, ws)
+			if err != nil {
+				return
+			}
+			if env.Type != nodeproto.TypeRequest {
+				continue
+			}
+			if req, err := nodeproto.DecodeBody[nodeproto.Request](env); err == nil && req.Method == nodeproto.MethodUpdateBox {
+				// The box kept the request; it is gone before it answers.
+				_ = ws.CloseNow()
+				close(asked)
+				return
+			}
+		}
+	}()
+	waitConnected(t, conns, id)
+	if _, err := svc.ApproveDevice(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ApproveCommands(id); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- svc.Update(ctx, id, UpdateOptions{}) }()
+	select {
+	case <-asked:
+	case err := <-done:
+		t.Fatalf("the update ended before it asked the box: %v", err)
+	}
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("the core gave up on a box that may keep the request: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+		if n, err := svc.reg.Get(id); err == nil && n.Update != nil && n.Update.State == UpdateRestarting {
+			break
+		}
+	}
+	cancel()
+	<-done
 }
