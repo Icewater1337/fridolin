@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -726,7 +727,14 @@ func (h *serviceHost) install(o installOptions) error {
 	if err != nil {
 		return fmt.Errorf("installing the binary: %w", err)
 	}
+	// An install that replaced the binary and failed before it recorded
+	// it left install.json naming the build before: this run finishes
+	// that change, keeping what the failed run would have kept.
+	m, merr := platform.ReadInstallManifest(dir)
+	resumed := !changed && merr == nil && m.Version != version.String()
 	switch {
+	case resumed:
+		h.printf("%s is already this build (%s); finishing the install that left %s recorded", binary, version.String(), m.Version)
 	case !changed:
 		h.printf("%s is already this build (%s)", binary, version.String())
 	case pathExists(binary + prevSuffix):
@@ -736,11 +744,12 @@ func (h *serviceHost) install(o installOptions) error {
 	}
 	// The tools that came with the binary it replaced stay with it in
 	// tools.prev; the same binary again only refreshes them.
-	if err := h.installTools(p.from.Tools, dir, changed); err != nil {
+	// A failed run may have got past the tools already.
+	if err := h.installTools(p.from.Tools, dir, changed || (resumed && !toolsInstalled(p.from.Tools, dir))); err != nil {
 		return err
 	}
-	if changed || !pathExists(filepath.Join(dir, platform.InstallManifestFile)) {
-		if err := writeManifest(dir, p.from.Source, changed); err != nil {
+	if changed || merr != nil || m.Version != version.String() || m.Source != p.from.Source {
+		if err := writeManifest(dir, p.from.Source, changed || resumed); err != nil {
 			return err
 		}
 	}
@@ -1020,9 +1029,7 @@ func (h *serviceHost) installTools(src, dir string, keepPrev bool) error {
 	n := 0
 	for _, e := range entries {
 		name := e.Name()
-		// Regular files only: a symlink would point the installed copy
-		// back into the checkout.
-		if !e.Type().IsRegular() || !(strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".txt")) {
+		if !isTool(e) {
 			continue
 		}
 		perm := os.FileMode(0o644)
@@ -1061,6 +1068,45 @@ func (h *serviceHost) installTools(src, dir string, keepPrev bool) error {
 	}
 	h.printf("copied %d tools from %s", n, src)
 	return nil
+}
+
+// isTool reports whether installTools copies e. Regular files only: a
+// symlink would point the installed copy back into the checkout.
+func isTool(e os.DirEntry) bool {
+	name := e.Name()
+	return e.Type().IsRegular() && (strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".txt"))
+}
+
+// toolsInstalled reports whether dir/tools already is what installTools
+// makes of src: none when src is "", else the same tools, byte for byte.
+func toolsInstalled(src, dir string) bool {
+	dst := filepath.Join(dir, "tools")
+	if src == "" {
+		return !platform.IsDir(dst)
+	}
+	want, err := toolHashes(src)
+	if err != nil {
+		return false
+	}
+	have, err := toolHashes(dst)
+	return err == nil && maps.Equal(want, have)
+}
+
+func toolHashes(dir string) (map[string][32]byte, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	sums := map[string][32]byte{}
+	for _, e := range entries {
+		if !isTool(e) {
+			continue
+		}
+		if sums[e.Name()], err = fileHash(filepath.Join(dir, e.Name())); err != nil {
+			return nil, err
+		}
+	}
+	return sums, nil
 }
 
 // writeManifest records the install. With keepPrev the record it replaces
