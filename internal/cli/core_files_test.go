@@ -188,3 +188,43 @@ func TestCoreFilesImportPartialFailure(t *testing.T) {
 		t.Fatalf("import printed %q, %v", out.String(), err)
 	}
 }
+
+// A credentials folder config accepts goes along, though it has a
+// space, a non-ASCII name and more than 4 levels (#794); one with a
+// newline is refused on import with the real reason.
+func TestCoreFilesUnusualFolder(t *testing.T) {
+	home, other := t.TempDir(), t.TempDir()
+	rel := "Library/Application Support/Zugänge/a/b/c"
+	if err := os.MkdirAll(filepath.Join(home, rel), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, rel, "dashboard-users.json"), []byte("u"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	c, _ := json.Marshal(map[string]any{"sandbox": map[string]string{"credentials_dir": filepath.Join(home, rel)}})
+	if err := os.WriteFile(cfg, c, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runCore([]string{"files", "export"}, coreEnv{environ: []string{"HOME=" + home, "FRIDOLIN_CONFIG=" + cfg}, stdout: &out, stderr: &errb}); code != 0 {
+		t.Fatalf("export: exit %d: %s", code, errb.String())
+	}
+	var got secretFiles
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Dir != "~/"+rel || len(got.Files) != 1 {
+		t.Fatalf("export: %s, %v", out.String(), err)
+	}
+	in, _ := json.Marshal(got)
+	if code := runCore([]string{"files", "import"}, coreEnv{environ: []string{"HOME=" + other}, stdin: bytes.NewReader(in), stdout: io.Discard, stderr: &errb}); code != 0 {
+		t.Fatalf("import: exit %d: %s", code, errb.String())
+	}
+	if b, err := os.ReadFile(filepath.Join(other, rel, "dashboard-users.json")); err != nil || string(b) != "u" {
+		t.Fatalf("imported: %q, %v", b, err)
+	}
+
+	errb.Reset()
+	bad, _ := json.Marshal(secretFiles{Dir: "~/a\nb", Files: map[string][]byte{"dashboard-users.json": []byte("x")}})
+	if code := runCore([]string{"files", "import"}, coreEnv{environ: []string{"HOME=" + other}, stdin: bytes.NewReader(bad), stdout: io.Discard, stderr: &errb}); code != 2 || !strings.Contains(errb.String(), "control character") {
+		t.Errorf("a newline: exit %d: %s", code, errb.String())
+	}
+}

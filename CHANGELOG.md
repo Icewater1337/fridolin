@@ -432,6 +432,12 @@ for compatibility.
 
 ### Fixed
 
+- **A core move carries any credentials folder config accepts.** A
+  `sandbox.credentials_dir` with a space, a non-ASCII name or more than
+  four levels below ~ (`~/Library/Application Support/fridolin`) stopped
+  the move with "is not a folder under ~". The move now takes any plain
+  folder below ~ and refuses only `.`, `..`, control characters and
+  invalid UTF-8, saying which (#794).
 - **A box update is no longer reported refused when the box drops before
   it answers.** The box keeps the core's request before it answers, and
   its updater may recreate the node before the answer leaves; the core
