@@ -778,18 +778,21 @@ func TestCalendarDisconnectEndsWhatTheBrainShows(t *testing.T) {
 
 // TestCalendarSwitchRevokesTheOldAccount: signing a brain in to another
 // account revokes the grant of the one it leaves, which nobody can use any
-// more, unless another brain shares it. Signing in to the same account
-// again revokes nothing: the new token belongs to the same grant.
+// more, unless another brain shares it, or the brain's own Gmail signs in
+// to it. Signing in to the same account again revokes nothing: the new
+// token belongs to the same grant.
 func TestCalendarSwitchRevokesTheOldAccount(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name, old string
 		shared    bool
+		gmail     bool
 		revoked   bool
 	}{
-		{"another account", "team@example.com", false, true},
-		{"another account another brain uses", "team@example.com", true, false},
-		{"the same account", "you@example.com", false, false},
+		{"another account", "team@example.com", false, false, true},
+		{"another account another brain uses", "team@example.com", true, false, false},
+		{"another account the brain's Gmail uses", "team@example.com", false, true, false},
+		{"the same account", "you@example.com", false, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -801,6 +804,12 @@ func TestCalendarSwitchRevokesTheOldAccount(t *testing.T) {
 			writeCalendarToken(t, tb, "a", tc.old, "RT-OLD")
 			if tc.shared {
 				writeCalendarToken(t, tb, "b", tc.old, "RT-B")
+			}
+			if tc.gmail {
+				data, _ := json.Marshal(google.Token{Token: "G", RefreshToken: "RT-GMAIL", ClientID: "123-abc.apps.googleusercontent.com", Scopes: []string{google.GmailScope}, Account: tc.old})
+				if err := os.WriteFile(tb.google.GmailTokenPath("a"), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			var start struct {
 				AuthURL string `json:"auth_url"`

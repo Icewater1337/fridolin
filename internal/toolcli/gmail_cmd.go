@@ -13,10 +13,10 @@ import (
 
 const gmailUsage = `Usage: fridolin gmail COMMAND [flags]
 
-The brain's Gmail, granted with the brain's Google connection (Brains →
-brain → Gmail → Connect Gmail; "reconnect Google to grant Gmail" when it
-says the connection has no Gmail). Every command prints JSON; COMMAND -h
-shows its flags.
+The brain's Gmail, with a Google sign-in of its own, apart from the
+calendar's (Brains → brain → Gmail → Connect Gmail; the commands say so
+when it is not connected). Every command prints JSON; COMMAND -h shows its
+flags.
 
 Commands:
   list      messages matching --query (Gmail search syntax, e.g.

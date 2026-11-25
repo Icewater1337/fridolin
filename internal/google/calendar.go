@@ -99,15 +99,27 @@ func (e *googleAPIError) scopeMissing() bool {
 
 // hint is what a brain should do about e, or "".
 func (e *googleAPIError) hint() string {
+	if e.service == "Gmail" {
+		m := strings.ToLower(e.message)
+		switch e.status {
+		case http.StatusUnauthorized:
+			return gmailReconnectHint
+		case http.StatusForbidden:
+			if strings.Contains(m, "has not been used") || strings.Contains(m, "is disabled") {
+				return gmailDisabledHint
+			}
+			return "If it says the access is insufficient, the brain's Gmail sign-in lacks it. " + gmailReconnectHint
+		case http.StatusNotFound:
+			return "Check the message ID and label names."
+		}
+		return ""
+	}
 	switch e.status {
 	case http.StatusUnauthorized:
 		return calendarReconnectHint
 	case http.StatusForbidden:
 		return "If it says the access is insufficient, the brain's sign-in lacks it. " + calendarReconnectHint
 	case http.StatusNotFound:
-		if e.service != "" {
-			return "Check the message ID and label names."
-		}
 		return "Check the event and calendar IDs."
 	}
 	return ""
@@ -529,8 +541,6 @@ func CallProblem(err error) (int, string) {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return http.StatusPreconditionFailed, "Google Calendar is not connected for this brain. Ask the owner to connect it in the dashboard: Brains → this brain → Calendar → Connect Google Calendar."
-	case errors.Is(err, ErrNoGmail):
-		return http.StatusPreconditionFailed, err.Error()
 	case errors.Is(err, errCalendarNotAllowed):
 		return http.StatusForbidden, err.Error()
 	case errors.As(err, &se):

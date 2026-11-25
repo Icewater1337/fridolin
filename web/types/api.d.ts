@@ -2504,7 +2504,6 @@ export interface CalendarStatus {
   account?: string;
   /** Signed in with an older version, which asked for every calendar. */
   broad_access?: boolean;
-  gmail?: boolean;
   /** The account's calendars; null when it has none. */
   calendars: CalendarEntry[] | null;
   client_configured: boolean;
@@ -2527,6 +2526,23 @@ export interface ContactsStatus {
   client_configured: boolean;
   connected: boolean;
   /** Whether Google answered a search, when the check was asked for. */
+  works?: boolean;
+  /** Why it did not. */
+  check_error?: string;
+  /** Why the last sign-in did not finish. */
+  last_error?: string;
+  /** What the sign-in asks for, to add on the consent screen. */
+  scope: string;
+  token_path: string;
+}
+
+/** GET /api/brains/{id}/gmail (?check=1 asks Gmail whether it works). */
+export interface GmailStatus {
+  client_configured: boolean;
+  connected: boolean;
+  /** The mailbox's address, when Gmail told it at sign-in. */
+  account?: string;
+  /** Whether Gmail answered, when the check was asked for. */
   works?: boolean;
   /** Why it did not. */
   check_error?: string;
@@ -3049,6 +3065,7 @@ export type GetResponse<P extends string> =
   P extends `/api/brains/${string}/skills` ? BrainSkills :
   P extends `/api/brains/${string}/calendar` ? CalendarStatus :
   P extends `/api/brains/${string}/contacts` ? ContactsStatus :
+  P extends `/api/brains/${string}/gmail` ? GmailStatus :
   P extends `/api/brains/${string}/backup/versions` ? BackupVersions :
   P extends `/api/brains/${string}` ? Brain :
   P extends `/api/errands/${string}` ? ErrandDetail :

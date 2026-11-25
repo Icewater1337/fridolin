@@ -59,16 +59,6 @@ var calendarScopes = []string{
 	"https://www.googleapis.com/auth/calendar.calendarlist.readonly", // the account's calendars, for the brain's page and `calendars`
 }
 
-// GmailScope is what a brain's Gmail grant adds to its calendar token:
-// the full mailbox scope, which the commands need for permanent delete
-// (gmail.modify only reaches the trash). Asking for it is opt-in per sign-in
-// (StartGmailSignIn); a token without it keeps the calendar working, and the
-// Gmail commands say to reconnect (docs/GMAIL.md).
-const GmailScope = "https://mail.google.com/"
-
-// HasGmail reports whether granted holds GmailScope.
-func HasGmail(granted []string) bool { return slices.Contains(granted, GmailScope) }
-
 // CalendarScopes are what a brain's calendar sign-in asks for, for the
 // setup steps that list them on the consent screen.
 func CalendarScopes() []string { return slices.Clone(calendarScopes) }
@@ -90,7 +80,7 @@ func missingScopes(granted []string) []string {
 func extraScopes(granted []string) []string {
 	var out []string
 	for _, s := range granted {
-		if !slices.Contains(calendarScopes, s) && s != GmailScope {
+		if !slices.Contains(calendarScopes, s) {
 			out = append(out, s)
 		}
 	}
@@ -218,6 +208,8 @@ type Auth struct {
 	// contactsError is each brain's last Google Contacts sign-in error
 	// (contacts.go).
 	contactsError map[string]string
+	// gmailError is the same for Gmail (gmail_auth.go).
+	gmailError map[string]string
 }
 
 // New creates the manager, and logs the files in the credentials
@@ -243,7 +235,7 @@ func New(options Options) *Auth {
 		options.HTTP = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	g := &Auth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}, contactsError: map[string]string{}}
+	g := &Auth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}, contactsError: map[string]string{}, gmailError: map[string]string{}}
 	if copies := g.leftoverClientCopies(); len(copies) > 0 {
 		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+
 			"each holding a client secret: %s. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: "+
@@ -467,19 +459,6 @@ var ErrNoClient = errors.New("add your Google OAuth client first (Settings → G
 
 // StartSignIn returns the Google URL that signs a brain in.
 func (g *Auth) StartSignIn(brainID string) (string, error) {
-	return g.startSignIn(brainID, calendarScopes)
-}
-
-// StartGmailSignIn is StartSignIn that also asks for GmailScope. The
-// calendar scopes are asked again in the same request, so the new token
-// holds both and the calendar keeps working; include_granted_scopes is not
-// used, as it would fold the Drive and Contacts grants of the same client
-// into a brain's token.
-func (g *Auth) StartGmailSignIn(brainID string) (string, error) {
-	return g.startSignIn(brainID, append(slices.Clone(calendarScopes), GmailScope))
-}
-
-func (g *Auth) startSignIn(brainID string, scopes []string) (string, error) {
 	c := g.Client()
 	if c == nil {
 		return "", ErrNoClient
@@ -495,10 +474,10 @@ func (g *Auth) startSignIn(brainID string, scopes []string) (string, error) {
 		}
 	}
 	redirect := g.RedirectURI()
-	g.pending[state] = oauthPending{brainID: brainID, verifier: verifier, created: time.Now(), client: c, redirectURI: redirect, scopes: scopes}
+	g.pending[state] = oauthPending{brainID: brainID, verifier: verifier, created: time.Now(), client: c, redirectURI: redirect, scopes: calendarScopes}
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
-	return g.authURL(c, redirect, scopes, state, sum), nil
+	return g.authURL(c, redirect, calendarScopes, state, sum), nil
 }
 
 // authURL is Google's consent page for a sign-in. No
@@ -629,9 +608,6 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 	if missing := missingScopes(tok.Scopes); len(missing) > 0 {
 		return fail("Google granted only part of the calendar access the brain needs (missing " + strings.Join(missing, ", ") + ") — connect again and leave every box ticked")
 	}
-	if slices.Contains(p.scopes, GmailScope) && !HasGmail(tok.Scopes) {
-		return fail("Google did not grant Gmail access — connect again and leave every box ticked, including \"Read, compose, send, and permanently delete all your email from Gmail\"")
-	}
 	if extra := extraScopes(tok.Scopes); len(extra) > 0 {
 		log.Printf("brain %s: Google granted more than the bridge asked for (%s); to narrow it, disconnect the brain's calendar, and every other brain signed in to the same account, and connect it again", p.brainID, strings.Join(extra, ", "))
 	}
@@ -662,7 +638,7 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 	var revokeOld string
 	oldData, oldErr := readCredentialFile(g.TokenPath(p.brainID))
 	if old, err := g.loadToken(p.brainID); err == nil && old.RefreshToken != "" && old.Account != "" &&
-		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" && g.contactsSharing("", old) == "" {
+		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" && g.contactsSharing("", old) == "" && g.gmailSharing("", old) == "" {
 		revokeOld = old.RefreshToken
 	}
 	if err := g.saveToken(p.brainID, tok); err != nil {
@@ -1115,6 +1091,10 @@ func (g *Auth) Disconnect(ctx context.Context, brainID string, localOnly bool) (
 			note = contactsSharingNote(other)
 			break
 		}
+		if other := g.gmailSharing("", t); other != "" {
+			note = gmailSharingNote(other)
+			break
+		}
 		if err := g.revoke(ctx, t.RefreshToken); err != nil {
 			return false, "", err
 		}
@@ -1200,11 +1180,8 @@ func (g *Auth) DeleteClient() error {
 
 // CalendarSnapshot preserves optional connection fields independently of their values.
 type CalendarSnapshot struct {
-	Account     *string `json:"account,omitempty"`
-	BroadAccess bool    `json:"broad_access,omitempty"`
-	// Gmail is whether the brain's token holds GmailScope; false means
-	// "reconnect Google to grant Gmail".
-	Gmail                bool            `json:"gmail,omitempty"`
+	Account              *string         `json:"account,omitempty"`
+	BroadAccess          bool            `json:"broad_access,omitempty"`
 	Calendars            []CalendarEntry `json:"calendars"`
 	ClientConfigured     bool            `json:"client_configured"`
 	Connected            bool            `json:"connected"`
@@ -1243,9 +1220,6 @@ func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest
 		return resp
 	}
 	resp.Connected = true
-	if t, err := g.loadToken(brainID); err == nil {
-		resp.Gmail = HasGmail(t.Scopes)
-	}
 	if t, err := g.loadToken(brainID); err == nil && len(extraScopes(t.Scopes)) > 0 {
 		// Connected with an older version, which asked for every calendar
 		// right there is. Signing in again alone keeps that grant alive at

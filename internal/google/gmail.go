@@ -16,14 +16,13 @@ import (
 	"strings"
 )
 
-// Gmail, for the brain's `fridolin gmail` commands (docs/GMAIL.md): the same
-// sign-in and token as the calendar's, with GmailScope added to it by the
-// Gmail sign-in (StartGmailSignIn). The calls go to the Gmail API under
-// Endpoints.APIBase.
+// Gmail, for the brain's `fridolin gmail` commands (docs/GMAIL.md), with the
+// brain's own Gmail sign-in (gmail_auth.go). The calls go to the Gmail API
+// under Endpoints.APIBase.
 
-// ErrNoGmail means the brain's token lacks GmailScope: a calendar-only
-// grant, which keeps the calendar working.
-var ErrNoGmail = errors.New("this brain's Google connection does not include Gmail. Ask the owner to reconnect Google with Gmail access in the dashboard: Brains → this brain → Gmail → Connect Gmail (reconnect Google to grant Gmail)")
+// ErrNoGmail means a Gmail token lacks GmailScope: one the sign-in did not
+// write, since it refuses a grant without it.
+var ErrNoGmail = errors.New("this brain's Gmail sign-in does not grant access to the mailbox: ask the owner to connect Gmail again in the dashboard (Brains → this brain → Gmail → Reconnect)")
 
 // UntrustedNotice is printed with every message read from a mailbox: its
 // text was written by whoever sent it.

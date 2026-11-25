@@ -12,14 +12,14 @@ for compatibility.
 
 - **Gmail for brains.** `fridolin gmail` lists, searches, reads, sends
   (new or a reply in its thread), labels, archives, trashes and deletes
-  mail through the brain's Google connection. Gmail is opt-in per brain
-  (Brains → brain → Calendar card → Connect Gmail), adds the
-  `https://mail.google.com/` scope to the calendar sign-in, and leaves
-  connections made before as they are: the calendar keeps working and
-  the Gmail commands say to reconnect Google. Sending and permanent
-  delete need the owner's approval; mail read is marked untrusted. Enable
-  the Gmail API and add the scope to the consent screen first:
-  [docs/GMAIL.md](docs/GMAIL.md)
+  mail. Gmail is a Google sign-in of its own per brain, as Google Contacts
+  is: Brains → brain → Gmail → Connect Gmail asks for
+  `https://mail.google.com/` alone, keeps the token in
+  `google_gmail_token_<brain>.json` next to the calendar's (a core move
+  carries it), and leaves the brain's calendar sign-in as it is. Sending
+  and permanent delete need the owner's approval; mail read is marked
+  untrusted. Enable the Gmail API and add the scope to the consent screen
+  first: [docs/GMAIL.md](docs/GMAIL.md)
 - **Per-folder node policy.** brain.json's new `node_policy` says, per
   folder and everything in it, where its copies may land (`storage`:
   nodes, backup targets, `cloud`) and which nodes may run backups,

@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/google"
 )
 
@@ -71,11 +74,36 @@ func (m *mailWrite) approve(ctx context.Context, id, ask string) error {
 func (m *mailWrite) done(err error) error {
 	m.w.Outcome = "ok"
 	if err != nil {
-		_, msg := google.CallProblem(err)
+		_, msg := google.GmailProblem(err)
 		m.w.Outcome = "failed: " + msg
 	}
 	m.a.MailWrites.RecordMail(m.tok, m.w)
 	return err
+}
+
+// mailHandler is one Gmail call of a brain: token gets its Gmail access
+// token, refreshing it when it has expired.
+type mailHandler func(ctx context.Context, r *http.Request, token func() (*google.Token, error)) (any, error)
+
+// mailCall runs fn for a brain's Gmail call, as calendarCall does a
+// calendar call, with the brain's Gmail token. Gmail's errors are not the
+// calendar's: they do not touch its grant's health.
+func (a *BrainAPI) mailCall(fn mailHandler) func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain) {
+	return func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain) {
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		out, err := fn(ctx, r, func() (*google.Token, error) { return a.Google().GmailAccessToken(ctx, br.ID()) })
+		if err != nil {
+			if ce, ok := errors.AsType[*callError](err); ok {
+				WriteErr(w, ce.status, ce.msg)
+				return
+			}
+			status, msg := google.GmailProblem(err)
+			WriteErr(w, status, msg)
+			return
+		}
+		WriteJSON(w, http.StatusOK, out)
+	}
 }
 
 // mailToken is token(), and checks the grant holds Gmail before anything
@@ -90,7 +118,7 @@ func mailToken(token func() (*google.Token, error)) (*google.Token, error) {
 
 // brainMailList answers GET /brain/gmail/messages?q=&max=: a Gmail search,
 // newest first (default 20 messages, at most 100).
-func (a *BrainAPI) brainMailList(ctx context.Context, r *http.Request, _ google.Calendars, token func() (*google.Token, error)) (any, error) {
+func (a *BrainAPI) brainMailList(ctx context.Context, r *http.Request, token func() (*google.Token, error)) (any, error) {
 	limit := 20
 	if s := r.URL.Query().Get("max"); s != "" {
 		var err error
@@ -106,7 +134,7 @@ func (a *BrainAPI) brainMailList(ctx context.Context, r *http.Request, _ google.
 }
 
 // brainMailGet answers GET /brain/gmail/messages/{id}.
-func (a *BrainAPI) brainMailGet(ctx context.Context, r *http.Request, _ google.Calendars, token func() (*google.Token, error)) (any, error) {
+func (a *BrainAPI) brainMailGet(ctx context.Context, r *http.Request, token func() (*google.Token, error)) (any, error) {
 	tok, err := mailToken(token)
 	if err != nil {
 		return nil, err
@@ -117,7 +145,7 @@ func (a *BrainAPI) brainMailGet(ctx context.Context, r *http.Request, _ google.C
 // brainMailSend answers POST /brain/gmail/send with a MailDraft. A send
 // cannot be taken back and reaches other people, so it always needs the
 // owner's yes: request_approval, then the approval_id here.
-func (a *BrainAPI) brainMailSend(ctx context.Context, r *http.Request, _ google.Calendars, token func() (*google.Token, error)) (any, error) {
+func (a *BrainAPI) brainMailSend(ctx context.Context, r *http.Request, token func() (*google.Token, error)) (any, error) {
 	var d google.MailDraft
 	if err := decodeSingleJSON(r.Body, &d); err != nil {
 		return nil, badCall("the message is not valid JSON: %v", google.DecodeError(err))
@@ -161,8 +189,8 @@ type MailChanged struct {
 
 // brainMailLabels answers POST /brain/gmail/messages/{id}/labels, and with
 // archive set removes INBOX instead.
-func (a *BrainAPI) brainMailLabels(archive bool) calendarHandler {
-	return func(ctx context.Context, r *http.Request, _ google.Calendars, token func() (*google.Token, error)) (any, error) {
+func (a *BrainAPI) brainMailLabels(archive bool) mailHandler {
+	return func(ctx context.Context, r *http.Request, token func() (*google.Token, error)) (any, error) {
 		id := r.PathValue("id")
 		var l MailLabels
 		action := "archive"
@@ -194,7 +222,7 @@ func (a *BrainAPI) brainMailLabels(archive bool) calendarHandler {
 
 // brainMailTrash answers POST /brain/gmail/messages/{id}/trash: Gmail keeps
 // a trashed message 30 days, so it needs no approval.
-func (a *BrainAPI) brainMailTrash(ctx context.Context, r *http.Request, _ google.Calendars, token func() (*google.Token, error)) (any, error) {
+func (a *BrainAPI) brainMailTrash(ctx context.Context, r *http.Request, token func() (*google.Token, error)) (any, error) {
 	id := r.PathValue("id")
 	w := a.mailWrite(r, "trash", id)
 	if err := w.allow(); err != nil {
@@ -212,7 +240,7 @@ func (a *BrainAPI) brainMailTrash(ctx context.Context, r *http.Request, _ google
 
 // brainMailDelete answers DELETE /brain/gmail/messages/{id}?approval_id=:
 // a permanent delete, which needs the owner's yes.
-func (a *BrainAPI) brainMailDelete(ctx context.Context, r *http.Request, _ google.Calendars, token func() (*google.Token, error)) (any, error) {
+func (a *BrainAPI) brainMailDelete(ctx context.Context, r *http.Request, token func() (*google.Token, error)) (any, error) {
 	id := r.PathValue("id")
 	w := a.mailWrite(r, "delete", id)
 	if err := w.allow(); err != nil {

@@ -121,6 +121,8 @@ func TestSendMailReplyStaysInThread(t *testing.T) {
 	}
 }
 
+// TestGmailNeedsItsScope: a token without GmailScope reaches no Gmail
+// call, and the brain hears to have Gmail connected again.
 func TestGmailNeedsItsScope(t *testing.T) {
 	t.Parallel()
 	sent := map[string]string{}
@@ -131,7 +133,7 @@ func TestGmailNeedsItsScope(t *testing.T) {
 	if !errors.Is(err, ErrNoGmail) {
 		t.Fatalf("err %v", err)
 	}
-	if status, msg := CallProblem(err); status != http.StatusPreconditionFailed || !strings.Contains(msg, "reconnect Google to grant Gmail") {
+	if status, msg := GmailProblem(err); status != http.StatusPreconditionFailed || !strings.Contains(msg, "connect Gmail again") {
 		t.Fatalf("%d %s", status, msg)
 	}
 	if len(sent) != 0 {

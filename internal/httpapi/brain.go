@@ -20,6 +20,7 @@ import (
 
 type BrainCalendarService interface {
 	AccessToken(context.Context, string) (*google.Token, error)
+	GmailAccessToken(context.Context, string) (*google.Token, error)
 	CalendarList(context.Context, *google.Token) ([]google.CalendarEntry, error)
 	EventsOf(context.Context, *google.Token, []string, time.Time, time.Time, string, int) (*google.CalendarListing, error)
 	InsertEvent(context.Context, *google.Token, string, map[string]any, string) (google.CalendarEvent, error)

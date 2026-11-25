@@ -1,29 +1,34 @@
 # Gmail
 
-A brain can read, send, label, archive, trash and delete mail in the Google
-account it is connected to, with `fridolin gmail`. It is the same Google
-connection as the [calendar's](CALENDAR.md): one sign-in per brain, one
-token (`google_calendar_token_<brain>.json`), the same protections (only
-the bridge reads it, the sandbox denies it to brains). Gmail is **opt-in per
-brain**: it adds one scope to that sign-in.
+A brain can read, send, label, archive, trash and delete mail in a Google
+account, with `fridolin gmail`. Gmail is **a sign-in of its own per
+brain**, as the [calendar](CALENDAR.md) and
+[Google Contacts](CALENDAR.md#google-contacts) are: its own card on the
+brain's page, its own token (`google_gmail_token_<brain>.json`, next to the
+calendar's), its own Connect, Reconnect and Disconnect. Connecting or
+disconnecting Gmail leaves the brain's calendar as it is, and a brain that
+never needs mail is never asked for it. The protections are the calendar's:
+only the bridge reads the token, and the sandbox denies it to brains.
 
 ## Scope
 
-`https://mail.google.com/`, which Google calls full access to the mailbox.
-It is asked for because permanent delete needs it (`gmail.modify` can only
-move a message to the trash). It also covers reading, sending, labels,
-drafts and trash. The brain never holds the token: the bridge makes every
-Gmail call, and holds the dangerous ones to the owner's approval (below).
+`https://mail.google.com/`, which Google calls full access to the mailbox,
+and nothing else. It is asked for because permanent delete needs it
+(`gmail.modify` can only move a message to the trash). It also covers
+reading, sending, labels, drafts and trash. The brain never holds the
+token: the bridge makes every Gmail call, and holds the dangerous ones to
+the owner's approval (below).
 
-The Gmail sign-in asks for the calendar scopes again in the same request,
-so the new token holds both. It does not use `include_granted_scopes`: that
-would fold the Drive and Contacts grants of the same OAuth client into the
-brain's token.
+The sign-in does not use `include_granted_scopes`, so the token holds Gmail
+alone, not the calendar's, Drive's or Contacts' scopes of the same OAuth
+client. At sign-in the bridge reads the mailbox's address from Gmail's
+profile and keeps it in the token, for the card and for Disconnect.
 
 ## What the owner does
 
 Once, in [Google Cloud Console](https://console.cloud.google.com), in the
-project of the OAuth client the dashboard uses (Settings → Google sign-in):
+project of the OAuth client the dashboard uses (Settings → Google sign-in).
+The brain's Gmail card shows these steps with links until it is connected:
 
 1. **Enable the Gmail API**:
    <https://console.cloud.google.com/flows/enableapi?apiid=gmail.googleapis.com>
@@ -37,16 +42,23 @@ project of the OAuth client the dashboard uses (Settings → Google sign-in):
    restricted scope; for one's own accounts, below the 100-account cap, that
    is expected and needs no verification.
 
-Then, per brain: Brains → the brain → the Calendar card → **Connect Gmail**
-(a brain not connected yet: connect, then the same button). Google asks for
-the calendar and the mailbox together; leave every box ticked. A brain's
-page then reads *Gmail granted*. Other brains (a work brain, say) stay as
-they are: without the button their connection has no Gmail.
+Then, per brain: Brains → the brain → **Gmail** → **Connect Gmail**, and
+leave the box ticked. The card then reads *Working* with the mailbox's
+address. Other brains (a work brain, say) have no Gmail until you connect
+them. **Reconnect** and **Switch account** sign in again; **Disconnect**
+deletes the token and revokes the access at Google, unless another sign-in
+of the same client may share it (below).
 
-A connection made before this has no Gmail scope: the calendar keeps working,
-and every `fridolin gmail` command answers *"reconnect Google to grant Gmail"*
-until the owner connects Gmail. *Reconnect* and *Switch account* on a
-connection that has Gmail keep it.
+### One grant per account
+
+Google keeps one grant per Google account and OAuth client, and revoking
+any token of it revokes them all. So a Disconnect of Gmail does not revoke
+the access while the brain's calendar, a Google Contacts sign-in, or
+another brain's Gmail may be for the same account, and says so; the
+calendar's and the contacts' Disconnect, and the calendar's **Switch
+account**, spare a grant a Gmail token may hold in the same way. Once none
+needs it, remove the access at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ## Commands
 
@@ -88,9 +100,13 @@ the HTML part with its tags removed, at most 100 KiB, and lists attachments
 
 ## Troubleshooting
 
-- *"reconnect Google to grant Gmail"*: the brain's connection has no Gmail
-  scope. Connect Gmail on its page.
-- *"Google did not grant Gmail access"* at the end of a sign-in: a box was
-  unticked. Connect again with every box ticked.
+- *"Gmail is not connected for this brain"*: connect Gmail on its page. A
+  brain's calendar sign-in does not cover Gmail, whatever it was granted.
+- *"the sign-in granted only part of the access asked for (missing
+  https://mail.google.com/)"* on the card: the box was unticked. Connect
+  again and leave it ticked.
 - *Gmail API has not been used in project … / is disabled* (403): enable the
-  Gmail API in the project (step 1).
+  Gmail API in the project (step 1). The card's check says so too.
+- *"Google refused to refresh the Gmail sign-in"*: the access was removed at
+  myaccount.google.com/permissions, it expired (an app in *Testing*), or the
+  account's password changed. **Reconnect** on the Gmail card.

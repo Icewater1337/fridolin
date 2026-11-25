@@ -63,7 +63,9 @@ func (f *fakeGmail) calls() string {
 	return strings.Join(f.log, ",")
 }
 
-func gmailBrain(t *testing.T, f *fakeGmail, scopes []string) (*testBridge, string, string) {
+// gmailBrain is a bridge with brain a, whose Google sign-ins are a token
+// of scopes at path(a): its Gmail's or its calendar's.
+func gmailBrain(t *testing.T, f *fakeGmail, path func(*google.Auth, string) string, scopes []string) (*testBridge, string, string) {
 	t.Helper()
 	tb, url := serveTestBridge(t, "")
 	useGoogleServer(tb, f.srv)
@@ -74,7 +76,7 @@ func gmailBrain(t *testing.T, f *fakeGmail, scopes []string) (*testBridge, strin
 	tok := google.Token{Token: "ACCESS-OK", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com", Scopes: scopes,
 		Expiry: time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)}
 	data, _ := json.Marshal(tok)
-	if err := os.WriteFile(tb.google.TokenPath("a"), data, 0o600); err != nil {
+	if err := os.WriteFile(path(tb.google, "a"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	token, revoke := tb.runTokens.mint("a")
@@ -89,7 +91,7 @@ func gmailBrain(t *testing.T, f *fakeGmail, scopes []string) (*testBridge, strin
 func TestGmailThroughTheBridge(t *testing.T) {
 	t.Parallel()
 	f := newFakeGmail(t)
-	tb, url, token := gmailBrain(t, f, append(google.CalendarScopes(), google.GmailScope))
+	tb, url, token := gmailBrain(t, f, (*google.Auth).GmailTokenPath, []string{google.GmailScope})
 	approved(t, tb, "a", "a1", "a2")
 	readTok, revoke := tb.runTokens.mintRun(runInfo{Brain: "a", ID: "r-read", Policy: &runPolicy{ID: "r-read", Brain: "a", Risk: skill.RiskRead}})
 	t.Cleanup(revoke)
@@ -159,15 +161,16 @@ func TestGmailThroughTheBridge(t *testing.T) {
 	}
 }
 
-// TestGmailNeedsTheGrant: a calendar-only token keeps the calendar working,
-// and Gmail says to reconnect Google, touching nothing.
-func TestGmailNeedsTheGrant(t *testing.T) {
+// TestGmailNeedsItsOwnSignIn: a brain whose calendar is connected but not
+// its Gmail gets no mail through the calendar's token: every Gmail command
+// says to connect Gmail, and nothing reaches Gmail.
+func TestGmailNeedsItsOwnSignIn(t *testing.T) {
 	t.Parallel()
 	f := newFakeGmail(t)
-	_, url, token := gmailBrain(t, f, google.CalendarScopes())
+	_, url, token := gmailBrain(t, f, (*google.Auth).TokenPath, append(google.CalendarScopes(), google.GmailScope))
 	for _, args := range [][]string{{"list"}, {"get", "--id", "m1"}, {"send", "--to", "a@example.com", "--body", "x", "--approval-id", "a1"}, {"delete", "--id", "m1", "--approval-id", "a1"}} {
 		code, doc := brainTool(t, toolcli.Gmail, url, token, args...)
-		if msg, _ := doc["error"].(string); code == 0 || !strings.Contains(msg, "reconnect Google to grant Gmail") {
+		if msg, _ := doc["error"].(string); code == 0 || !strings.Contains(msg, "Gmail is not connected") || !strings.Contains(msg, "Connect Gmail") {
 			t.Errorf("%v: %d %v", args, code, doc)
 		}
 	}

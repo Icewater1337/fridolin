@@ -25,8 +25,6 @@ project's ID, links that open that project. It takes about ten minutes.
    Google Drive API together
    ([link](https://console.cloud.google.com/flows/enableapi?apiid=calendar-json.googleapis.com,drive.googleapis.com)).
    Drive is for backups; leave it out if you will not back up to Drive.
-   Gmail ([GMAIL.md](GMAIL.md)) is enabled the same way
-   (`gmail.googleapis.com`), only if a brain will use it.
 3. **Consent screen** ([Google Auth Platform](https://console.cloud.google.com/auth/overview);
    older consoles: APIs & Services → OAuth consent screen) → *Get started*:
    - App name *Fridolin*, your address as the user support email;
@@ -40,8 +38,7 @@ project's ID, links that open that project. It takes about ten minutes.
      with copy buttons — `calendar.events`, `calendar.events.freebusy`,
      `calendar.calendarlist.readonly` (the calendar's, below) and
      `drive.file` (the backup's), each under
-     `https://www.googleapis.com/auth/`, and, for brains you connect to
-     Gmail, `https://mail.google.com/` ([GMAIL.md](GMAIL.md)). A brain's calendar sign-in never
+     `https://www.googleapis.com/auth/`. A brain's calendar sign-in never
      asks for Drive, nor the Drive sign-in for calendars.
    - [Audience](https://console.cloud.google.com/auth/audience) →
      **Publish app**, so the status reads *In production*. An app left in
@@ -328,7 +325,9 @@ A brain's Google Contacts sign-in (below) is a token of the same client
 too, and it does not record its account. So while one is there, a
 calendar's Disconnect, or a **Switch account**, does not revoke the
 calendar's grant either: the contacts' sign-in may be of the same
-account and would lose its access with it.
+account and would lose its access with it. A brain's Gmail sign-in
+([GMAIL.md](GMAIL.md)) records its account, and spares the calendar's
+grant, and the calendar its, only when it is for the same one.
 
 ## Google Contacts
 

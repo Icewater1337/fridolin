@@ -6,7 +6,7 @@ import { store } from '../app/store.js';
 import { brainsResource, configResource, resource } from '../app/resources.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { showActivity } from '../components/activity-item.js';
-import { calendarCard, contactsCard } from '../components/calendar.js';
+import { calendarCard, contactsCard, gmailCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
@@ -81,6 +81,7 @@ export default /** @satisfies {PageModule} */ ({
       h('section.section', h('h2.section-title', 'Now'), liveBox),
       h('section.section', h('h2.section-title', 'Settings'), formBox),
       h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id, { signal: ctx.signal })),
+      h('section.section', h('h2.section-title', 'Gmail'), gmailCard(id, { signal: ctx.signal })),
       contactsSection,
       h('section.section', h('h2.section-title', 'Standing intents'), intentsBox),
       h('section.section', h('h2.section-title', 'Skills'), skillsCard(id, { signal: ctx.signal })),
