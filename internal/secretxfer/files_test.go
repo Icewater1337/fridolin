@@ -86,7 +86,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 	if _, err := SealBundleFiles("mini", map[string]string{"fridolin.export.key": "k1"}, map[string][]byte{"../x.json": []byte("x")}, "~/credentials", id.Recipient().String()); err == nil {
 		t.Fatal("sealed a file outside the names")
 	}
-	for _, bad := range []string{"/etc", "~/../etc", "~", "~/a/../../b", "credentials", "~/.", "~/x/..", "~/a/./b", "~/a//b", "~/a\nb", "~/a\tb", "~/a\x00b", "~/\xffx"} {
+	for _, bad := range []string{"/etc", "~/../etc", "~", "~/a/../../b", "credentials", "~/.", "~/x/..", "~/a/./b", "~/a//b", "~//etc", "~/a\nb", "~/a\tb", "~/a\x00b", "~/\xffx"} {
 		if CheckFilesDir(bad) == nil {
 			t.Errorf("the folder %q passed", bad)
 		}

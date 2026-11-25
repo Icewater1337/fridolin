@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -63,7 +64,8 @@ func CheckFilesDir(dir string) error {
 		return fmt.Errorf("the secret files' folder %q is not valid UTF-8", dir)
 	case strings.ContainsFunc(rel, unicode.IsControl):
 		return fmt.Errorf("the secret files' folder %q holds a control character", dir)
-	case !filepath.IsLocal(rel) || filepath.Clean(rel) != rel || rel == ".":
+	// path, not filepath: the folder is the core's (Unix), also when a Windows node checks it.
+	case path.IsAbs(rel) || path.Clean(rel) != rel || rel == "." || slices.Contains(strings.Split(rel, "/"), ".."):
 		return fmt.Errorf("the secret files' folder %q is not a plain folder below ~ (no \".\", \"..\", \"//\" or trailing \"/\")", dir)
 	}
 	return nil
