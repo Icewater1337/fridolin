@@ -21,7 +21,7 @@ test('Gmail: its own sign-in, with the one-time steps and Connect, then whether 
   net.answer(0, status({ connected: false }));
   await tick();
   assert.ok(card.textContent.includes('Enable the Gmail API'), card.textContent);
-  assert.ok(card.textContent.includes(scope), 'the scope to add on the consent screen');
+  assert.ok(/https:\/\/mail\.google\.com\//.test(card.textContent), 'the scope to add on the consent screen');
   assert.ok(card.querySelectorAll('a').some((a) => (a.getAttribute('href') || '').includes('apiid=gmail.googleapis.com')), 'a link that enables the Gmail API');
   assert.ok(card.textContent.includes('the calendar stays as it is'), card.textContent);
   button(card, 'Connect Gmail').click();
