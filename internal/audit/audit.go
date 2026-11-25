@@ -149,6 +149,13 @@ const (
 	// let it reach them), or why it was refused or failed. Never the
 	// event's title, description or attendees.
 	CalendarWrite = "calendar_write"
+	// MailWrite is a Gmail change a brain's run made through the bridge
+	// (fridolin gmail send, label, archive, trash, delete, docs/GMAIL.md):
+	// Brain and Run the run's, ID the message, Detail the action (and how
+	// many people a send reaches), Outcome ok (with the approval a send or a
+	// delete needed), or why it was refused or failed. Never a subject, a
+	// body or an address.
+	MailWrite = "mail_write"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores
