@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -42,20 +45,28 @@ const (
 	maxFileBytes  = 16 << 10
 )
 
-// filesDir is the credentials folder as config names it under the core's
-// home: "~/" and plain path components, never "..".
-var filesDir = regexp.MustCompile(`^~(/[A-Za-z0-9._-]{1,64}){1,4}$`)
+// maxFilesDir bounds the credentials folder's name; PATH_MAX is 1024 on macOS.
+const maxFilesDir = 1024
 
 // CheckFilesDir reports what is wrong with a credentials folder a move
-// names for its secret files.
+// names for its secret files: "~/" and a clean local path below it, as
+// config takes it (spaces, any language, any depth: #794), but never
+// "." or "..", a control character or invalid UTF-8. The folder only
+// ever reaches a command as an argument or on stdin, never in a shell.
 func CheckFilesDir(dir string) error {
-	if !filesDir.MatchString(dir) {
-		return fmt.Errorf("the secret files' folder %q is not a folder under ~", dir)
-	}
-	for _, c := range strings.Split(dir, "/")[1:] {
-		if c == "." || c == ".." {
-			return fmt.Errorf("the secret files' folder %q is not a folder under ~", dir)
-		}
+	rel, ok := strings.CutPrefix(dir, "~/")
+	switch {
+	case !ok:
+		return fmt.Errorf("the secret files' folder %q does not start with ~/", dir)
+	case len(dir) > maxFilesDir:
+		return fmt.Errorf("the secret files' folder is longer than %d bytes", maxFilesDir)
+	case !utf8.ValidString(rel):
+		return fmt.Errorf("the secret files' folder %q is not valid UTF-8", dir)
+	case strings.ContainsFunc(rel, unicode.IsControl):
+		return fmt.Errorf("the secret files' folder %q holds a control character", dir)
+	// path, not filepath: the folder is the core's (Unix), also when a Windows node checks it.
+	case path.IsAbs(rel) || path.Clean(rel) != rel || rel == "." || slices.Contains(strings.Split(rel, "/"), ".."):
+		return fmt.Errorf("the secret files' folder %q is not a plain folder below ~ (no \".\", \"..\", \"//\" or trailing \"/\")", dir)
 	}
 	return nil
 }
