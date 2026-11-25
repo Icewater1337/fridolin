@@ -1204,7 +1204,7 @@ type CalendarSnapshot struct {
 	BroadAccess bool    `json:"broad_access,omitempty"`
 	// Gmail is whether the brain's token holds GmailScope; false means
 	// "reconnect Google to grant Gmail".
-	Gmail                bool            `json:"gmail"`
+	Gmail                bool            `json:"gmail,omitempty"`
 	Calendars            []CalendarEntry `json:"calendars"`
 	ClientConfigured     bool            `json:"client_configured"`
 	Connected            bool            `json:"connected"`
