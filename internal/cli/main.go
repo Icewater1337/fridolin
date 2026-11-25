@@ -96,6 +96,8 @@ Run by brains, inside a run (each prints JSON; -h shows its flags):
   fridolin polls             the results of the polls the brain sent
   fridolin calendar COMMAND  the brain's Google Calendar: calendars, list,
                              create, free, delete
+  fridolin gmail COMMAND     the brain's Gmail: list, search, get, send,
+                             label, archive, trash, delete
   fridolin mcp --run ID      the MCP server with Fridolin's tools for the run
                              (the bridge has each run start it)
   fridolin memory search QUERY
@@ -174,6 +176,8 @@ func Main() {
 		os.Exit(toolcli.Polls(args, processToolIO()))
 	case "calendar":
 		os.Exit(toolcli.Calendar(args, processToolIO()))
+	case "gmail":
+		os.Exit(toolcli.Gmail(args, processToolIO()))
 	case "memory":
 		os.Exit(memoryCmd(args))
 	case "intent":

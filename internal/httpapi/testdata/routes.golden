@@ -18,6 +18,7 @@ DELETE /api/site/secrets/{module}/{name}
 DELETE /api/site/users/{id}
 DELETE /api/vault/targets/{name}
 DELETE /brain/calendar/events/{id}
+DELETE /brain/gmail/messages/{id}
 DELETE /brain/intents/{id}
 GET /api/activity
 GET /api/approvals
@@ -59,6 +60,8 @@ GET /api/whatsapp/groups
 GET /api/whatsapp/qr
 GET /brain/calendar/calendars
 GET /brain/calendar/events
+GET /brain/gmail/messages
+GET /brain/gmail/messages/{id}
 GET /brain/intents
 GET /brain/live/next
 GET /brain/mcp/tools
@@ -153,6 +156,10 @@ POST /api/vault/targets/{name}/snapshot
 POST /api/whatsapp/pair
 POST /brain/calendar/events
 POST /brain/calendar/freebusy
+POST /brain/gmail/messages/{id}/archive
+POST /brain/gmail/messages/{id}/labels
+POST /brain/gmail/messages/{id}/trash
+POST /brain/gmail/send
 POST /brain/intents
 POST /brain/live/turn-end
 POST /brain/mcp/call

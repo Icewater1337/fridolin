@@ -105,6 +105,9 @@ func (e *googleAPIError) hint() string {
 	case http.StatusForbidden:
 		return "If it says the access is insufficient, the brain's sign-in lacks it. " + calendarReconnectHint
 	case http.StatusNotFound:
+		if e.service != "" {
+			return "Check the message ID and label names."
+		}
 		return "Check the event and calendar IDs."
 	}
 	return ""
