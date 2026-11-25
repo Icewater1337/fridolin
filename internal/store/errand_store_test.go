@@ -316,3 +316,21 @@ func TestAddErrandNoteOnce(t *testing.T) {
 		t.Errorf("notes %q %v", got, err)
 	}
 }
+
+func TestErrandWindowAndSlots(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	e := Errand{ID: "e1", Brain: "core", Contact: "15551234567", State: ErrandOpen, Chat: "c", Days: 1, CreatedAt: now, Deadline: now, Window: `{"days":["mon"]}`} // personal-data:ignore (a fictional 555 number)
+	if err := s.AddErrand(ctx, e); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetErrandSlots(ctx, "e1", `[[1,2]]`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetErrand(ctx, "e1")
+	if err != nil || got.Window != e.Window || got.Slots != `[[1,2]]` {
+		t.Fatalf("%+v %v", got, err)
+	}
+}

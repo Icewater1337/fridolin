@@ -217,6 +217,10 @@ type Errand struct {
 	// "" for none; BookedFrom and BookedTo are its time.
 	Booked               string
 	BookedFrom, BookedTo time.Time
+	// Window is the owner's limit on its times, JSON of errand.Window, ""
+	// for none; Slots the times its poll offers, JSON [[from,to]...] in
+	// the poll's option order, "" for no poll.
+	Window, Slots string
 }
 
 // Live reports whether the errand has not ended: it waits for the owner,
@@ -258,7 +262,7 @@ func (c ErrandContact) Warned(now time.Time) bool {
 // ErrNoErrand is an errand, or a contact, the store does not have.
 var ErrNoErrand = errors.New("no such errand")
 
-const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at, mode, opened_by, calendar, booked, booked_from, booked_to`
+const errandColumns = `id, brain, contact, name, goal, brief, message, state, approval, by_owner, run, chat_jid, days, sent, outcome, created_at, deadline, closed_at, mode, opened_by, calendar, booked, booked_from, booked_to, window, slots`
 
 const contactColumns = `contact, lid, name, brain, state, reason, updated_at, mode, brief, warned_at, calendar`
 
@@ -294,7 +298,7 @@ func scanErrand(row interface{ Scan(...any) error }) (Errand, error) {
 	var e Errand
 	var closed, bookedFrom, bookedTo sql.NullTime
 	err := row.Scan(&e.ID, &e.Brain, &e.Contact, &e.Name, &e.Goal, &e.Brief, &e.Message, &e.State, &e.Approval, &e.ByOwner, &e.Run, &e.Chat, &e.Days, &e.Sent, &e.Outcome, &e.CreatedAt, &e.Deadline, &closed, &e.Mode, &e.OpenedBy,
-		&e.Calendar, &e.Booked, &bookedFrom, &bookedTo)
+		&e.Calendar, &e.Booked, &bookedFrom, &bookedTo, &e.Window, &e.Slots)
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, ErrNoErrand
 	}
@@ -325,8 +329,14 @@ func (s *Store) AddErrand(ctx context.Context, e Errand) error {
 	if mode == "" {
 		mode = ErrandByMessage
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, '', NULL, NULL)`,
-		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC(), mode, e.OpenedBy, e.Calendar)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO errands (`+errandColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, '', NULL, NULL, ?, '')`,
+		e.ID, e.Brain, e.Contact, e.Name, e.Goal, e.Brief, e.Message, e.State, e.Approval, e.ByOwner, e.Run, e.Chat, e.Days, e.Sent, e.Outcome, e.CreatedAt.UTC(), e.Deadline.UTC(), mode, e.OpenedBy, e.Calendar, e.Window)
+	return err
+}
+
+// SetErrandSlots records the times errand id's poll offers.
+func (s *Store) SetErrandSlots(ctx context.Context, id, slots string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE errands SET slots = ? WHERE id = ?`, slots, id)
 	return err
 }
 
@@ -636,4 +646,18 @@ func (s *Store) AllErrands(ctx context.Context, ended int) ([]Errand, error) {
 // to, the latest first.
 func (s *Store) BlockedErrandContacts(ctx context.Context) ([]ErrandContact, error) {
 	return s.queryContacts(ctx, `WHERE state = ? ORDER BY updated_at DESC, contact`, ContactBlocked)
+}
+
+// migrateV17 lets an errand carry the owner's window of times and the
+// times its poll offers (docs/BRAINS.md, "Scheduling by poll").
+func migrateV17(tx *sql.Tx) error {
+	for _, q := range []string{
+		`ALTER TABLE errands ADD COLUMN window TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE errands ADD COLUMN slots TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
