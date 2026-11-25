@@ -4,12 +4,13 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"net"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -380,16 +381,25 @@ func serveBridge(t *testing.T, tb *testBridge) string {
 	return listen
 }
 
-// closedPort is a loopback address nothing listens on.
+// closedPort is a loopback address nothing listens on: a socket bound to
+// it, which never listens, keeps the port until the test ends. A port
+// closed again at once is free for a parallel test's listener, whose
+// backlog then takes the dial and resets it when it closes (#800).
 func closedPort(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := ln.Addr().String()
-	ln.Close()
-	return addr
+	t.Cleanup(func() { _ = syscall.Close(fd) })
+	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	sa, err := syscall.Getsockname(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("127.0.0.1:%d", sa.(*syscall.SockaddrInet4).Port)
 }
 
 // fridolin open asks the running bridge for a login code: the link it
