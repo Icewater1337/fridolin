@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -358,6 +359,51 @@ func TestFrideInstanceMakesRoom(t *testing.T) {
 		return l["id"] == "site" && l["by"] == "core" && l["detail"] == "stopped on mini ("+mini.ID+"): to make room for work"
 	}) {
 		t.Errorf("the audit: %v", h.auditOf("fride_instance"))
+	}
+}
+
+// New work is placed once, by the call that made it: the queue, kicked by
+// the declares a start causes, must not place the thread first (#607),
+// which handed FrIDE the task twice and left the call without its start.
+func TestFrideNewWorkIsPlacedOnce(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"instances": {"work": {}, "site": {}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	mini := h.fakeHostNode("mini", addr, 16384, 13144, 6144)
+
+	reply := h.coreSays("start them", step("fride_spawn", `{"instance":"site","size":"small","reason":"ahead"}`), step("fride_task", `{"message":"Fix it","instance":"work"}`))
+	if !strings.Contains(reply, "Started the FrIDE instance work on mini with 6144 MB. To make room, the idle instance site stopped.") {
+		t.Errorf("making room:\n%s", reply)
+	}
+	// The queue offers waiting work all the time, as it does after any
+	// declare; each thread must still reach FrIDE once.
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					h.b.fride.retryQueued()
+				}
+			}
+		})
+	}
+	const more = 100
+	for range more {
+		if _, placed, why, _, err := h.b.fride.newWork(t.Context(), harnessDM, "core", "More", nil, "", "work"); err != nil || !placed {
+			t.Fatalf("newWork: placed %v: %q, %v", placed, why, err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	if n := len(slices.DeleteFunc(mini.Calls(), func(c string) bool { return c != "fride.task@work" })); n != more+1 {
+		t.Errorf("%d threads reached work %d times", more+1, n)
 	}
 }
 
