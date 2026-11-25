@@ -380,16 +380,25 @@ func serveBridge(t *testing.T, tb *testBridge) string {
 	return listen
 }
 
-// closedPort is a loopback address nothing listens on.
+// closedPort is a loopback address nothing listens on. The local end of a
+// loopback connection holds its port until the test ends: a parallel
+// test's listener cannot take it, as it could a port closed again at once,
+// whose backlog then took the dial and reset it (#800), and a dial to it
+// is refused on Linux and macOS alike, where a bound socket that never
+// listens lets macOS's dial time out instead.
 func closedPort(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := ln.Addr().String()
-	ln.Close()
-	return addr
+	t.Cleanup(func() { ln.Close() })
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c.LocalAddr().String()
 }
 
 // fridolin open asks the running bridge for a login code: the link it
