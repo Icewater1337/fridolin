@@ -13,7 +13,7 @@ import { nextId } from './fields.js';
 import { tabs } from './tabs.js';
 import { pill, callout, mono, loading, timeAgo, kv } from './common.js';
 import { errorMessage } from '../lib/errors.js';
-/** @import { GoogleClientCheck, GrantHealth, CalendarStatus, CalendarEntry, ContactsStatus } from '../../types/api.js' */
+/** @import { GoogleClientCheck, GrantHealth, CalendarStatus, CalendarEntry, ContactsStatus, GmailStatus } from '../../types/api.js' */
 
 const CONSOLE = 'https://console.cloud.google.com';
 const CALENDAR_API = 'calendar-json.googleapis.com';
@@ -656,5 +656,112 @@ export function contactsCard(brainId, { signal } = {}) {
   }
 
   refresh().catch(failed(signal, (e) => mount(el, callout('bad', 'Could not check Google Contacts', errorMessage(e)))));
+  return Object.assign(el, { refresh });
+}
+
+const GMAIL_API = 'gmail.googleapis.com';
+
+/**
+ * Brain page card of the brain's Gmail, which its `fridolin gmail` commands
+ * use: the one-time steps in Google Cloud Console, connect, check,
+ * disconnect. A sign-in of its own, apart from the calendar's and the
+ * contacts', so turning Gmail on or off leaves them alone. signal is the
+ * page's. el.refresh() checks again.
+ * @param {string} brainId
+ * @param {{signal?: AbortSignal}} [options]
+ */
+export function gmailCard(brainId, { signal } = {}) {
+  const el = h('div.card', loading('Checking Gmail…'));
+  const url = `/api/brains/${encodeURIComponent(brainId)}/gmail`;
+  // The paste box for a sign-in from another machine; it stays while the
+  // card repaints.
+  const returnBox = h('div');
+  /** @param {...any} children */
+  const show = (...children) => mount(el, ...children, returnBox);
+  /** @param {HTMLElement} state the pill */
+  const head = (state) => h('div.card-head', h('div.card-title', icon('inbox'), h('h3', 'Gmail')), state);
+
+  async function refresh() {
+    /** @type {GmailStatus} */
+    const s = await get(`${url}?check=1`, { signal });
+    render(s);
+  }
+
+  function connectButton(label = 'Connect Gmail') {
+    return btn(label, {
+      kind: 'primary', icon: 'external',
+      onClick: async () => {
+        const r = await post(`${url}/connect`);
+        if (onThisMachine()) {
+          window.location.assign(r.auth_url);
+          return;
+        }
+        window.open(r.auth_url, '_blank', 'noopener');
+        mount(returnBox, pasteReturnBox({ onDone: async () => { mount(returnBox); await refresh(); } }));
+      },
+    });
+  }
+
+  /** @param {string} scope */
+  const setupSteps = (scope) => h('details.details',
+    h('summary', 'Once, in Google Cloud Console, before the first sign-in'),
+    h('ol.steps-list.small',
+      h('li', ext(consoleLink('/flows/enableapi', '', { apiid: GMAIL_API }), 'Enable the Gmail API'), ' in the project of the bridge’s Google client (Settings → Google sign-in).'),
+      h('li', ext(consoleLink('/auth/scopes', ''), 'Data access'), ' → Add or remove scopes → paste this into “Manually add scopes”, Add to table, Update, Save: ', mono(scope, { copy: true })),
+      h('li', 'Then connect here. Google asks for full access to the mailbox, which permanent delete needs; leave the box ticked.')));
+
+  /** @param {GmailStatus} s */
+  function render(s) {
+    const errBox = s.last_error ? callout('bad', 'Sign-in did not finish', s.last_error) : null;
+    if (!s.client_configured && !s.connected) {
+      show(head(pill('Not set up', 'neutral')),
+        h('p.muted', 'The bridge needs a Google OAuth client first: ', h('a', { href: '#/settings/google' }, 'Settings → Google sign-in'), '.'));
+      return;
+    }
+    if (!s.connected) {
+      show(head(pill('Not connected', 'neutral')),
+        errBox,
+        h('p.muted', 'Lets this brain read, label, archive and trash mail, and send or permanently delete it with your approval each time. A sign-in of its own: the calendar stays as it is.'),
+        setupSteps(s.scope),
+        h('div.actions', connectButton()));
+      return;
+    }
+    const disconnectBtn = btn('Disconnect', {
+      kind: 'danger', icon: 'x', small: true,
+      onClick: async () => {
+        const ok = await confirmDialog({
+          title: 'Disconnect Gmail?',
+          message: 'The bridge deletes this brain’s Gmail token and revokes the access at Google, unless another sign-in of the same Google client may share it (this brain’s calendar, say), which would lose its access too. The mail itself is not touched.',
+          confirm: 'Disconnect', danger: true,
+        });
+        if (!ok) return;
+        let r;
+        try {
+          r = await del(url);
+        } catch (e) {
+          if (errorStatus(e) !== 502) throw e;
+          const anyway = await confirmDialog({
+            title: 'Google did not revoke the access',
+            message: h('div', h('p', errorMessage(e)), h('p', 'Delete the token here anyway? The access then stays at Google until you remove it at myaccount.google.com/permissions.')),
+            confirm: 'Delete the token', danger: true,
+          });
+          if (!anyway) return;
+          r = await del(`${url}?local_only=1`);
+        }
+        if (r && r.note) toast(`Disconnected; ${r.note}`, 'info');
+        await refresh();
+      },
+    });
+    const works = s.works !== false;
+    show(head(works ? pill('Working', 'ok') : pill('Not working', 'bad')),
+      errBox,
+      s.account ? h('p', 'Mailbox: ', h('strong', s.account)) : null,
+      works ? null : callout('bad', 'Gmail did not answer', s.check_error || '', h('div.actions', connectButton('Reconnect'))),
+      works ? null : setupSteps(s.scope),
+      h('p.muted.small', 'The bridge makes this brain’s Gmail calls itself and holds sending and permanent deletes to your approval; the brain cannot read the token. Token: ', mono(s.token_path)),
+      h('div.actions', connectButton('Switch account'), disconnectBtn));
+  }
+
+  refresh().catch(failed(signal, (e) => mount(el, callout('bad', 'Could not check Gmail', errorMessage(e)))));
   return Object.assign(el, { refresh });
 }

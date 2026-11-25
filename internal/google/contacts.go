@@ -34,7 +34,7 @@ import (
 // lookup, and nothing it finds is kept. contacts.readonly does not let the
 // bridge read the account's address, so the token names no account, and
 // it may share its grant at Google with any other token from the same
-// client: a disconnect, of the calendar or of the contacts, does not
+// client: a disconnect, of the calendar, the contacts or Gmail, does not
 // revoke a grant another token may hold (contactsSharing).
 
 // ContactsScope is what a brain's contacts sign-in asks for: reading the
@@ -212,6 +212,10 @@ func (g *Auth) DisconnectContacts(ctx context.Context, brainID string, localOnly
 		}
 		if other := g.contactsSharing(brainID, t); other != "" {
 			note = contactsSharingNote(other)
+			break
+		}
+		if other := g.gmailSharing("", t); other != "" {
+			note = gmailSharingNote(other)
 			break
 		}
 		if err := g.revoke(ctx, t.RefreshToken); err != nil {

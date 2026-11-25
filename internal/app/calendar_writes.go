@@ -66,3 +66,18 @@ func runEntry(run runInfo, kind string) audit.Entry {
 	}
 	return e
 }
+
+// RecordMail is httpapi.MailWriteGuard's audit line.
+func (w calendarWrites) RecordMail(tok string, mw httpapi.MailWrite) {
+	detail := mw.Action
+	if mw.Recipients > 0 {
+		detail += fmt.Sprintf(" to %d", mw.Recipients)
+	}
+	outcome := mw.Outcome
+	if mw.Approval != "" {
+		outcome += " (approval " + mw.Approval + ")"
+	}
+	e := runEntry(w.caller(tok).run, audit.MailWrite)
+	e.ID, e.Detail, e.Outcome = mw.Message, detail, outcome
+	w.b.audit.Append(e)
+}

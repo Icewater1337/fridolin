@@ -325,7 +325,9 @@ A brain's Google Contacts sign-in (below) is a token of the same client
 too, and it does not record its account. So while one is there, a
 calendar's Disconnect, or a **Switch account**, does not revoke the
 calendar's grant either: the contacts' sign-in may be of the same
-account and would lose its access with it.
+account and would lose its access with it. A brain's Gmail sign-in
+([GMAIL.md](GMAIL.md)) records its account, and spares the calendar's
+grant, and the calendar its, only when it is for the same one.
 
 ## Google Contacts
 

@@ -20,6 +20,7 @@ import (
 
 type BrainCalendarService interface {
 	AccessToken(context.Context, string) (*google.Token, error)
+	GmailAccessToken(context.Context, string) (*google.Token, error)
 	CalendarList(context.Context, *google.Token) ([]google.CalendarEntry, error)
 	EventsOf(context.Context, *google.Token, []string, time.Time, time.Time, string, int) (*google.CalendarListing, error)
 	InsertEvent(context.Context, *google.Token, string, map[string]any, string) (google.CalendarEvent, error)
@@ -27,6 +28,12 @@ type BrainCalendarService interface {
 	DeleteEvent(context.Context, *google.Token, string, string) error
 	BusyTimes(context.Context, *google.Token, []string, time.Time, time.Time, string) ([]google.BusySlot, error)
 	Note(string, error)
+	ListMail(context.Context, *google.Token, string, int) (*google.MailListing, error)
+	GetMail(context.Context, *google.Token, string) (*google.MailMessage, error)
+	SendMail(context.Context, *google.Token, google.MailDraft) (*google.MailSent, error)
+	ModifyMailLabels(context.Context, *google.Token, string, []string, []string) error
+	TrashMail(context.Context, *google.Token, string) error
+	DeleteMail(context.Context, *google.Token, string) error
 }
 type BrainAPI struct {
 	BrainForToken func(string) *brainruntime.Brain
@@ -37,7 +44,9 @@ type BrainAPI struct {
 	// CalendarWrites holds the calendar's writes (create, delete) to the
 	// policy the bridge's tools that write are held to.
 	CalendarWrites CalendarWriteGuard
-	Memory         BrainMemoryService
+	// MailWrites is the same for Gmail's writes.
+	MailWrites MailWriteGuard
+	Memory     BrainMemoryService
 	// MCPTools and MCPCall serve a run's MCP server (fridolin mcp --run):
 	// the tools the run's token may use, and a call of one. run is the
 	// run id the server was started with, which must be the token's.

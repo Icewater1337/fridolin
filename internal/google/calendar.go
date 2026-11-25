@@ -79,10 +79,16 @@ func (c Calendars) Allows(e CalendarEntry) (allowed, isDefault bool) {
 type googleAPIError struct {
 	status  int
 	message string
+	// service names the API in messages; "" is Google Calendar.
+	service string
 }
 
 func (e *googleAPIError) Error() string {
-	return fmt.Sprintf("Google Calendar %d: %s", e.status, strings.TrimSuffix(e.message, "."))
+	svc := e.service
+	if svc == "" {
+		svc = "Google Calendar"
+	}
+	return fmt.Sprintf("%s %d: %s", svc, e.status, strings.TrimSuffix(e.message, "."))
 }
 
 // scopeMissing reports whether e is Google saying the token lacks a scope
@@ -93,6 +99,21 @@ func (e *googleAPIError) scopeMissing() bool {
 
 // hint is what a brain should do about e, or "".
 func (e *googleAPIError) hint() string {
+	if e.service == "Gmail" {
+		m := strings.ToLower(e.message)
+		switch e.status {
+		case http.StatusUnauthorized:
+			return gmailReconnectHint
+		case http.StatusForbidden:
+			if strings.Contains(m, "has not been used") || strings.Contains(m, "is disabled") {
+				return gmailDisabledHint
+			}
+			return "If it says the access is insufficient, the brain's Gmail sign-in lacks it. " + gmailReconnectHint
+		case http.StatusNotFound:
+			return "Check the message ID and label names."
+		}
+		return ""
+	}
 	switch e.status {
 	case http.StatusUnauthorized:
 		return calendarReconnectHint
@@ -112,7 +133,17 @@ const calendarReconnectHint = "Ask the owner to connect the calendar again in th
 // on path with query, body as JSON when it is not nil, and the answer
 // decoded into out when it is not nil.
 func (g *Auth) calendarAPI(ctx context.Context, tok *Token, method, path string, query url.Values, body, out any) error {
-	u := g.options.Endpoints.APIBase + "/calendar/v3" + path
+	return g.googleAPI(ctx, tok, "", "/calendar/v3"+path, method, query, body, out)
+}
+
+// googleAPI is calendarAPI for any API under the endpoints' APIBase: path
+// holds the API's prefix, service names it in errors ("" is Google Calendar).
+func (g *Auth) googleAPI(ctx context.Context, tok *Token, service, path, method string, query url.Values, body, out any) error {
+	svcName := service
+	if svcName == "" {
+		svcName = "Google Calendar"
+	}
+	u := g.options.Endpoints.APIBase + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -134,7 +165,7 @@ func (g *Auth) calendarAPI(ctx context.Context, tok *Token, method, path string,
 	}
 	resp, err := g.options.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not reach Google Calendar (%w); this is usually temporary, try again in a minute", err)
+		return fmt.Errorf("could not reach %s (%w); this is usually temporary, try again in a minute", svcName, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -147,13 +178,13 @@ func (g *Auth) calendarAPI(ctx context.Context, tok *Token, method, path string,
 		if e.Error.Message == "" {
 			e.Error.Message = http.StatusText(resp.StatusCode)
 		}
-		return &googleAPIError{status: resp.StatusCode, message: e.Error.Message}
+		return &googleAPIError{status: resp.StatusCode, message: e.Error.Message, service: service}
 	}
 	if out == nil {
 		return nil
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out); err != nil {
-		return fmt.Errorf("reading Google Calendar's answer: %w", DecodeError(err))
+		return fmt.Errorf("reading %s's answer: %w", svcName, DecodeError(err))
 	}
 	return nil
 }

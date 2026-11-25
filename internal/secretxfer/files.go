@@ -20,9 +20,9 @@ import (
 // fileName are the secret files a move carries from the core's
 // credentials folder (sandbox.credentials_dir, under ~): the
 // Google OAuth web client, the dashboard's users, and each brain's
-// calendar client and token, and its Google Contacts token. Nothing else
-// in that folder goes (#187).
-var fileName = regexp.MustCompile(`^(google_oauth_web_credentials|dashboard-users|(google_calendar_(credentials|token)|google_contacts_token)_[a-z0-9][a-z0-9_-]{0,63})\.json$`)
+// calendar client and token, its Google Contacts token and its Gmail
+// token. Nothing else in that folder goes (#187).
+var fileName = regexp.MustCompile(`^(google_oauth_web_credentials|dashboard-users|(google_calendar_(credentials|token)|google_contacts_token|google_gmail_token)_[a-z0-9][a-z0-9_-]{0,63})\.json$`)
 
 // LocalPrefix marks, in a move's files, a secret file of the data dir's
 // LocalDir rather than of the credentials folder: "local:gitlab.json".
@@ -37,8 +37,9 @@ const LocalDir = "core/local-secrets"
 // the GitHub identity's commit name and email.
 var localName = regexp.MustCompile(`^local:(gitlab|github)\.json$`)
 
-// maxFiles covers the 2 global files and all 3 per brain for 20 brains
-// (#610); the export does not know the brains, so it is a constant.
+// maxFiles covers the 2 global files and all 4 per brain for 15 brains,
+// or 3 per brain for 20 (#610); the export does not know the brains, so it
+// is a constant.
 const (
 	maxFiles      = 64
 	maxLocalFiles = 4

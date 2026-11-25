@@ -22,6 +22,7 @@ async function openPage(t, opts = {}) {
     if (path === '/api/brains/work/approve' && init.method === 'POST') return opts.approve;
     if (path === '/api/brains/work/stop' && init.method === 'POST') return { stopped: true };
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };
+    if (path.startsWith('/api/brains/work/gmail')) return { client_configured: true, connected: false, scope: 'https://mail.google.com/', token_path: '/Users/you/.fridolin/google_gmail_token_work.json' };
     if (path.startsWith('/api/brains/work/contacts')) return { client_configured: true, connected: false, scope: 'https://www.googleapis.com/auth/contacts.readonly', token_path: '/Users/you/.fridolin/google_contacts_token_work.json' };
     if (path === '/api/brains/work' && init.method === 'PUT') return { ok: true };
     if (path.startsWith('/api/brains/work/intents/') && init.method === 'DELETE') return { status: 'removed' };
@@ -190,7 +191,7 @@ test('edits whose form left the page are not unsaved changes', async (t) => {
 test('a brain that does not exist shows only that', async (t) => {
   const { root, poll } = await openPage(t);
   const shown = () => root.querySelectorAll('section.section').filter((s) => !s.hidden).map((s) => s.querySelector('h2').textContent);
-  const all = ['Now', 'Settings', 'Calendar', 'Standing intents', 'Skills', 'Recent messages', 'Remove'];
+  const all = ['Now', 'Settings', 'Calendar', 'Gmail', 'Standing intents', 'Skills', 'Recent messages', 'Remove'];
   assert.deepEqual(shown(), all);
   await poll([]);
   assert.match(root.textContent, /No such brain/);

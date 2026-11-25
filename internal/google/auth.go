@@ -208,6 +208,8 @@ type Auth struct {
 	// contactsError is each brain's last Google Contacts sign-in error
 	// (contacts.go).
 	contactsError map[string]string
+	// gmailError is the same for Gmail (gmail_auth.go).
+	gmailError map[string]string
 }
 
 // New creates the manager, and logs the files in the credentials
@@ -233,7 +235,7 @@ func New(options Options) *Auth {
 		options.HTTP = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	g := &Auth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}, contactsError: map[string]string{}}
+	g := &Auth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}, contactsError: map[string]string{}, gmailError: map[string]string{}}
 	if copies := g.leftoverClientCopies(); len(copies) > 0 {
 		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+
 			"each holding a client secret: %s. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: "+
@@ -636,7 +638,7 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 	var revokeOld string
 	oldData, oldErr := readCredentialFile(g.TokenPath(p.brainID))
 	if old, err := g.loadToken(p.brainID); err == nil && old.RefreshToken != "" && old.Account != "" &&
-		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" && g.contactsSharing("", old) == "" {
+		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" && g.contactsSharing("", old) == "" && g.gmailSharing("", old) == "" {
 		revokeOld = old.RefreshToken
 	}
 	if err := g.saveToken(p.brainID, tok); err != nil {
@@ -1087,6 +1089,10 @@ func (g *Auth) Disconnect(ctx context.Context, brainID string, localOnly bool) (
 		}
 		if other := g.contactsSharing("", t); other != "" {
 			note = contactsSharingNote(other)
+			break
+		}
+		if other := g.gmailSharing("", t); other != "" {
+			note = gmailSharingNote(other)
 			break
 		}
 		if err := g.revoke(ctx, t.RefreshToken); err != nil {

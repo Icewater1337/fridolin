@@ -24,11 +24,14 @@ type GoogleService interface {
 	SetClient([]byte) (*google.Client, error)
 	DeleteClient() error
 	StartSignIn(string) (string, error)
+	StartGmailSignIn(string) (string, error)
 	CalendarStatus(context.Context, string, *manifest.Calendar, bool) google.CalendarSnapshot
 	Select(string, manifest.Calendar) error
 	Disconnect(context.Context, string, bool) (bool, string, error)
 	Health(string) *google.GrantHealth
 	StartContactsSignIn(string) (string, error)
+	GmailStatus(context.Context, string, bool) google.GmailSnapshot
+	DisconnectGmail(context.Context, string, bool) (bool, string, error)
 	ContactsStatus(context.Context, string, bool) google.ContactsSnapshot
 	DisconnectContacts(context.Context, string, bool) (bool, string, error)
 }
@@ -279,6 +282,55 @@ func (a *GoogleAPI) ContactsDisconnect(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	revoked, note, err := a.Google().DisconnectContacts(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
+	switch {
+	case errors.Is(err, google.ErrNotRevoked):
+		WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
+		return
+	case err != nil:
+		WriteErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, CalendarDisconnectedResponse{Status: "disconnected", Revoked: revoked, Note: note})
+}
+
+// ── Gmail (the brain's `fridolin gmail`) ────────────────────────────────
+
+// GmailStatus answers GET /api/brains/{id}/gmail: whether the brain
+// connected its Gmail; ?check=1 asks Gmail whether it works.
+func (a *GoogleAPI) GmailStatus(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
+	if br == nil {
+		return
+	}
+	WriteJSON(w, http.StatusOK, a.Google().GmailStatus(r.Context(), br.ID(), r.URL.Query().Get("check") == "1"))
+}
+
+// GmailConnect starts a brain's Gmail sign-in, a sign-in of its own apart
+// from the brain's calendar's.
+func (a *GoogleAPI) GmailConnect(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
+	if br == nil {
+		return
+	}
+	u, err := a.Google().StartGmailSignIn(br.ID())
+	if err != nil {
+		WriteErr(w, http.StatusPreconditionFailed, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, AuthURLResponse{AuthURL: u})
+}
+
+// GmailDisconnect ends a brain's Gmail access, as Disconnect does its
+// calendar's, and answers the same: ?local_only=1 deletes the token
+// without revoking it.
+func (a *GoogleAPI) GmailDisconnect(w http.ResponseWriter, r *http.Request) {
+	br := a.calendarBrain(w, r)
+	if br == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	revoked, note, err := a.Google().DisconnectGmail(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
 	switch {
 	case errors.Is(err, google.ErrNotRevoked):
 		WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")

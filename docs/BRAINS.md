@@ -710,7 +710,8 @@ irreversible step (none today; the vault's later) need an approval. So
 do the brain's calendar writes: `fridolin calendar create` and `delete`
 need `write`, and an invitation Google emails, or deleting an event with
 other attendees, needs an approval
-([CALENDAR.md](CALENDAR.md#what-a-brains-calendar-writes-need)).
+([CALENDAR.md](CALENDAR.md#what-a-brains-calendar-writes-need)); so do
+`fridolin gmail send` and `delete` ([GMAIL.md](GMAIL.md)).
 
 **Irreversible steps ask first.** Every run's prompt says: before any
 irreversible step, and before each step a skill lists under `approve`,

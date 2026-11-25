@@ -22,6 +22,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 		"google_calendar_token_personal.json":   `{"t":"x"}`,
 		"google_calendar_credentials_team.json": `{"installed":{}}`,
 		"google_contacts_token_core.json":       `{"t":"y"}`,
+		"google_gmail_token_personal.json":      `{"t":"z"}`,
 		"restore.sh":                            "#!/bin/sh\n", // not a secret file
 		"git-crypt-backup.key":                  "k",
 	} {
@@ -42,7 +43,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 		names = append(names, n)
 	}
 	slices.Sort(names)
-	want := []string{"dashboard-users.json", "google_calendar_credentials_team.json", "google_calendar_token_personal.json", "google_contacts_token_core.json", "google_oauth_web_credentials.json"}
+	want := []string{"dashboard-users.json", "google_calendar_credentials_team.json", "google_calendar_token_personal.json", "google_contacts_token_core.json", "google_gmail_token_personal.json", "google_oauth_web_credentials.json"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("read %q", names)
 	}
@@ -72,7 +73,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(kept, []string{"dashboard-users.json"}) || len(stored) != 4 {
+	if !slices.Equal(kept, []string{"dashboard-users.json"}) || len(stored) != 5 {
 		t.Fatalf("stored %q kept %q", stored, kept)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dst, "dashboard-users.json")); string(b) != `["mine"]` {
@@ -183,14 +184,14 @@ func TestLocalFilesTravelSealed(t *testing.T) {
 	}
 }
 
-// A credentials folder with several brains, each with all three files,
+// A credentials folder with several brains, each with all four files,
 // moves whole (#610), and only more than maxFiles is refused.
 func TestManyBrainsSecretFilesMove(t *testing.T) {
 	write := func(dir string, n int, body []byte) {
 		t.Helper()
 		names := []string{"google_oauth_web_credentials.json", "dashboard-users.json"}
 		for i := 0; len(names) < n; i++ {
-			for _, k := range []string{"google_calendar_credentials", "google_calendar_token", "google_contacts_token"} {
+			for _, k := range []string{"google_calendar_credentials", "google_calendar_token", "google_contacts_token", "google_gmail_token"} {
 				names = append(names, fmt.Sprintf("%s_brain%02d.json", k, i))
 			}
 		}
@@ -206,7 +207,7 @@ func TestManyBrainsSecretFilesMove(t *testing.T) {
 	}
 	secrets := map[string]string{"fridolin.export.key": "k1"}
 
-	// 4 brains: 14 files, through the round trip.
+	// 3 brains: 14 files, through the round trip.
 	src := t.TempDir()
 	write(src, 14, []byte(`{"t":"x"}`))
 	files, err := ReadFiles(src)

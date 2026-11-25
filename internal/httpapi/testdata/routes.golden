@@ -8,6 +8,7 @@ DELETE /api/brain-dirs
 DELETE /api/brains/{id}
 DELETE /api/brains/{id}/calendar
 DELETE /api/brains/{id}/contacts
+DELETE /api/brains/{id}/gmail
 DELETE /api/brains/{id}/intents/{intent}
 DELETE /api/google/client
 DELETE /api/plaud/devices/{id}
@@ -18,6 +19,7 @@ DELETE /api/site/secrets/{module}/{name}
 DELETE /api/site/users/{id}
 DELETE /api/vault/targets/{name}
 DELETE /brain/calendar/events/{id}
+DELETE /brain/gmail/messages/{id}
 DELETE /brain/intents/{id}
 GET /api/activity
 GET /api/approvals
@@ -28,6 +30,7 @@ GET /api/brains/{id}
 GET /api/brains/{id}/backup/versions
 GET /api/brains/{id}/calendar
 GET /api/brains/{id}/contacts
+GET /api/brains/{id}/gmail
 GET /api/brains/{id}/skills
 GET /api/calendar/health
 GET /api/chats/ignored
@@ -59,6 +62,8 @@ GET /api/whatsapp/groups
 GET /api/whatsapp/qr
 GET /brain/calendar/calendars
 GET /brain/calendar/events
+GET /brain/gmail/messages
+GET /brain/gmail/messages/{id}
 GET /brain/intents
 GET /brain/live/next
 GET /brain/mcp/tools
@@ -82,6 +87,7 @@ POST /api/brains/inspect
 POST /api/brains/{id}/approve
 POST /api/brains/{id}/calendar/connect
 POST /api/brains/{id}/contacts/connect
+POST /api/brains/{id}/gmail/connect
 POST /api/brains/{id}/skills/approve
 POST /api/brains/{id}/stop
 POST /api/chats/allow
@@ -153,6 +159,10 @@ POST /api/vault/targets/{name}/snapshot
 POST /api/whatsapp/pair
 POST /brain/calendar/events
 POST /brain/calendar/freebusy
+POST /brain/gmail/messages/{id}/archive
+POST /brain/gmail/messages/{id}/labels
+POST /brain/gmail/messages/{id}/trash
+POST /brain/gmail/send
 POST /brain/intents
 POST /brain/live/turn-end
 POST /brain/mcp/call
