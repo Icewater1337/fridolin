@@ -86,13 +86,15 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 	if _, err := SealBundleFiles("mini", map[string]string{"fridolin.export.key": "k1"}, map[string][]byte{"../x.json": []byte("x")}, "~/credentials", id.Recipient().String()); err == nil {
 		t.Fatal("sealed a file outside the names")
 	}
-	for _, bad := range []string{"/etc", "~/../etc", "~", "~/a/../../b", "credentials", "~/.", "~/x/..", "~/a b"} {
+	for _, bad := range []string{"/etc", "~/../etc", "~", "~/a/../../b", "credentials", "~/.", "~/x/..", "~/a/./b", "~/a//b", "~//etc", "~/a\nb", "~/a\tb", "~/a\x00b", "~/\xffx"} {
 		if CheckFilesDir(bad) == nil {
 			t.Errorf("the folder %q passed", bad)
 		}
 	}
 	// A hidden folder, as a credentials folder usually is.
-	for _, good := range []string{"~/.creds", "~/.config/creds", "~/creds"} {
+	// A space, a non-ASCII name and more than 4 levels, which config
+	// accepts too (#794).
+	for _, good := range []string{"~/.creds", "~/.config/creds", "~/creds", "~/Library/Application Support/fridolin", "~/Dokumente/Zugänge", "~/a/b/c/d/e"} {
 		if err := CheckFilesDir(good); err != nil {
 			t.Errorf("the folder %q: %v", good, err)
 		}
