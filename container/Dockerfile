@@ -61,9 +61,9 @@ ARG LITESTREAM_VERSION=0.5.18
 # What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
 # (quick tunnels to a dev server).
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.104.0
+ARG GH_VERSION=2.105.0
 # renovate: datasource=github-releases depName=cloudflare/cloudflared
-ARG CLOUDFLARED_VERSION=2026.11.0
+ARG CLOUDFLARED_VERSION=2026.11.1
 # Google's Antigravity CLI (agy), for brains on agent_provider or provider
 # "antigravity". Its installer (antigravity.google/cli/install.sh) reads
 # https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_<amd64|arm64>.json,
@@ -85,15 +85,15 @@ RUN set -eu; \
       amd64) restic_sha=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c; \
              rclone_sha=b00f00b3266c3764413afe599d3ec316f6f43b3e0ea8a0bc1d186d2133e46df7; \
              ls_arch=x86_64; ls_sha=d3687b9fd0f2e9426bbd3da828429ff3f1dfc5c9b74d54fdf028e4ee510e7dea; \
-             gh_sha=98cb101ad87dbbd3f6b2f2bfcbd43197ccd07643140121d8a9cfaa91eadbc24e; \
-             cf_sha=51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd; \
+             gh_sha=79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f; \
+             cf_sha=97bb3b02d23a5980fc9c15a1a270e692da1923f103f920d5b16d4931d5ab55e7; \
              agy_path=linux-x64/cli_linux_x64; \
              agy_sha=83311d3f354567612dc16c1ae2ea9b503d6f6833aa4e138d39aa229da3f3bb99b0e4d7cca0bce4796b0060d6a51d8113eb7449ed5dc0e7900bf217107ea5bff9 ;; \
       arm64) restic_sha=a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465; \
              rclone_sha=ee169016675e23a69d77240565133ff7dbc9b33d16fa8f7053d4af39f1eaeb78; \
              ls_arch=arm64; ls_sha=922a09e6a7ac67f2095571894dc6382e94e1dd4cdd9674883ddf1a8e74ab982d; \
-             gh_sha=cb34cefc6f4e77b90731374a2b737516bb8f3033c6ca46aa949e5344f68069e3; \
-             cf_sha=abe54a006acf9faf2d19ee9d953cb0d0804e92f59c5382a162e57b84d086f56f; \
+             gh_sha=b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02; \
+             cf_sha=b155cec3e48e489cfb8e5c602769fb8c771083018d8881d68b4d18a791567c5a; \
              agy_path=linux-arm/cli_linux_arm64; \
              agy_sha=c9b29bba475f63a1a80161ae93ba72b221c7a586d9851e4d0061546704bab66d6b2760b25d716d191724fc7564f3246456ee151e28aa37af48dbcd72bdc6c463 ;; \
       *) echo "unsupported architecture ${TARGETARCH}" >&2; exit 1 ;; \
