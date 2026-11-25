@@ -20,14 +20,16 @@ import (
 type gatedRunner struct {
 	mu      sync.Mutex
 	gates   map[string]chan struct{}
-	started []string         // the texts of the runs, in the order they started
-	slots   map[string]*Slot // each run's slot (RunSpec.Slot), by its text
+	reached map[string]chan struct{} // closed once a gated run's Run recorded its slot
+	started []string                 // the texts of the runs, in the order they started
+	slots   map[string]*Slot         // each run's slot (RunSpec.Slot), by its text
 }
 
 func newGatedRunner(gated ...string) *gatedRunner {
-	g := &gatedRunner{gates: map[string]chan struct{}{}, slots: map[string]*Slot{}}
+	g := &gatedRunner{gates: map[string]chan struct{}{}, reached: map[string]chan struct{}{}, slots: map[string]*Slot{}}
 	for _, text := range gated {
 		g.gates[text] = make(chan struct{})
+		g.reached[text] = make(chan struct{})
 	}
 	return g
 }
@@ -36,8 +38,12 @@ func (g *gatedRunner) Run(ctx context.Context, spec RunSpec, c claudecli.Callbac
 	text := spec.Message.Text
 	g.mu.Lock()
 	g.started = append(g.started, text)
+	_, again := g.slots[text]
 	g.slots[text] = spec.Slot
 	gate := g.gates[text]
+	if r := g.reached[text]; r != nil && !again {
+		close(r)
+	}
 	g.mu.Unlock()
 	if gate != nil {
 		select {
@@ -59,9 +65,17 @@ func (g *gatedRunner) ran() []string {
 	return slices.Clone(g.started)
 }
 
-// slot returns the slot the run for text went in, as its RunSpec had it.
+// slot returns the slot the gated run for text went in, as its RunSpec had
+// it. It waits for the run to reach the runner: the lane makes a run its
+// current one before it calls Run, so waitRunning alone does not mean the
+// slot was recorded yet (#744).
 func (g *gatedRunner) slot(t *testing.T, text string) *Slot {
 	t.Helper()
+	select {
+	case <-g.reached[text]:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the run for %q never reached the runner", text)
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	s := g.slots[text]
