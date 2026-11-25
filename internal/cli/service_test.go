@@ -1146,3 +1146,99 @@ func TestServiceRefusesOtherSystems(t *testing.T) {
 		t.Errorf("ran %q", f.cmds)
 	}
 }
+
+func TestServiceInstallRerunFinishesAFailedInstall(t *testing.T) {
+	// An install that replaced the binary and failed before it recorded
+	// it leaves install.json naming the build before. The rerun finds the
+	// binary already in place, and must still record it and keep the
+	// previous tools and record, as the failed run would have.
+	cases := []struct {
+		name string
+		fail func(t *testing.T, f *fakeService) (undo func())
+	}{
+		{"the tools fail", func(t *testing.T, f *fakeService) func() {
+			if os.Geteuid() == 0 {
+				t.Skip("root reads a folder it cannot")
+			}
+			if err := os.Chmod(f.src+"/tools", 0); err != nil {
+				t.Fatal(err)
+			}
+			return func() { _ = os.Chmod(f.src+"/tools", 0o755) }
+		}},
+		{"the record fails", func(t *testing.T, f *fakeService) func() {
+			// A folder where install.prev.json goes cannot be written over.
+			makeFiles(t, f.dir(), "install.prev.json/x")
+			return func() { _ = os.RemoveAll(f.dir() + "/install.prev.json") }
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeService(t, "linux")
+			dir, bin := f.dir(), f.dir()+"/fridolin"
+			if err := f.install(f.exe("build one")); err != nil {
+				t.Fatalf("%v\n%s", err, f.out)
+			}
+			// Every test build has one version; build one stands for an older one.
+			m, err := platform.ReadInstallManifest(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.Version = "v0.0.1-old"
+			data, _ := json.Marshal(m)
+			if err := os.WriteFile(dir+"/install.json", data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(f.src+"/tools/poll_results.py", []byte("print('poll 2')\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			undo := c.fail(t, f)
+			if err := f.install(f.exe("build two")); err == nil {
+				t.Fatalf("the install that should fail did not:\n%s", f.out)
+			}
+			undo()
+			if err := f.install(f.exe("build two")); err != nil {
+				t.Fatalf("rerun: %v\n%s", err, f.out)
+			}
+			if m, err := platform.ReadInstallManifest(dir); err != nil || m.Version != version.String() {
+				t.Errorf("after the rerun install.json = %+v, %v; want version %s", m, err, version.String())
+			}
+			if readFile(t, dir+"/tools/poll_results.py") != "print('poll 2')\n" || readFile(t, dir+"/tools.prev/poll_results.py") != "print('poll')\n" {
+				t.Errorf("after the rerun: tools %q, tools.prev %q", readFile(t, dir+"/tools/poll_results.py"), readFile(t, dir+"/tools.prev/poll_results.py"))
+			}
+
+			// The rollback pairs build one with its tools and record. The
+			// fake bridge answers with the test's version, not build one's.
+			if err := f.h.rollback(f.cfg, dir); err != nil && !strings.Contains(err.Error(), "not v0.0.1-old that was installed") {
+				t.Fatalf("rollback: %v\n%s", err, f.out)
+			}
+			if readFile(t, bin) != "build one" || readFile(t, dir+"/tools/poll_results.py") != "print('poll')\n" {
+				t.Errorf("after the rollback: fridolin %q, tools %q", readFile(t, bin), readFile(t, dir+"/tools/poll_results.py"))
+			}
+			if m, _ := platform.ReadInstallManifest(dir); m.Version != "v0.0.1-old" {
+				t.Errorf("after the rollback install.json names %q, want v0.0.1-old", m.Version)
+			}
+		})
+	}
+}
+
+func TestServiceInstallRecordsANewSourceForTheSameBuild(t *testing.T) {
+	f := newFakeService(t, "linux")
+	dir := f.dir()
+	exe := f.exe("build one")
+	if err := f.install(exe); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	other := f.home + "/src/other"
+	makeFiles(t, other, "go.mod", "tools/requirements.txt")
+	if err := f.install(exe, func(o *installOptions) { o.Source = other }); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	if m, err := platform.ReadInstallManifest(dir); err != nil || m.Source != other {
+		t.Errorf("install.json = %+v, %v; want source %s", m, err, other)
+	}
+	// The binary did not change: nothing is kept for a rollback.
+	if pathExists(dir+"/install.prev.json") || pathExists(dir+"/tools.prev") || pathExists(dir+"/fridolin.prev") {
+		t.Errorf("a new source for the same build kept a previous install")
+	}
+}
