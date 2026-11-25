@@ -24,6 +24,7 @@ type GoogleService interface {
 	SetClient([]byte) (*google.Client, error)
 	DeleteClient() error
 	StartSignIn(string) (string, error)
+	StartGmailSignIn(string) (string, error)
 	CalendarStatus(context.Context, string, *manifest.Calendar, bool) google.CalendarSnapshot
 	Select(string, manifest.Calendar) error
 	Disconnect(context.Context, string, bool) (bool, string, error)
@@ -74,7 +75,7 @@ func (a *GoogleAPI) Callback(w http.ResponseWriter, r *http.Request) {
 func (a *GoogleAPI) Client(w http.ResponseWriter, r *http.Request) {
 	g := a.Google()
 	resp := GoogleClientResponse{Configured: false, RedirectURI: g.RedirectURI(), Builtin: g.Builtin() != nil,
-		Scopes: append(google.CalendarScopes(), backup.DriveScope)}
+		Scopes: append(google.CalendarScopes(), google.GmailScope, backup.DriveScope)}
 	if c := g.Client(); c != nil {
 		hint := c.ClientID
 		if i := strings.Index(hint, "-"); i > 0 {
@@ -175,7 +176,14 @@ func (a *GoogleAPI) Connect(w http.ResponseWriter, r *http.Request) {
 	if br == nil {
 		return
 	}
-	u, err := a.Google().StartSignIn(br.ID())
+	// ?gmail=1 asks for Gmail along with the calendar: the same sign-in,
+	// one more scope, so a calendar-only connection keeps working until
+	// the owner chooses it.
+	start := a.Google().StartSignIn
+	if r.URL.Query().Get("gmail") == "1" {
+		start = a.Google().StartGmailSignIn
+	}
+	u, err := start(br.ID())
 	if err != nil {
 		WriteErr(w, http.StatusPreconditionFailed, err.Error())
 		return

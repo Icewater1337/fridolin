@@ -66,7 +66,7 @@ func TestBuiltinGoogleClient(t *testing.T) {
 	}
 	body := tb.do("GET", "/api/google/client", nil).Body.String()
 	_ = json.Unmarshal([]byte(body), &c)
-	if !c.Configured || !c.Builtin || c.Source != google.SourceBuiltin || len(c.Scopes) != 4 || strings.Contains(body, "BUILTIN-SECRET") {
+	if !c.Configured || !c.Builtin || c.Source != google.SourceBuiltin || len(c.Scopes) != 5 || strings.Contains(body, "BUILTIN-SECRET") {
 		t.Fatalf("client = %s", body)
 	}
 

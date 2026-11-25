@@ -18,12 +18,14 @@ import { errorMessage } from '../lib/errors.js';
 const CONSOLE = 'https://console.cloud.google.com';
 const CALENDAR_API = 'calendar-json.googleapis.com';
 const DRIVE_API = 'drive.googleapis.com';
+const GMAIL_API = 'gmail.googleapis.com';
 // What a sign-in asks for, for the consent screen's Data access page: the
 // bridge's GET /api/google/client sends the same list.
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.events.freebusy',
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+  'https://mail.google.com/', // Gmail, optional per brain (permanent delete needs it)
   'https://www.googleapis.com/auth/drive.file',
 ];
 
@@ -205,7 +207,7 @@ export function googleClientSetup({ redirectUri = 'http://127.0.0.1:8765/', onSa
     },
   });
 
-  const apis = drive ? DRIVE_API : `${CALENDAR_API},${DRIVE_API}`;
+  const apis = drive ? DRIVE_API : `${CALENDAR_API},${DRIVE_API},${GMAIL_API}`;
   return h('div.stack.google-setup',
     h('p.muted', 'About ten minutes in Google Cloud Console, once. Each link opens the right page in a new tab; come back here after each step.'),
     h('ol.steps-list',
@@ -216,8 +218,8 @@ export function googleClientSetup({ redirectUri = 'http://127.0.0.1:8765/', onSa
           projectIn,
           h('div.help', 'Shown under the name as you create it. Typed here, the links below open that project directly.'))),
       h('li',
-        h('strong', 'Enable the APIs. '), step('/flows/enableapi', drive ? 'Enable the Google Drive API' : 'Enable the Google Calendar and Drive APIs', { apiid: apis }),
-        ' — one page, one Next/Enable. ', drive ? null : 'Drive is for backups; leave it out if you will not back up to Google Drive.'),
+        h('strong', 'Enable the APIs. '), step('/flows/enableapi', drive ? 'Enable the Google Drive API' : 'Enable the Google Calendar, Drive and Gmail APIs', { apiid: apis }),
+        ' — one page, one Next/Enable. ', drive ? null : 'Drive is for backups, Gmail only for brains you connect to it; leave out what you will not use.'),
       h('li',
         h('strong', 'Set up the consent screen. '), step('/auth/overview', 'Google Auth Platform'), ' (older consoles: APIs & Services → OAuth consent screen) → Get started:',
         h('ul.small',
@@ -410,11 +412,13 @@ export function calendarCard(brainId, { signal } = {}) {
     render(s);
   }
 
-  function connectButton(label = 'Connect Google Calendar') {
+  // gmail: also ask for Gmail, the same sign-in with one more scope; a
+  // reconnect of a brain that has Gmail keeps it.
+  function connectButton(label = 'Connect Google Calendar', gmail = false) {
     const b = btn(label, {
-      kind: 'primary', icon: 'external',
+      kind: gmail && label.includes('Gmail') ? 'default' : 'primary', icon: 'external',
       onClick: async () => {
-        const r = await post(`/api/brains/${encodeURIComponent(brainId)}/calendar/connect`);
+        const r = await post(`/api/brains/${encodeURIComponent(brainId)}/calendar/connect${gmail ? '?gmail=1' : ''}`);
         if (onThisMachine()) {
           // Same tab: Google sends the browser back to this page afterwards.
           window.location.assign(r.auth_url);
@@ -441,6 +445,19 @@ export function calendarCard(brainId, { signal } = {}) {
       'Files named like the copies of the OAuth client that older versions wrote for the calendar tool, each holding a client secret: ',
       names.flatMap((n, i) => (i ? [', ', mono(n)] : [mono(n)])),
       '. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: delete them by hand, unless something else of yours uses them.');
+  }
+
+  // Gmail is the calendar sign-in with one more scope (mail.google.com, which
+  // permanent delete needs). A connection made without it keeps the calendar
+  // working; the brain's Gmail commands then say to reconnect Google.
+  /** @param {CalendarStatus} s */
+  function gmailBox(s) {
+    if (s.gmail) {
+      return h('p.small', pill('Gmail granted', 'ok'), ' The brain can read, send (with your approval), label, archive, trash and delete mail in this account.');
+    }
+    return callout('info', 'Gmail is not granted',
+      'This brain’s Google connection covers the calendar only, so its Gmail commands will say to reconnect Google. Connecting asks Google for full mailbox access (permanent delete needs it); sending and deleting mail still need your approval each time.',
+      h('div.actions', connectButton('Connect Gmail', true)));
   }
 
   /** @param {CalendarStatus} s */
@@ -537,16 +554,17 @@ export function calendarCard(brainId, { signal } = {}) {
       broken || health.state === 'expiring'
         ? callout(broken ? 'bad' : 'warn', broken ? (health.state === 'revoked' ? 'Google revoked this sign-in' : 'This sign-in has to be renewed') : 'This sign-in ends soon',
           health.detail || '', h('div', 'Reconnect signs in again, with the same or another account; the calendars you ticked stay ticked for the same account.'),
-          h('div.actions', connectButton('Reconnect')))
+          h('div.actions', connectButton('Reconnect', !!s.gmail)))
         : null,
+      gmailBox(s),
       s.broad_access ? callout('warn', 'More access than the calendar needs',
         'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included, unless another brain is signed in to the same Google account: disconnect that one too, or the old access stays.') : null,
-      s.list_error && !broken ? callout('bad', s.reconnect_needed ? 'Google no longer accepts this sign-in' : 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Reconnect'))) : null,
+      s.list_error && !broken ? callout('bad', s.reconnect_needed ? 'Google no longer accepts this sign-in' : 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Reconnect', !!s.gmail))) : null,
       cals.length ? h('div.table-wrap', h('table.table',
         h('thead', h('tr', h('th', 'Use'), h('th', 'Calendar'), h('th', 'Access'), h('th', 'New events'))),
         h('tbody', rows))) : null,
       h('p.muted.small', 'Google grants access to the whole account; the bridge makes this brain’s calendar calls itself, only on the calendars you tick, and with the sandbox on the brain cannot read the token. Token: ', mono(s.token_path)),
-      h('div.actions', cals.length ? saveBtn : null, connectButton('Switch account'), disconnectBtn));
+      h('div.actions', cals.length ? saveBtn : null, connectButton('Switch account', !!s.gmail), disconnectBtn));
   }
 
   refresh().catch(failed(signal, (e) => mount(el, callout('bad', 'Could not check the calendar', e.message))));

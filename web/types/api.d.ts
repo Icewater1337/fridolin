@@ -2504,6 +2504,7 @@ export interface CalendarStatus {
   account?: string;
   /** Signed in with an older version, which asked for every calendar. */
   broad_access?: boolean;
+  gmail?: boolean;
   /** The account's calendars; null when it has none. */
   calendars: CalendarEntry[] | null;
   client_configured: boolean;
