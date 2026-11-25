@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -222,6 +223,8 @@ type errandRequest struct {
 	// Calendar is the most the errand may do with the owner's calendar,
 	// "" for what brain.json and the person allow.
 	Calendar string
+	// Window limits the times the errand offers and books, nil for none.
+	Window *errand.Window
 }
 
 // openErrand starts an errand for run c: at once when the owner asked
@@ -259,6 +262,14 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 	case slices.ContainsFunc(cfg.AllowedNumbers, func(n string) bool { return chat.IdentityKey(n) == number }):
 		return "", errors.New("that number is in allowed_numbers: write to them in their own chat, not in an errand")
 	}
+	window := ""
+	if r.Window != nil {
+		if err := r.Window.Validate(); err != nil {
+			return "", err
+		}
+		j, _ := json.Marshal(r.Window)
+		window = string(j)
+	}
 	days := r.Days
 	if days == 0 {
 		days = errand.DefaultDays
@@ -289,7 +300,7 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 	byOwner := errandByOwner(c.run, cfg)
 	now := time.Now()
 	e := store.Errand{ID: "e" + randomToken(7), Brain: c.run.Brain, Contact: number, Name: name, Goal: goal, Brief: brief, Message: message,
-		State: store.ErrandAsking, ByOwner: byOwner, Run: c.run.ID, Chat: target, Days: days, CreatedAt: now, Deadline: now.Add(time.Duration(days) * 24 * time.Hour), Mode: store.ErrandByMessage, Calendar: r.Calendar}
+		State: store.ErrandAsking, ByOwner: byOwner, Run: c.run.ID, Chat: target, Days: days, CreatedAt: now, Deadline: now.Add(time.Duration(days) * 24 * time.Hour), Mode: store.ErrandByMessage, Calendar: r.Calendar, Window: window}
 	text := message
 	if !known {
 		text = errand.Intro(s.OwnerName, s.Intro) + "\n\n" + message
@@ -765,12 +776,16 @@ type errandChannel struct {
 // a question for the owner, the end or an abort it does not.
 func (b *App) errandAct(ctx context.Context, e store.Errand, ans errand.Answer, lines []store.ErrandLine, ch errandChannel) bool {
 	switch ans.Action {
-	case errand.Reply, errand.Book:
+	case errand.Reply, errand.Book, errand.Poll:
 		// A book that got here was booked, or asked for: its text goes
-		// out as a reply.
+		// out as a reply. A poll's follows its text (errandRespond kept
+		// only the times that may be offered).
 		var err error
 		if ans.Text != "" {
 			err = ch.say(ans.Text)
+		}
+		if err == nil && ans.Action == errand.Poll {
+			err = b.sendSlotPoll(ctx, e, answerSpans(ans, RuntimeConfig(b.cfgs).Location()))
 		}
 		// The note goes on whether or not the reply did; ctx may be why it did not.
 		b.passOnNote(context.WithoutCancel(ctx), e, ans.Note)

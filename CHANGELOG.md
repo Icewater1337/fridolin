@@ -23,6 +23,7 @@ for compatibility.
 - **Longer node agent sessions.** A `node_agent_run` session may now run 24
   hours instead of 2; `node.json`'s `agent_max_runtime` (e.g. `"48h"`) sets it.
   Restart the node to apply.
+- **Scheduling by poll in errands.** `contact_person` takes a `window` (days, times, length, place); the errand then offers up to 12 free times in a WhatsApp poll with a "none of these work" option, and the vote books the time as the errand's calendar mode allows (docs/BRAINS.md, "Scheduling by poll").
 - **Per-folder node policy.** brain.json's new `node_policy` says, per
   folder and everything in it, where its copies may land (`storage`:
   nodes, backup targets, `cloud`) and which nodes may run backups,

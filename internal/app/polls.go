@@ -35,6 +35,10 @@ func (b *App) recordVote(v pollVote) {
 		b.ownerPickVote(token, v)
 		return
 	}
+	if id, ok := strings.CutPrefix(v.Poll.Ref, errandSlotsRef); ok {
+		b.errandSlotsVote(id, v)
+		return
+	}
 	br := b.brainMgr.Get(v.Poll.Brain)
 	if br == nil {
 		br = b.brainMgr.BrainFor(v.Poll.Chat, chat.IsGroupJID(v.Poll.Chat))

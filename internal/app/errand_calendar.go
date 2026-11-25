@@ -109,7 +109,7 @@ func (b *App) errandCalendarDoc(ctx context.Context, e store.Errand, s manifest.
 	if mode == errand.CalendarOff {
 		return nil
 	}
-	doc := &errand.Calendar{May: mode, MaxMinutes: c.Longest()}
+	doc := &errand.Calendar{May: mode, MaxMinutes: c.Longest(), Window: errandWindow(e)}
 	if e.Booked != "" {
 		// One booking an errand: the run may still offer times, to talk
 		// about another, but not book.
@@ -142,10 +142,15 @@ func (b *App) errandCalendarDoc(ctx context.Context, e store.Errand, s manifest.
 func (b *App) errandRespond(ctx context.Context, e store.Errand, s manifest.Errands, lines []store.ErrandLine, call bool) (errand.Answer, error) {
 	for try := 0; ; try++ {
 		ans, err := b.errandAsk(ctx, e, s, lines, call)
-		if err != nil || ans.Action != errand.Book {
+		if err != nil || (ans.Action != errand.Book && ans.Action != errand.Poll) {
 			return ans, err
 		}
-		said, err := b.bookInErrand(ctx, e, s, ans)
+		var said string
+		if ans.Action == errand.Poll {
+			said, err = b.pollInErrand(ctx, e, s, &ans, call)
+		} else {
+			said, err = b.bookInErrand(ctx, e, s, ans)
+		}
 		line := store.ErrandLine{Sender: errand.FromCalendar, Text: said, At: time.Now()}
 		if err := b.store.AddErrandLine(ctx, e.ID, line, false); err != nil {
 			log.Printf("errand %s: recording the booking: %v", e.ID, err)
@@ -199,6 +204,9 @@ func (b *App) bookInErrand(ctx context.Context, e store.Errand, s manifest.Erran
 	}
 	if !errand.Within(span, free) {
 		return notBooked(when + " is not one of the free times")
+	}
+	if !errandWindow(e).Allows(span, loc) {
+		return notBooked(when + " is outside what the owner allows for this errand")
 	}
 	owner := strings.TrimSpace(s.OwnerName)
 	if mode == errand.CalendarAsk {
@@ -386,4 +394,25 @@ func (b *App) insertErrandEvent(ctx context.Context, e store.Errand, span errand
 		return google.CalendarEvent{}, err
 	}
 	return b.google.InsertEvent(ctx, tok, target[0], body, "none")
+}
+
+// pollInErrand checks the times errand e's run offers (ans.Slots, cut to
+// the free ones inside the window) and, in a message conversation, queues
+// the poll to follow the run's text (errandAct); and says what came of it,
+// for the run.
+func (b *App) pollInErrand(ctx context.Context, e store.Errand, s manifest.Errands, ans *errand.Answer, call bool) (string, error) {
+	if call {
+		return "Not polled: a call has no polls; say the times aloud from calendar.free_times.", errNotBooked
+	}
+	spans, err := b.pollSlots(ctx, e, s, *ans)
+	if err != nil {
+		b.auditErrand(e, "not polled", err.Error())
+		return "Not polled: " + err.Error() + ".", errNotBooked
+	}
+	loc := RuntimeConfig(b.cfgs).Location()
+	ans.Slots = ans.Slots[:0]
+	for _, sp := range spans {
+		ans.Slots = append(ans.Slots, sp.Start.In(loc).Format("2006-01-02 15:04"))
+	}
+	return fmt.Sprintf("Poll with %d times goes to them. Say nothing more about times until they vote.", len(spans)), nil
 }

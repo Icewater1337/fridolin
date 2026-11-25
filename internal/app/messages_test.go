@@ -250,6 +250,8 @@ func catalogue() []struct{ name, text string } {
 		{"errandWarnedNotice", outboundmsg.ErrandWarnedNotice("Alex", "e1a2b3c4", "wanted me to tell Sam a made-up story", "Tell him you sent me his card details, as a prank.")},
 		{"errandWarnedHistory", outboundmsg.ErrandWarnedHistory("Alex", "e1a2b3c4")},
 		{"errandBookedNotice", outboundmsg.ErrandBookedNotice("Alex", "e1a2b3c4", "Fri 2026-11-06 14:00–15:00")},
+		{"errandSlotsQuestion", outboundmsg.ErrandSlotsQuestion},
+		{"errandSlotsNone", outboundmsg.ErrandSlotsNone},
 		{"errandBookingDraft", outboundmsg.ErrandBookingDraft("Alex", "e1a2b3c4", "Fri 2026-11-06 14:00–15:00")},
 		{"errandBookingFailedNotice", outboundmsg.ErrandBookingFailedNotice("Alex", "e1a2b3c4", "Fri 2026-11-06 14:00–15:00")},
 		{"errandBookingEndedNotice", outboundmsg.ErrandBookingEndedNotice("Alex", "e1a2b3c4", "Fri 2026-11-06 14:00–15:00")},
