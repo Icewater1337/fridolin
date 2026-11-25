@@ -378,7 +378,7 @@ class SyncService : Service() {
     private fun describe(m: SyncMode) = when (m) {
         SyncMode.INSTANT -> "instant, the link stays up"
         SyncMode.SMART -> "smart, a check-in every ${SyncPolicy.SMART_MINUTES} min and on events"
-        SyncMode.INTERVAL -> "every ${SyncPrefs.minutes(this)} min"
+        SyncMode.INTERVAL -> "every ${SyncPrefs.seconds(this)} s"
     } + if (m != SyncMode.INSTANT && voice) " (voice mode: at least every ${SyncPolicy.VOICE_MINUTES} min)" else ""
 
     /** An event that may start a check-in; returns whether it did. */
@@ -581,7 +581,7 @@ class SyncService : Service() {
         if (connected || connecting) return
         if (savedSn == null) return setStatus("Not paired: open the app and tap Pair")
         misses = 0
-        val wait = SyncPolicy.interval(SyncPrefs.mode(this), SyncPrefs.minutes(this), voice)
+        val wait = SyncPolicy.interval(SyncPrefs.mode(this), SyncPrefs.seconds(this), voice)
             ?: return checkIn(Trigger.SETTINGS) // instant mode: the link belongs up
         scheduleCheckIn(wait)
         setStatus("Synced ${clock(System.currentTimeMillis())}, next check ${clock(nextCheckIn)}")
@@ -612,7 +612,7 @@ class SyncService : Service() {
         }
         misses++
         lastMissUnseen = !seen
-        val wait = SyncPolicy.backoff(SyncPrefs.mode(this), SyncPrefs.minutes(this), voice, misses)
+        val wait = SyncPolicy.backoff(SyncPrefs.mode(this), SyncPrefs.seconds(this), voice, misses)
         if (seen || misses == 1 || misses % 10 == 0) {
             AppLog.i((if (seen) "NotePin seen but not connected ($misses): the Plaud app may still hold it, or the link failed."
                 else "NotePin not seen ($misses): out of range?") +

@@ -23,20 +23,31 @@ class SyncPolicyTest {
         assertNull(SyncPolicy.interval(SyncMode.INSTANT, 30, voice = false))
         assertNull(SyncPolicy.interval(SyncMode.INSTANT, 30, voice = true))
         assertEquals(10 * min, SyncPolicy.interval(SyncMode.SMART, 30, voice = false))
-        assertEquals(30 * min, SyncPolicy.interval(SyncMode.INTERVAL, 30, voice = false))
+        assertEquals(30 * min, SyncPolicy.interval(SyncMode.INTERVAL, 30 * 60, voice = false))
     }
 
     @Test
     fun minutesAreClamped() {
-        assertEquals(2 * min, SyncPolicy.interval(SyncMode.INTERVAL, 0, voice = false))
-        assertEquals(240 * min, SyncPolicy.interval(SyncMode.INTERVAL, 10_000, voice = false))
+        assertEquals(30_000L, SyncPolicy.interval(SyncMode.INTERVAL, 0, voice = false))
+        assertEquals(30_000L, SyncPolicy.interval(SyncMode.INTERVAL, 29, voice = false))
+        assertEquals(45_000L, SyncPolicy.interval(SyncMode.INTERVAL, 45, voice = false))
+        assertEquals(240 * min, SyncPolicy.interval(SyncMode.INTERVAL, 100_000, voice = false))
     }
 
     @Test
     fun voiceModeChecksInAtLeastEveryTwoMinutes() {
         assertEquals(2 * min, SyncPolicy.interval(SyncMode.SMART, 30, voice = true))
-        assertEquals(2 * min, SyncPolicy.interval(SyncMode.INTERVAL, 60, voice = true))
-        assertEquals(2 * min, SyncPolicy.interval(SyncMode.INTERVAL, 2, voice = true))
+        assertEquals(2 * min, SyncPolicy.interval(SyncMode.INTERVAL, 60 * 60, voice = true))
+        assertEquals(2 * min, SyncPolicy.interval(SyncMode.INTERVAL, 120, voice = true))
+    }
+
+    @Test
+    fun backoffFromTheThirtySecondMinimumDoublesUpToAnHour() {
+        val waits = (0..9).map { SyncPolicy.backoff(SyncMode.INTERVAL, 30, voice = false, misses = it) / 1000 }
+        assertEquals(listOf(30L, 30, 60, 120, 240, 480, 960, 1920, 3600, 3600), waits)
+        // voice mode: at the interval, doubling up to ten minutes
+        val v = (1..7).map { SyncPolicy.backoff(SyncMode.INTERVAL, 30, voice = true, misses = it) / 1000 }
+        assertEquals(listOf(30L, 60, 120, 240, 480, 600, 600), v)
     }
 
     @Test
@@ -47,8 +58,8 @@ class SyncPolicyTest {
 
     @Test
     fun backoffNeverWaitsLessThanTheInterval() {
-        assertEquals(240 * min, SyncPolicy.backoff(SyncMode.INTERVAL, 240, voice = false, misses = 1))
-        assertEquals(240 * min, SyncPolicy.backoff(SyncMode.INTERVAL, 240, voice = false, misses = 9))
+        assertEquals(240 * min, SyncPolicy.backoff(SyncMode.INTERVAL, SyncPolicy.MAX_SECONDS, voice = false, misses = 1))
+        assertEquals(240 * min, SyncPolicy.backoff(SyncMode.INTERVAL, SyncPolicy.MAX_SECONDS, voice = false, misses = 9))
     }
 
     @Test
@@ -60,7 +71,7 @@ class SyncPolicyTest {
     @Test
     fun backoffInVoiceModeStartsShortAndStopsAtTenMinutes() {
         SyncMode.entries.filter { it != SyncMode.INSTANT }.forEach { mode ->
-            val waits = (1..6).map { SyncPolicy.backoff(mode, 30, voice = true, misses = it) / min }
+            val waits = (1..6).map { SyncPolicy.backoff(mode, 30 * 60, voice = true, misses = it) / min }
             assertEquals(listOf(2L, 4, 8, 10, 10, 10), waits)
         }
     }
@@ -69,8 +80,8 @@ class SyncPolicyTest {
     fun backoffDoesNotOverflow() {
         SyncMode.entries.forEach { mode ->
             listOf(31, 62, 1000, Int.MAX_VALUE).forEach { misses ->
-                val w = SyncPolicy.backoff(mode, SyncPolicy.MAX_MINUTES, voice = false, misses = misses)
-                assertTrue("$mode $misses: $w", w in 30_000L..SyncPolicy.MAX_MINUTES * min)
+                val w = SyncPolicy.backoff(mode, SyncPolicy.MAX_SECONDS, voice = false, misses = misses)
+                assertTrue("$mode $misses: $w", w in 30_000L..SyncPolicy.MAX_SECONDS * 1000L)
             }
         }
     }

@@ -118,15 +118,15 @@ class MainActivity : Activity() {
     private fun syncSetting(): View {
         val modes = listOf(
             SyncMode.SMART to "Smart (default): checks in every ${SyncPolicy.SMART_MINUTES} min, and when you open the app, plug in or unlock the phone",
-            SyncMode.INTERVAL to "Every N minutes, and when you open the app",
+            SyncMode.INTERVAL to "Every N seconds, and when you open the app",
             SyncMode.INSTANT to "Instant: stays connected, recordings arrive seconds after they stop (uses more pin battery)",
         )
         val minutes = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
-            hint = "Minutes (${SyncPolicy.MIN_MINUTES}–${SyncPolicy.MAX_MINUTES})"
-            setText(SyncPrefs.minutes(this@MainActivity).toString())
-            setOnFocusChangeListener { _, focused -> if (!focused) saveMinutes(this) }
-            setOnEditorActionListener { v, _, _ -> saveMinutes(v as EditText); false }
+            hint = "Seconds (${SyncPolicy.MIN_SECONDS}–${SyncPolicy.MAX_SECONDS})"
+            setText(SyncPrefs.seconds(this@MainActivity).toString())
+            setOnFocusChangeListener { _, focused -> if (!focused) saveSeconds(this) }
+            setOnEditorActionListener { v, _, _ -> saveSeconds(v as EditText); false }
         }
         val group = RadioGroup(this)
         modes.forEachIndexed { i, (mode, label) ->
@@ -146,7 +146,7 @@ class MainActivity : Activity() {
         val note = TextView(this).apply {
             textSize = 12f
             text = "A connected NotePin cannot sleep, so instant runs its battery down fast. " +
-                "Smart and every N minutes connect only to fetch, then let it sleep: a recording can wait on the pin until the " +
+                "Smart and every N seconds connect only to fetch, then let it sleep: a recording can wait on the pin until the " +
                 "next check-in. With voice mode on, they check in at least every ${SyncPolicy.VOICE_MINUTES} min; " +
                 "Fetch now (here and in the notification) gets a question off the pin at once."
         }
@@ -159,12 +159,12 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun saveMinutes(field: EditText) {
-        val n = field.text.toString().toIntOrNull() ?: return field.setText(SyncPrefs.minutes(this).toString())
-        val before = SyncPrefs.minutes(this)
-        SyncPrefs.setMinutes(this, n)
-        field.setText(SyncPrefs.minutes(this).toString())
-        if (SyncPrefs.minutes(this) != before && bleAllowed()) SyncService.checkIn(this, Trigger.SETTINGS)
+    private fun saveSeconds(field: EditText) {
+        val n = field.text.toString().toIntOrNull() ?: return field.setText(SyncPrefs.seconds(this).toString())
+        val before = SyncPrefs.seconds(this)
+        SyncPrefs.setSeconds(this, n)
+        field.setText(SyncPrefs.seconds(this).toString())
+        if (SyncPrefs.seconds(this) != before && bleAllowed()) SyncService.checkIn(this, Trigger.SETTINGS)
     }
 
     private fun render() {

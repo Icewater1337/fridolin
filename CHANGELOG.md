@@ -20,6 +20,11 @@ for compatibility.
   and permanent delete need the owner's approval; mail read is marked
   untrusted. Enable the Gmail API and add the scope to the consent screen
   first: [docs/GMAIL.md](docs/GMAIL.md)
+- **Plaud Sync: "every N" can go down to 30 seconds.** The phone app's
+  setting is now in seconds (30–14400, was 2–240 minutes); a saved
+  number of minutes carries over. A missed check-in still backs off from
+  the interval, doubling. Build the app again to update the phones.
+
 - **Per-folder node policy.** brain.json's new `node_policy` says, per
   folder and everything in it, where its copies may land (`storage`:
   nodes, backup targets, `cloud`) and which nodes may run backups,

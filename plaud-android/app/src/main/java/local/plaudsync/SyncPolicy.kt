@@ -11,7 +11,7 @@ enum class SyncMode(val key: String) {
     INSTANT("instant"),
     /** Checks in every [SyncPolicy.SMART_MINUTES], and at once on the events in [SyncPolicy.checkInOn]. */
     SMART("smart"),
-    /** Checks in every N minutes, and when the app is opened or asked to. */
+    /** Checks in every N seconds, and when the app is opened or asked to. */
     INTERVAL("interval");
 
     companion object {
@@ -47,9 +47,10 @@ object SyncPolicy {
     const val SMART_MINUTES = 10
     /** While voice mode is on a recorded question should not wait long: check in at least this often. */
     const val VOICE_MINUTES = 2
-    const val MIN_MINUTES = 2
-    const val MAX_MINUTES = 240
-    const val DEFAULT_MINUTES = 30
+    /** The "every N" setting is kept in seconds: 30 s up to 4 h, default 30 min. */
+    const val MIN_SECONDS = 30
+    const val MAX_SECONDS = 240 * 60
+    const val DEFAULT_SECONDS = 30 * 60
 
     /** In instant mode a lost link is sought again after this, doubling up to [INSTANT_BACKOFF_CAP_MS]. */
     const val INSTANT_RETRY_MS = 30_000L
@@ -66,16 +67,16 @@ object SyncPolicy {
     /** Opening the app, plugging in or an advertisement change: at most one check-in per this. */
     const val EVENT_GAP_MS = 60_000L
 
-    fun minutes(n: Int) = n.coerceIn(MIN_MINUTES, MAX_MINUTES)
+    fun seconds(n: Int) = n.coerceIn(MIN_SECONDS, MAX_SECONDS)
 
     /** Time between check-ins while the pin is in range; null in instant mode, where the link stays. */
-    fun interval(mode: SyncMode, minutes: Int, voice: Boolean): Long? {
-        val m = when (mode) {
+    fun interval(mode: SyncMode, seconds: Int, voice: Boolean): Long? {
+        val s = when (mode) {
             SyncMode.INSTANT -> return null
-            SyncMode.SMART -> SMART_MINUTES
-            SyncMode.INTERVAL -> minutes(minutes)
+            SyncMode.SMART -> SMART_MINUTES * 60
+            SyncMode.INTERVAL -> seconds(seconds)
         }
-        return (if (voice) minOf(m, VOICE_MINUTES) else m) * 60_000L
+        return (if (voice) minOf(s, VOICE_MINUTES * 60) else s) * 1000L
     }
 
     /**
@@ -84,8 +85,8 @@ object SyncPolicy {
      * never more than the cap (in voice mode [VOICE_BACKOFF_CAP_MS]). The pin coming back in range
      * ends the wait early ([Trigger.IN_RANGE]).
      */
-    fun backoff(mode: SyncMode, minutes: Int, voice: Boolean, misses: Int): Long {
-        val base = interval(mode, minutes, voice) ?: INSTANT_RETRY_MS
+    fun backoff(mode: SyncMode, seconds: Int, voice: Boolean, misses: Int): Long {
+        val base = interval(mode, seconds, voice) ?: INSTANT_RETRY_MS
         val cap = when {
             mode == SyncMode.INSTANT -> INSTANT_BACKOFF_CAP_MS
             voice -> maxOf(VOICE_BACKOFF_CAP_MS, base)

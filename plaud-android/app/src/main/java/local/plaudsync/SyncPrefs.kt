@@ -12,9 +12,11 @@ object SyncPrefs {
     fun mode(ctx: Context) = SyncMode.of(prefs(ctx).getString("sync_mode", null))
     fun setMode(ctx: Context, m: SyncMode) = prefs(ctx).edit().putString("sync_mode", m.key).apply()
 
-    /** N of "every N minutes". */
-    fun minutes(ctx: Context) = SyncPolicy.minutes(prefs(ctx).getInt("sync_minutes", SyncPolicy.DEFAULT_MINUTES))
-    fun setMinutes(ctx: Context, n: Int) = prefs(ctx).edit().putInt("sync_minutes", SyncPolicy.minutes(n)).apply()
+    /** N of "every N seconds"; builds before 0.10 kept minutes ("sync_minutes"), read once as long as no seconds are saved. */
+    fun seconds(ctx: Context) = prefs(ctx).run {
+        SyncPolicy.seconds(getInt("sync_seconds", getInt("sync_minutes", SyncPolicy.DEFAULT_SECONDS / 60) * 60))
+    }
+    fun setSeconds(ctx: Context, n: Int) = prefs(ctx).edit().putInt("sync_seconds", SyncPolicy.seconds(n)).apply()
 
     /** The pin's battery as it last reported it: percent, charging (null: not said), when. */
     data class Battery(val level: Int, val charging: Boolean?, val at: Long)
