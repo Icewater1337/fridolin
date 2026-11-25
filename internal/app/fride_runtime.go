@@ -787,12 +787,21 @@ func (f *frideRuntime) newWork(ctx context.Context, chat, brain, message string,
 	}
 	f.start()
 	t := store.FrideThread{Chat: chat, Brain: brain, Message: message, Repos: repos, WantNode: want, Instance: instance, State: store.FrideQueued}
+	// The row's lock is taken before anyone can see the row: a start's
+	// declare kicks the queue, which would place the new queued thread
+	// itself and make this call place it a second time.
+	f.mu.Lock()
 	id, err := f.b.store.AddFrideThread(ctx, t)
 	if err != nil {
+		f.mu.Unlock()
 		return t, false, "", frideStarted{}, err
 	}
 	t.ID = id
-	unlock := f.lock(id)
+	l := &sync.Mutex{}
+	l.Lock()
+	f.locks[id] = l
+	f.mu.Unlock()
+	unlock := l.Unlock
 	var placed bool
 	var why string
 	var s frideStarted
