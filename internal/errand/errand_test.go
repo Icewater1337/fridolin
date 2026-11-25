@@ -3,6 +3,7 @@ package errand
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func TestParseAnswerTakesEachAction(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseAnswer: %v", err)
 			}
-			if got != tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %+v, want %+v", got, tc.want)
 			}
 		})
@@ -155,7 +156,7 @@ func TestResponsesRequestHasNoToolsAndAStrictSchema(t *testing.T) {
 	if r.Model != "gpt-5" || r.Instructions != Instructions || !strings.Contains(r.Input, `"person": "Alex"`) || r.Tools == nil || len(r.Tools) != 0 {
 		t.Errorf("got %+v", r)
 	}
-	if f := r.Text.Format; f.Type != "json_schema" || !f.Strict || len(f.Schema.Required) != 10 {
+	if f := r.Text.Format; f.Type != "json_schema" || !f.Strict || len(f.Schema.Required) != 11 {
 		t.Errorf("format %+v", f)
 	}
 }

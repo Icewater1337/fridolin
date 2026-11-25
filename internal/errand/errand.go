@@ -27,6 +27,8 @@ import (
 
 // The limits of an errand.
 const (
+	// MaxSlots is how many times a poll offers.
+	MaxSlots = 12
 	// MaxMessages is how many messages Fridolin writes in one errand,
 	// the first one included; the errand ends at the next answer after it.
 	MaxMessages = 20
@@ -113,6 +115,10 @@ const (
 	// allows. Text goes out as for a reply once the bridge booked it, or
 	// asked the owner.
 	Book = "book"
+	// Poll sends the person a WhatsApp poll with Slots, start times (as
+	// BookStart) each BookMinutes long, and a "none of these" option: their
+	// vote is their choice (docs/BRAINS.md, "Scheduling by poll").
+	Poll = "poll"
 )
 
 // Line is one message of the conversation.
@@ -171,6 +177,9 @@ type Answer struct {
 	// time, "2006-01-02 15:04", and how long.
 	BookStart   string `json:"book_start"`
 	BookMinutes int    `json:"book_minutes"`
+	// Slots are the start times a Poll offers, as BookStart, at most
+	// MaxSlots; each lasts BookMinutes.
+	Slots []string `json:"slots"`
 }
 
 // Instructions are the rules every errand's run gets ahead of its
@@ -191,15 +200,17 @@ Rules:
 10. Write short WhatsApp messages in the language the person writes in, as formal or informal as they are ("du" or "Sie"), or else in the language of the conversation so far. No markup, no [POLL] blocks.
 11. When the document's channel is "phone call", what you write is read aloud and what they said was transcribed: short spoken sentences, no emoji, lists or links, and allow for words the transcription got wrong.
 12. If the document has a calendar, you may help find a time to meet: offer only times inside calendar.free_times, and claim to know nothing else of the owner's calendar. With calendar.may "book" or "book_after_yes", once the person agrees on a time inside free_times, answer "book" with book_start (local time, "YYYY-MM-DD HH:MM") and book_minutes (at most calendar.max_minutes). With "book" your text goes out only once it is booked, so write it as the confirmation; with "book_after_yes" it goes out at once, so say the owner will confirm. Lines from "calendar" are the bridge's word on what was booked or not: tell the person what they say.
+13. To find a time, answer "poll" instead of listing times in text: slots are up to 12 start times ("YYYY-MM-DD HH:MM") inside calendar.free_times and inside calendar.window when it has one, each book_minutes long (calendar.window.minutes, else 60); your text introduces the poll. The bridge sends the person a poll with those times and a "none of these" option; a line from "calendar" tells you what they voted. Use it only when calendar.may is not "off"; when they vote none, ask what suits them or poll again with other times.
 
 Answer with one JSON object and nothing else:
-{"action": "reply" | "done" | "ask_owner" | "abort" | "book", "text": "", "summary": "", "question": "", "reason": "", "note": "", "severe": false, "stop": false, "book_start": "", "book_minutes": 0}
+{"action": "reply" | "done" | "ask_owner" | "abort" | "book" | "poll", "text": "", "summary": "", "question": "", "reason": "", "note": "", "severe": false, "stop": false, "book_start": "", "book_minutes": 0, "slots": []}
 - text: your message to the person; required for "reply", may be "" otherwise.
 - summary: for "done", what came of it, for the owner.
 - question: for "ask_owner", what the owner should answer.
 - reason: for "abort", what the person tried; severe: whether it was serious (rule 4).
 - note: what to pass on to the owner (rule 6), else "".
-- book_start, book_minutes: for "book", the time to book (rule 12); else "" and 0.`
+- book_start, book_minutes: for "book", the time to book (rule 12); else "" and 0.
+- slots, book_minutes: for "poll", the start times to offer (rule 13); else [].`
 
 // document is the errand as its run reads it: JSON, so that nothing the
 // person writes can end their line and start another, or pass for a
@@ -235,7 +246,7 @@ func Document(e Errand) string {
 		d.PassedOn = []string{}
 	}
 	if c := e.Calendar; c != nil {
-		d.Calendar = &calendarDoc{May: c.May, FreeTimes: c.Free, MaxMinutes: c.MaxMinutes, Note: c.Note}
+		d.Calendar = &calendarDoc{May: c.May, FreeTimes: c.Free, MaxMinutes: c.MaxMinutes, Note: c.Note, Window: c.Window}
 		if d.Calendar.FreeTimes == nil {
 			d.Calendar.FreeTimes = []string{}
 		}
@@ -329,6 +340,10 @@ func ParseAnswer(out string) (Answer, error) {
 		if strings.TrimSpace(a.BookStart) == "" || a.BookMinutes <= 0 || a.BookMinutes > 24*60 {
 			return Answer{}, fmt.Errorf("%w: book without a time or with %d minutes", ErrNoAnswer, a.BookMinutes)
 		}
+	case Poll:
+		if len(a.Slots) == 0 || len(a.Slots) > MaxSlots || a.BookMinutes <= 0 || a.BookMinutes > 24*60 {
+			return Answer{}, fmt.Errorf("%w: a poll with %d slots of %d minutes", ErrNoAnswer, len(a.Slots), a.BookMinutes)
+		}
 	case Done, Abort:
 	default:
 		return Answer{}, fmt.Errorf("%w: unknown action %q", ErrNoAnswer, textx.Truncate(a.Action, 40))
@@ -340,8 +355,11 @@ func ParseAnswer(out string) (Answer, error) {
 	} else {
 		a.Severe = false
 	}
-	if a.Action != Book {
+	if a.Action != Book && a.Action != Poll {
 		a.BookStart, a.BookMinutes = "", 0
+	}
+	if a.Action != Poll {
+		a.Slots = nil
 	}
 	a.BookStart = strings.TrimSpace(a.BookStart)
 	if utf8.RuneCountInString(a.Text) > MaxText {
@@ -359,9 +377,10 @@ func ParseAnswer(out string) (Answer, error) {
 var schema = map[string]any{
 	"type":                 "object",
 	"additionalProperties": false,
-	"required":             []string{"action", "text", "summary", "question", "reason", "note", "severe", "stop", "book_start", "book_minutes"},
+	"required":             []string{"action", "text", "summary", "question", "reason", "note", "severe", "stop", "book_start", "book_minutes", "slots"},
 	"properties": map[string]any{
-		"action":       map[string]any{"type": "string", "enum": []string{Reply, Done, AskOwner, Abort, Book}},
+		"action":       map[string]any{"type": "string", "enum": []string{Reply, Done, AskOwner, Abort, Book, Poll}},
+		"slots":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		"book_start":   map[string]any{"type": "string"},
 		"book_minutes": map[string]any{"type": "integer"},
 		"text":         map[string]any{"type": "string"},

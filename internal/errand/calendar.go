@@ -1,6 +1,7 @@
 package errand
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -61,6 +62,9 @@ type Calendar struct {
 	// Note says what else the run must know: why there are no free times,
 	// or that the conversation has its booking.
 	Note string
+	// Window is what the owner limited this errand's times to, nil for
+	// nothing beyond the calendar's own hours.
+	Window *Window
 }
 
 // calendarDoc is Calendar in the document.
@@ -69,6 +73,7 @@ type calendarDoc struct {
 	FreeTimes  []string `json:"free_times"`
 	MaxMinutes int      `json:"max_minutes"`
 	Note       string   `json:"note,omitempty"`
+	Window     *Window  `json:"window,omitempty"`
 }
 
 // Span is a stretch of time.
@@ -190,4 +195,90 @@ func ParseBookStart(s string, loc *time.Location) (time.Time, error) {
 		return t.In(loc), nil
 	}
 	return time.Time{}, fmt.Errorf("book_start %q is no time as YYYY-MM-DD HH:MM", s)
+}
+
+// Window is what the owner asked of one errand's times, as contact_person
+// takes it: the bridge offers and books only times inside it.
+type Window struct {
+	// Days are weekdays as "mon".."sun"; none means any.
+	Days []string `json:"days,omitempty"`
+	// From and To are "HH:MM" local; a time lies inside when it starts at
+	// From or later and ends at To or earlier. Empty means no limit.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+	// Minutes is how long the meeting lasts; 0 means DefaultMinutes.
+	Minutes int `json:"minutes,omitempty"`
+	// Place is where: an address, or "online".
+	Place string `json:"place,omitempty"`
+}
+
+// DefaultMinutes is a meeting's length when the window names none.
+const DefaultMinutes = 60
+
+var weekdayNames = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+
+func clock(s string) (int, error) {
+	t, err := time.Parse("15:04", s)
+	return t.Hour()*60 + t.Minute(), err
+}
+
+// Validate reports why w cannot be used, and lower-cases its days.
+func (w *Window) Validate() error {
+	for i, d := range w.Days {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if len(d) > 3 {
+			d = d[:3]
+		}
+		if !slices.Contains(weekdayNames, d) {
+			return fmt.Errorf("window day %q is no weekday (mon..sun)", w.Days[i])
+		}
+		w.Days[i] = d
+	}
+	var from, to int
+	var err error
+	if w.From != "" {
+		if from, err = clock(w.From); err != nil {
+			return fmt.Errorf("window from %q is no HH:MM", w.From)
+		}
+	}
+	to = 24 * 60
+	if w.To != "" {
+		if to, err = clock(w.To); err != nil {
+			return fmt.Errorf("window to %q is no HH:MM", w.To)
+		}
+	}
+	if to <= from || w.Minutes < 0 || w.Minutes > 24*60 {
+		return errors.New("window needs from before to, and minutes of at most 24 hours")
+	}
+	w.Place = strings.TrimSpace(w.Place)
+	return nil
+}
+
+// Length is the meeting's length.
+func (w *Window) Length() time.Duration {
+	if w == nil || w.Minutes == 0 {
+		return DefaultMinutes * time.Minute
+	}
+	return time.Duration(w.Minutes) * time.Minute
+}
+
+// Allows reports whether s lies inside w, in loc. A nil window allows all.
+func (w *Window) Allows(s Span, loc *time.Location) bool {
+	if w == nil {
+		return true
+	}
+	start, end := s.Start.In(loc), s.End.In(loc)
+	if len(w.Days) > 0 && !slices.Contains(w.Days, weekdayNames[start.Weekday()]) {
+		return false
+	}
+	if start.YearDay() != end.YearDay() || start.Year() != end.Year() {
+		return false
+	}
+	if from, err := clock(w.From); w.From != "" && err == nil && start.Hour()*60+start.Minute() < from {
+		return false
+	}
+	if to, err := clock(w.To); w.To != "" && err == nil && end.Hour()*60+end.Minute() > to {
+		return false
+	}
+	return true
 }
