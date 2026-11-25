@@ -124,8 +124,8 @@ var (
 	mdURLRE      = regexp.MustCompile(`(?:https?://|www\.)\S+`)
 	mdEmphasisRE = regexp.MustCompile("~~|`+")
 	mdBoldRE     = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-	// The * of an italic pair has no word character outside it, so 3*4*5 stays.
-	mdItalicRE    = regexp.MustCompile(`(^|[^\w*])\*([^*\s][^*]*)\*([^\w*]|$)`)
+	// A bare italic pair; stripItalics checks what stands around it.
+	mdItalicRE    = regexp.MustCompile(`\*([^*\s][^*]*)\*`)
 	mdUnderlineRE = regexp.MustCompile(`(^|[\s(])_+|_+([\s).,!?:;]|$)`)
 )
 
@@ -229,7 +229,7 @@ func stripMarkdown(text string) string {
 		lines = append(lines, strings.ReplaceAll(line, "|", " "))
 	}
 	text = mdBoldRE.ReplaceAllString(strings.Join(lines, "\n"), "$1")
-	text = mdItalicRE.ReplaceAllString(text, "$1$2$3")
+	text = stripItalics(text)
 	text = mdEmphasisRE.ReplaceAllString(text, "")
 	text = mdUnderlineRE.ReplaceAllString(text, "$1$2")
 	text = strings.Map(func(r rune) rune {
@@ -239,6 +239,42 @@ func stripMarkdown(text string) string {
 		return r
 	}, text)
 	return strings.Join(strings.Fields(text), " ")
+}
+
+// stripItalics takes the stars off each italic pair that has no word
+// character and no * right outside it, so 3*4*5 stays. The neighbours are
+// checked here, not in the regex, so that two italic words with one
+// character between them both lose their stars (#795).
+func stripItalics(text string) string {
+	var b strings.Builder
+	last := 0
+	for from := 0; from < len(text); {
+		m := mdItalicRE.FindStringSubmatchIndex(text[from:])
+		if m == nil {
+			break
+		}
+		start, end := from+m[0], from+m[1]
+		if italicEdge(text, start-1) && italicEdge(text, end) {
+			b.WriteString(text[last:start])
+			b.WriteString(text[from+m[2] : from+m[3]])
+			last, from = end, end
+			continue
+		}
+		// Not italics: a later * may still open a pair, as in "3*4 und *so*".
+		from = start + 1
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
+// italicEdge reports whether the byte at i, next to an italic star, is no
+// word character (as the regexp \w, ASCII) and no *; outside text counts.
+func italicEdge(text string, i int) bool {
+	if i < 0 || i >= len(text) {
+		return true
+	}
+	c := text[i]
+	return c != '*' && c != '_' && !('0' <= c && c <= '9') && !('a' <= c && c <= 'z') && !('A' <= c && c <= 'Z')
 }
 
 // listItems reports which lines are list items: a bulleted line, and a
