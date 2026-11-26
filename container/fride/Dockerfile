@@ -27,7 +27,7 @@ ARG NODE_IMAGE=node:26.13.1-bookworm-slim
 # ── FrIDE and ponytail ────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS fride
 ARG FRIDE_REPO
-ARG FRIDE_COMMIT=15ca58bf0b22a3aef7a88809a3339e68212fe601
+ARG FRIDE_COMMIT=90aa9277214d77bac338e727748ed8f780c8ce3f
 # ponytail v5.3.2 (docs/NODES.md, "Ponytail for every agent").
 ARG PONYTAIL_REPO=https://github.com/DietrichGebert/ponytail
 ARG PONYTAIL_COMMIT=16352ac229eb08a9598dcae48fe9f2b342567d86

@@ -376,6 +376,19 @@ for compatibility.
 
 ### Changed
 
+- **FrIDE instances and the box's FrIDE run FrIDE 90aa927** (was
+  15ca58b, from 2026-11-23): `fride pr` in a task finds its own FrIDE
+  through the `serve.port` file FrIDE writes, and names the address and
+  error when a call fails; `pr.draft`, `orchestrator.dangerous`,
+  `rebaseOnUp` and per-path `checks` as settings, all off or unchanged by
+  default; `fride task base`; skills of your own in every workspace;
+  panels that run shell commands (`fride.run`). The config the template
+  and the box's image bring (`container/fride/companion.json`) now sets
+  `panels.confirmRisky`, so FrIDE's web UI asks before a panel runs a
+  command or deletes, moves or stops work; an instance's config put back
+  when its sandbox is made anew, and a box's, gain it. An instance gets
+  the new FrIDE when its node rebuilds the template (`fridolin node fride
+  host setup`) and its sandbox is made anew.
 - **FrIDE instances and the box's FrIDE run FrIDE 15ca58b** (was
   aa7d94c, from 2026-10-30): stacked pull requests, task agents that
   commit and push small steps, the orchestrator's own panels, and every

@@ -30,7 +30,7 @@ ARG GO_IMAGE=golang:1.27.4-bookworm
 # ── FrIDE ─────────────────────────────────────────────────────────────────
 FROM ${GO_IMAGE} AS fride
 ARG FRIDE_REPO
-ARG FRIDE_COMMIT=15ca58bf0b22a3aef7a88809a3339e68212fe601
+ARG FRIDE_COMMIT=90aa9277214d77bac338e727748ed8f780c8ce3f
 RUN test -n "${FRIDE_REPO}" || { echo "pass --build-arg FRIDE_REPO=<FrIDE's git URL>" >&2; exit 1; }; \
     git clone -q "${FRIDE_REPO}" /src/fride \
  && git -C /src/fride checkout -q --detach "${FRIDE_COMMIT}"
