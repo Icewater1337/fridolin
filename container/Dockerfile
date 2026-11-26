@@ -184,7 +184,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates tzdata tini bubblewrap ffmpeg python3 git openssh-client curl jq sqlite3 age \
       libatomic1 \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && git config --system --add safe.directory '*'
+# safe.directory: git refuses a repository whose folder another user owns.
+# Here every folder a run sees is the owner's, bound in from the host and
+# shown owned by whoever reads it, and the brain's user exists only inside
+# its sandbox, so the check guards nothing and only stopped brains from
+# committing in their own folders ("detected dubious ownership").
 
 COPY --from=tools /usr/local/bin/restic /usr/local/bin/rclone /usr/local/bin/litestream \
      /usr/local/bin/gh /usr/local/bin/cloudflared /usr/local/bin/agy /usr/local/bin/
