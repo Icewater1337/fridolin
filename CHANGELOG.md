@@ -20,6 +20,10 @@ for compatibility.
   and permanent delete need the owner's approval; mail read is marked
   untrusted. Enable the Gmail API and add the scope to the consent screen
   first: [docs/GMAIL.md](docs/GMAIL.md)
+- **Plaud Sync: "every N" can go down to 30 seconds.** The phone app's
+  setting is now in seconds (30–14400, was 2–240 minutes); a saved
+  number of minutes carries over. A missed check-in still backs off from
+  the interval, doubling. Build the app again to update the phones.
 - **Longer node agent sessions.** A `node_agent_run` session may now run 24
   hours instead of 2; `node.json`'s `agent_max_runtime` (e.g. `"48h"`) sets it.
   Restart the node to apply.

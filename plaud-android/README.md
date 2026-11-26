@@ -59,13 +59,13 @@ The **Sync** setting on the app's screen picks the trade-off:
 - **Smart** (default): connects every 10 minutes, and when you open the app, plug the phone in
   or unlock it, or the pin comes back in range. It fetches what is new and disconnects. While the
   pin records it stays connected, so the end of the recording is seen at once.
-- **Every N minutes** (2–240): only on that timer and when you open the app. The pin sleeps
+- **Every N seconds** (30–14400, default 30 min): only on that timer and when you open the app. The pin sleeps
   longest.
 - **Instant**: stays connected, as up to version 0.3. Recordings arrive seconds after they stop,
   and the pin's battery runs down fast.
 
 **Fetch now**, on the screen and in the notification, checks in at once. With voice mode on,
-smart and every N minutes check in at least every 2 minutes. A pin out of reach is tried less
+smart and every N seconds check in at least every 2 minutes. A pin out of reach is tried less
 and less often (the interval doubling up to an hour, or 10 minutes with voice mode on; in
 instant mode 30 seconds up to 10 minutes). Each check-in first looks for the pin with the app's
 own scan, which is filtered by Plaud's Bluetooth company id rather than an address and runs with

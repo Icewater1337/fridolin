@@ -120,7 +120,7 @@ phone is paired), or ask the core brain, which has `plaud_app_update` and
 
 1. Fridolin builds the app as above. The build's versionCode is past the
    build before and past what each phone runs; its versionName is the
-   source's (`0.9`). Fridolin keeps it with its SHA-256 and the certificate
+   source's (`0.10`). Fridolin keeps it with its SHA-256 and the certificate
    it is signed with (`<data_dir>/plaud/app/release.json`).
 2. At its check-ins (at most every 10 minutes, and at once when the app is
    opened or was just updated), the app asks for the release through the
@@ -337,7 +337,7 @@ setting now chooses:
 | Sync | Connects | A recording reaches the phone | Pin battery |
 | --- | --- | --- | --- |
 | **Smart** (default) | every 10 min, and when the app is opened, the phone is plugged in or unlocked (at most every 5 min), or the pin comes back in range | at the next check-in: usually minutes, at most 10 | sleeps between check-ins |
-| **Every N minutes** (2–240, default 30) | every N min, and when the app is opened | within N minutes | sleeps longest |
+| **Every N seconds** (30–14400, default 1800) | every N s, and when the app is opened | within N seconds | sleeps longest |
 | **Instant** | always | seconds after it stops | runs down fast, as before |
 
 A check-in connects, fetches what is new, deletes it on the pin, and
@@ -345,7 +345,7 @@ disconnects a few seconds later. If the pin is recording at that moment,
 the link stays until the recording stops, so its end is seen at once: the
 pin is awake while it records anyway. **Fetch now**, in the app and in its
 notification, checks in at once in any mode. With voice mode on, smart
-and every N minutes check in at least every 2 minutes. **Unpair** connects
+and every N seconds check in at least every 2 minutes. **Unpair** connects
 to the pin first, so it needs the pin close by, not already connected.
 
 A check-in that misses the pin (out of range, phone in another room) waits
