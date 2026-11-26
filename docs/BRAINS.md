@@ -295,7 +295,7 @@ what the model says:
 | `list_brains()` | the brains with any grant, their names and grants | absent |
 | `read_memory(brain, path)` | its own, and the brains granted `read` | its own only |
 | `request_approval(action, details, risk, step)`, `ask_user(question, options)`, `check_approval(id)` | ask you in WhatsApp and wait for the answer, see [Skills, risk and approvals](#skills-risk-and-approvals) | the same, in the core run's chat; not in an observe-only run |
-| `node_update(node)` | with nodes on: updates a node's fridolin to the core's version, a write action ([NODES.md](NODES.md#updates)) | absent |
+| `node_update(node, force?)` | with nodes on: updates a node's fridolin to the core's version, a write action; `force` updates a busy node, only when the owner asked ([NODES.md](NODES.md#updates)) | absent |
 | `node_exec(argv, node, dir, timeout_seconds, approval_id, wait_seconds)`, `node_exec_rules(node)` | while a node whose `exec` you approved is online: runs one command its allowlist allows, a write action; a command whose rule has `approve` asks you in a poll each time ([NODES.md](NODES.md#the-core-brain-runs-commands)) | absent |
 | `contact_person(number, name, goal, brief, message, days, call, calendar)`, `errands(id)`, `errand_answer(id, text)`, `errand_stop(id)` | with brain.json's `errands` set, in a run that may ask you: has Fridolin write to someone for you and carry the conversation, see [Errands](#errands) | absent |
 | `plaud_app_update()`, `plaud_app_status()` | while the Plaud Sync app uploads through the site (`plaud.phone_upload`): builds the app as the Plaud card does, which the paired phones then install, a write action; and says what each phone runs and how its last update went ([PLAUD.md](PLAUD.md#updates)) | absent |

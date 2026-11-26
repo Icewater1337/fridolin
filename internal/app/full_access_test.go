@@ -28,7 +28,8 @@ func TestFullAccessTakesTheBrainsTrustAndTheNodesWord(t *testing.T) {
 		t.Fatal(err)
 	}
 	caps := func(full bool) nodeproto.Capabilities {
-		return nodeproto.Capabilities{Exec: &nodeproto.ExecCap{Allow: []nodeproto.ExecRule{{Name: "hostname", Args: []string{}}}},
+		return nodeproto.Capabilities{Exec: &nodeproto.ExecCap{Allow: []nodeproto.ExecRule{{Name: "hostname", Args: []string{}},
+			{Name: "find", Args: []string{root, "-name", "stale", "-delete"}, Exact: true}}},
 			FS: &nodeproto.FSCap{Roots: []nodeproto.FSRoot{{Path: root, Write: true}}}, Terminal: &nodeproto.WorkstationCap{Roots: []string{root}}, FullAccess: full}
 	}
 	mini := h.joinExecNode("mac-mini", addr, caps(true))
@@ -73,6 +74,20 @@ func TestFullAccessTakesTheBrainsTrustAndTheNodesWord(t *testing.T) {
 	reply = h.coreSays("trusted", step("node_exec", shell("mac-mini", "echo hi", "")), step("node_exec", shell("laptop", "echo hi", "")))
 	if !strings.Contains(reply, `"stdout": "hi\n"`) || !strings.Contains(reply, "laptop does not run this") {
 		t.Fatalf("trusted:\n%s", reply)
+	}
+
+	// A command an exec rule allows as it is runs without a poll, though
+	// the guard would ask for it under full access alone (find -delete).
+	stale := filepath.Join(root, "stale")
+	if err := os.WriteFile(stale, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reply = h.coreSays("allowed cleanup", step("node_exec", execArgs([]string{"find", root, "-name", "stale", "-delete"}, `"node":"mac-mini"`)))
+	if !strings.Contains(reply, `"exit_code": 0`) || strings.Contains(reply, "asks you first") {
+		t.Fatalf("an allowed find -delete under full access:\n%s", reply)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("the allowed cleanup did not run: %v", err)
 	}
 
 	// A risky command waits for the owner: no runs nothing, yes runs it.
@@ -131,8 +146,8 @@ func TestFullAccessTakesTheBrainsTrustAndTheNodesWord(t *testing.T) {
 			full++
 		}
 	}
-	if full != 4 { // echo hi, the denied rm, the approved rm, the unguarded one
-		t.Errorf("%d full-access lines, want 4: %v", full, h.auditOf("node_exec"))
+	if full != 5 { // echo hi, the allowed find, the denied rm, the approved rm, the unguarded one
+		t.Errorf("%d full-access lines, want 5: %v", full, h.auditOf("node_exec"))
 	}
 }
 

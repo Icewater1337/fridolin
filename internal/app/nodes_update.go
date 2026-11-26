@@ -52,7 +52,7 @@ func (b *App) nodeBusy(id string) string {
 		defer cancel()
 		if threads, err := b.store.FrideThreads(ctx, store.FrideSent); err == nil {
 			for _, t := range threads {
-				if t.Node == id && !slices.Contains(frideIdle, strings.ToLower(t.FrideStatus)) {
+				if t.Node == id && !slices.Contains(frideIdle, strings.ToLower(t.FrideStatus)) && !b.fride.reapGone(ctx, t) {
 					return fmt.Sprintf("FrIDE #%d runs there (%s)", t.ID, orDefault(t.FrideStatus, "started"))
 				}
 			}
@@ -96,9 +96,10 @@ func (b *App) registerNodeTools(r *tools.Set[mcpCaller]) {
 		Available: func(c mcpCaller) bool { return c.Core() && b.nodesEnabled },
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Update one of the owner's machines (a node) to this core's fridolin version: the core sends it the signed build of its version, the node swaps it in and restarts, and goes back to its old version by itself if the new one does not connect. Only when the person asks to update a node, or after telling them a node runs an older version and they agree. Refused while the node runs a FrIDE task or a backup, or when the node's update is not approved.",
+				Description: "Update one of the owner's machines (a node) to this core's fridolin version: the core sends it the signed build of its version, the node swaps it in and restarts, and goes back to its old version by itself if the new one does not connect. Only when the person asks to update a node, or after telling them a node runs an older version and they agree. Refused while the node runs a FrIDE task or a backup, or when the node's update is not approved. force=true updates it anyway: only when the owner asked for that.",
 				InputSchema: tools.Schema(map[string]any{
-					"node": tools.Str("The node: its name or id, as !fleet lists it."),
+					"node":  tools.Str("The node: its name or id, as !fleet lists it."),
+					"force": map[string]any{"type": "boolean", "description": "Update although a FrIDE task or backup runs there. Only when the owner asked for it."},
 				}, "node"),
 			}
 		},
@@ -108,7 +109,8 @@ func (b *App) registerNodeTools(r *tools.Set[mcpCaller]) {
 
 func (b *App) callNodeUpdate(ctx context.Context, _ mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
 	var args struct {
-		Node string `json:"node"`
+		Node  string `json:"node"`
+		Force bool   `json:"force"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil || strings.TrimSpace(args.Node) == "" {
 		return mcp.ErrorResult("node is missing: the node's name or id"), nil
@@ -117,7 +119,7 @@ func (b *App) callNodeUpdate(ctx context.Context, _ mcpCaller, raw json.RawMessa
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
-	to, err := b.nodes.StartUpdate(n.ID, nodes.UpdateOptions{})
+	to, err := b.nodes.StartUpdate(n.ID, nodes.UpdateOptions{Force: args.Force})
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}

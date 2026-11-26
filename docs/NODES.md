@@ -1465,7 +1465,7 @@ so it picks the instance by what the work is for:
 | `fride_task(…, instance?)` | with `instance`, starts it unless it runs (`medium`) and hands it the work; without, a node's own FrIDE as above |
 | `fride_instances()` | each instance: description, repositories, identities, where it runs, its state, memory and open threads; and the nodes that run instances, with their free memory |
 | `fride_spawn(instance, size?, reason)` | starts one ahead, or remakes a running one with no open thread at another size |
-| `fride_stop(instance)` | stops one with no open thread |
+| `fride_stop(instance, force?)` | stops one with no open thread; `force` stops it anyway, only when the owner asked. Threads whose task FrIDE no longer has are closed first |
 
 `fride_repo_add` takes `instance` too. Work on an instance stays on it:
 its thread is (node, instance, FrIDE's thread there), every call for it
@@ -2788,8 +2788,11 @@ keychain); and anything naming a hidden file or folder of secrets
 (`~/.app-secrets`), `~/.personal-calendar`, `~/.ssh`, `~/.gitconfig`, `~/.git-credentials`,
 `~/.*-token`, `~/.*-api-key`, `~/.config/gh`, `~/.fridolin` (with
 `bridge.db`) or the keychains. In a terminal it checks each command line
-as its Enter completes it, and types nothing until the yes. It is a
-tripwire against a brain talked into harm by what it reads, not a
+as its Enter completes it, and types nothing until the yes. A
+`node_exec` command that an exec rule without `approve` allows as it is
+(say an `exact` rule for `find ~/Library/Caches/go-build … -delete`) does
+not ask: you approved that rule, and full access asks no more than it. It
+is a tripwire against a brain talked into harm by what it reads, not a
 sandbox: a command that hides what it does (a variable, base64, a script)
 passes it.
 

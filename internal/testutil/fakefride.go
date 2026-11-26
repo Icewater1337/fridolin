@@ -421,7 +421,7 @@ func (f *FakeFride) answer(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(rest, "tasks/"), "/")
 		t := f.tasks[parts[0]]
 		if t == nil || !t.Exists {
-			fail(http.StatusNotFound, "no such task")
+			fail(http.StatusNotFound, fmt.Sprintf("no task %q", parts[0])) // FrIDE's wording
 			return
 		}
 		switch {
