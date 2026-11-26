@@ -1951,6 +1951,7 @@ more with the owner later (see FrIDE's SETUP.md).
     "fride": { "build": "go build ./...", "test": "go vet ./... && go test -short ./..." }
   },
   "review": { "approvals": { "normal": 0, "risky": 0 } },
+  "panels": { "confirmRisky": true },
   "companion": {
     "enabled": true,
     "claudePlugins": ["~/fride-companion/plugins/ponytail"],
@@ -1967,6 +1968,14 @@ change. `review.approvals` at zero turns off FrIDE's wait for a person's
 approval in its Review tab before a task is Done: nobody approves there,
 and without it the core's close of a finished task
 (`POST /api/companion/tasks/<id>/close`) is refused.
+
+`panels.confirmRisky` makes FrIDE's web UI ask before a panel the
+orchestrator built deletes, moves or stops work, drives a terminal or
+runs a shell command (`fride.run`, which shows the command first).
+The orchestrator reads text from chats and pull requests, so a panel is
+code that such text may have shaped; nothing unattended clicks a panel,
+so the question costs the companion nothing (FrIDE's docs/PANELS.md,
+"Safety").
 
 `claudeAllow` lets every task agent finish its own pull request once CI
 is green, as the bug fixer asks: merge it, read its state and checks,

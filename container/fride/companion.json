@@ -36,6 +36,7 @@
     "fride": { "build": "go build ./...", "test": "go vet ./... && go test -short ./..." }
   },
   "review": { "approvals": { "normal": 0, "risky": 0 } },
+  "panels": { "confirmRisky": true },
   "companion": {
     "enabled": true,
     "claudePlugins": ["/opt/fride/plugins/ponytail"],
