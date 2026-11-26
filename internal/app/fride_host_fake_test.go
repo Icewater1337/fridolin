@@ -289,7 +289,7 @@ func (f *fakeHost) handle(req nodeproto.Request) (any, *nodeproto.Error) {
 		}
 	}
 	if (req.Method == nodeproto.MethodFrideTaskInfo || req.Method == nodeproto.MethodFrideClose) && f.isGone() {
-		return nil, nodeproto.Errorf(nodeproto.CodeNotFound, "no task")
+		return nil, nodeproto.Errorf(nodeproto.CodeNotFound, "no task %q", "gone")
 	}
 	bundle := fakeBundle()
 	switch req.Method {

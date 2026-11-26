@@ -1,11 +1,13 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
 // A FrIDE thread whose task is gone from FrIDE closes here at fride_close,
@@ -43,5 +45,25 @@ func TestFrideStaleThreads(t *testing.T) {
 	reply = h.coreSays("stop", step("fride_stop", `{"instance":"work"}`), step("fride_stop", `{"instance":"work","force":true}`))
 	if !strings.Contains(reply, "[core:fride_stop failed] the FrIDE instance work has open threads (#3)") || !strings.Contains(reply, "Stopped the FrIDE instance work") {
 		t.Fatalf("fride_stop with and without force:\n%s", reply)
+	}
+}
+
+// Only FrIDE's own answer for a task it does not have counts as gone: a
+// node's not-found for an instance, or any other error, keeps the thread.
+func TestTaskGone(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{
+		{nodeproto.Errorf(nodeproto.CodeNotFound, "no task %q", "gmail-access"), true},
+		{nodeproto.Errorf(nodeproto.CodeNotFound, "no FrIDE instance fridolin on this node"), false},
+		{nodeproto.Errorf(nodeproto.CodeUnavailable, "no task %q", "x"), false},
+		{errors.New(`no task "x"`), false},
+		{nil, false},
+	} {
+		if got := taskGone(c.err); got != c.want {
+			t.Errorf("taskGone(%v) = %v, want %v", c.err, got, c.want)
+		}
 	}
 }

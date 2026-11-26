@@ -1233,10 +1233,13 @@ func droppable(status string) bool {
 	return false
 }
 
-// taskGone reports whether err is FrIDE saying the task is not there.
+// taskGone reports whether err is FrIDE saying the task is not there:
+// its 404 for a task, `no task "…"`. A node's own not-found, such as an
+// instance that is not on it, says nothing about the task, and keeps the
+// thread.
 func taskGone(err error) bool {
 	var pe *nodeproto.Error
-	return errors.As(err, &pe) && pe.Code == nodeproto.CodeNotFound
+	return errors.As(err, &pe) && pe.Code == nodeproto.CodeNotFound && strings.HasPrefix(pe.Message, "no task ")
 }
 
 // dropGone closes thread id here because its task no longer exists in
