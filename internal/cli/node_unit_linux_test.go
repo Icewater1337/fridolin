@@ -31,7 +31,7 @@ func TestGoldenNodeUnit(t *testing.T) {
 	if err := nodeagent.ControlService(svc, "install"); err != nil {
 		t.Fatal(err)
 	}
-	unit, err := os.ReadFile(nodeagent.LinuxUnitPath(home))
+	unit, err := os.ReadFile(nodeagent.LinuxUnitPath(home, nodeagent.ServiceName))
 	if err != nil {
 		t.Fatal(err)
 	}

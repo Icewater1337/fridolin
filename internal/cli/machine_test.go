@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -377,6 +378,11 @@ func TestNodeChecks(t *testing.T) {
 // enabled into target ("" for not enabled) and whose user lingers when
 // linger is "yes".
 func linuxNodeEnv(env *doctor.Env, target, linger string) *doctor.Env {
+	return linuxNamedNodeEnv(env, nodeagent.ServiceName, target, linger)
+}
+
+// linuxNamedNodeEnv is linuxNodeEnv for the unit of the service name.
+func linuxNamedNodeEnv(env *doctor.Env, name, target, linger string) *doctor.Env {
 	env.GOOS, env.Home = "linux", "/home/you"
 	env.Getenv = func(name string) string {
 		if name == "USER" {
@@ -386,7 +392,7 @@ func linuxNodeEnv(env *doctor.Env, target, linger string) *doctor.Env {
 	}
 	stat, run := env.Stat, env.Run
 	env.Stat = func(p string) (fs.FileInfo, error) {
-		if p == nodeagent.LinuxUnitPath(env.Home) || (target != "" && p == nodeagent.LinuxWantsLink(env.Home, target)) {
+		if p == nodeagent.LinuxUnitPath(env.Home, name) || (target != "" && p == nodeagent.LinuxWantsLink(env.Home, target, name)) {
 			return nil, nil
 		}
 		return stat(p)
@@ -541,5 +547,61 @@ func TestCoreLeftoversResult(t *testing.T) {
 		if r.Status == doctor.Warn && !strings.Contains(r.Fix, "Forgetting a former core host") {
 			t.Errorf("%s: the fix %q", c.name, r.Fix)
 		}
+	}
+}
+
+// TestNodeReportRedacts: doctor --redact on the node path masks the home
+// folder and the linger user as the core's report does (#808).
+func TestNodeReportRedacts(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := nodeagent.NewKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "box"}); err != nil {
+		t.Fatal(err)
+	}
+	running := func() (string, error) { return "running", nil }
+	for _, asJSON := range []bool{false, true} {
+		env := linuxNodeEnv(doctorEnvFor("fridolin-core.example.ts.net:8766", nil), "default.target", "no")
+		env.Home = filepath.Dir(dir)
+		var out bytes.Buffer
+		writeNodeReport(&out, env, dir, nodeService{status: running, redact: true}, asJSON)
+		if s := out.String(); strings.Contains(s, env.Home) || !strings.Contains(s, "~") || strings.Contains(s, "enable-linger you") || !strings.Contains(s, "enable-linger $USER") {
+			t.Errorf("json %v, not redacted:\n%s", asJSON, s)
+		}
+	}
+}
+
+// TestNodeServiceNamedInNodeJSON: doctor --node checks the service
+// node.json names for a second node, as fridolin node status does (#810).
+func TestNodeServiceNamedInNodeJSON(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := nodeagent.NewKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "box", Service: "fride-sandbox"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := systemNodeService(dir).name, nodeagent.ServiceConfigNamed(runtime.GOOS, "fridolin", dir, "fride-sandbox").Name; got != want {
+		t.Fatalf("service name %q, want %q", got, want)
+	}
+	// node-boot is Linux's check, and there the name is the unit's.
+	svc := nodeService{status: func() (string, error) { return "running", nil }, name: nodeagent.NodeServiceConfig("linux", "fridolin", dir).Name}
+	boot := func(unit string) doctor.CheckReport {
+		t.Helper()
+		env := linuxNamedNodeEnv(doctorEnvFor("fridolin-core.example.ts.net:8766", nil), unit, "default.target", "yes")
+		for _, c := range doctor.Run(context.Background(), env, nodeChecks(dir, svc)).Checks {
+			if c.ID == "node-boot" {
+				return c
+			}
+		}
+		t.Fatal("no node-boot check")
+		return doctor.CheckReport{}
+	}
+	if c := boot(svc.name); c.Status != doctor.OK {
+		t.Errorf("the second node's unit enabled: %+v", c)
+	}
+	if c := boot(nodeagent.ServiceName); c.Status != doctor.Fail || !strings.Contains(c.Detail, svc.name) {
+		t.Errorf("only the machine's node enabled: %+v", c)
 	}
 }

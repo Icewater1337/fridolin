@@ -659,7 +659,7 @@ func doctorCmd(args []string, stdout io.Writer) int {
 		return 2
 	}
 	if *node || *stateDir != "" || isNodeMachine(*cfgPath) {
-		return nodeDoctor(*stateDir, o.JSON, stdout)
+		return nodeDoctor(*stateDir, o.JSON, o.Redact, stdout)
 	}
 	if err := app.WriteDoctor(stdout, *cfgPath, o); err != nil {
 		if !errors.Is(err, doctor.ErrFailed) {
