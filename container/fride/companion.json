@@ -39,6 +39,6 @@
   "companion": {
     "enabled": true,
     "claudePlugins": ["/opt/fride/plugins/ponytail"],
-    "claudeAllow": ["Bash(gh pr merge:*)"]
+    "claudeAllow": ["Bash(gh pr merge:*)", "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr ready:*)", "Bash(gh pr comment:*)", "Bash(gh run rerun:*)"]
   }
 }
