@@ -151,7 +151,6 @@ func (a *BrainAPI) brainMailSend(ctx context.Context, r *http.Request, token fun
 		return nil, badCall("the message is not valid JSON: %v", google.DecodeError(err))
 	}
 	w := a.mailWrite(r, "send", d.ReplyTo)
-	w.w.Recipients = d.Recipients()
 	if err := w.allow(); err != nil {
 		return nil, err
 	}
@@ -159,13 +158,20 @@ func (a *BrainAPI) brainMailSend(ctx context.Context, r *http.Request, token fun
 	if err != nil {
 		return nil, w.done(err)
 	}
+	// Prepared before approve: a draft that cannot be sent does not spend
+	// the owner's yes.
+	p, err := a.Google().PrepareMail(ctx, tok, d)
+	if err != nil {
+		return nil, w.done(err)
+	}
+	w.w.Recipients = p.Recipients
 	ask := "sending an email cannot be taken back and reaches other people: that needs the owner's yes first. " +
 		"Call request_approval with the recipients, the subject and what the message says, and once it answers approved, " +
 		"send it again with its approval_id (fridolin gmail send … --approval-id ID)."
 	if err := w.approve(ctx, d.ApprovalID, ask); err != nil {
 		return nil, err
 	}
-	sent, err := a.Google().SendMail(ctx, tok, d)
+	sent, err := a.Google().SendMail(ctx, tok, p)
 	if sent != nil {
 		w.w.Message = sent.ID
 	}

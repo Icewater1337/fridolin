@@ -161,6 +161,57 @@ func TestGmailThroughTheBridge(t *testing.T) {
 	}
 }
 
+// TestGmailSendChecksTheDraftBeforeTheApproval: a draft that cannot be
+// sent is refused without spending the owner's approval, and the audit line
+// counts a reply's recipients although --to was not given (#807).
+func TestGmailSendChecksTheDraftBeforeTheApproval(t *testing.T) {
+	t.Parallel()
+	f := newFakeGmail(t)
+	tb, url, token := gmailBrain(t, f, (*google.Auth).GmailTokenPath, []string{google.GmailScope})
+	approved(t, tb, "a", "a1")
+	send := func(args ...string) string {
+		t.Helper()
+		_, doc := brainTool(t, toolcli.Gmail, url, token, append([]string{"send", "--body", "hi", "--approval-id", "a1"}, args...)...)
+		msg, _ := doc["error"].(string)
+		return msg
+	}
+	if msg := send("--to", "not an address"); !strings.Contains(msg, "not an email address") {
+		t.Fatalf("a bad address: %q", msg)
+	}
+	if msg := send("--reply-to", "m1"); msg != "" {
+		t.Fatalf("the reply after a refused draft: %q", msg)
+	}
+	lines, err := audit.Read(tb.audit.Dir, audit.Filter{Kind: audit.MailWrite})
+	if err != nil || len(lines) == 0 {
+		t.Fatalf("audit: %v %v", lines, err)
+	}
+	sent := 0
+	for _, l := range lines {
+		if l.ID == "sent1" {
+			sent++
+			if l.Detail != "send to 1" || !strings.HasPrefix(l.Outcome, "ok") {
+				t.Errorf("audit line %+v", l)
+			}
+		}
+	}
+	if sent != 1 {
+		t.Errorf("%d audit lines of the send: %+v", sent, lines)
+	}
+}
+
+// TestGmailSendKeepsAQuotedNameWhole: --to with a quoted display name that
+// has a comma is one address, not two (#809).
+func TestGmailSendKeepsAQuotedNameWhole(t *testing.T) {
+	t.Parallel()
+	f := newFakeGmail(t)
+	tb, url, token := gmailBrain(t, f, (*google.Auth).GmailTokenPath, []string{google.GmailScope})
+	approved(t, tb, "a", "a1")
+	_, doc := brainTool(t, toolcli.Gmail, url, token, "send", "--to", `"Doe, John" <john@example.com>, b@example.com`, "--body", "hi", "--approval-id", "a1")
+	if msg, _ := doc["error"].(string); msg != "" {
+		t.Fatalf("send: %q", msg)
+	}
+}
+
 // TestGmailNeedsItsOwnSignIn: a brain whose calendar is connected but not
 // its Gmail gets no mail through the calendar's token: every Gmail command
 // says to connect Gmail, and nothing reaches Gmail.
