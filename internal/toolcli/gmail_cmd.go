@@ -90,7 +90,9 @@ func Gmail(args []string, t IO) int {
 		flags.StringVar(&d.ReplyTo, "reply-to", "", "the ID of the message this answers, to stay in its thread")
 		flags.StringVar(&d.ApprovalID, "approval-id", "", "the approval_id request_approval answered approved with (required)")
 		run = func(c *gmailRun) (any, error) {
-			d.To, d.Cc, d.Bcc = splitList(*to), splitList(*cc), splitList(*bcc)
+			// Unsplit: the bridge parses each as an RFC 5322 list, so a
+			// quoted name with a comma ("Doe, John" <…>) stays one address.
+			d.To, d.Cc, d.Bcc = oneEntry(*to), oneEntry(*cc), oneEntry(*bcc)
 			if *file != "" {
 				b, err := os.ReadFile(*file)
 				if err != nil {
@@ -161,6 +163,13 @@ func (c *gmailRun) get(path string, q url.Values) (any, error) {
 
 func (c *gmailRun) send(method, path string, body any) (any, error) {
 	return c.call(method, path, body)
+}
+
+func oneEntry(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return []string{s}
 }
 
 func splitList(s string) []string {

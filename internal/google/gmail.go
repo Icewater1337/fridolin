@@ -93,17 +93,25 @@ type gmailMessage struct {
 	Payload  gmailPart `json:"payload"`
 }
 
-func (m gmailMessage) header(name string) string {
+// rawHeader is a header as it came, RFC 2047 words still encoded: the form
+// mail.ParseAddressList needs, since a decoded name loses its quoting.
+func (m gmailMessage) rawHeader(name string) string {
 	for _, h := range m.Payload.Headers {
 		if strings.EqualFold(h.Name, name) {
-			v, err := new(mime.WordDecoder).DecodeHeader(h.Value)
-			if err != nil {
-				return h.Value
-			}
-			return v
+			return h.Value
 		}
 	}
 	return ""
+}
+
+// header is a header decoded for reading.
+func (m gmailMessage) header(name string) string {
+	raw := m.rawHeader(name)
+	v, err := new(mime.WordDecoder).DecodeHeader(raw)
+	if err != nil {
+		return raw
+	}
+	return v
 }
 
 // maxMailBody is the most of a body get prints.
@@ -213,13 +221,10 @@ type MailDraft struct {
 	ApprovalID string   `json:"approval_id"`
 }
 
-// Recipients counts everyone a draft reaches, for the audit line.
-func (d MailDraft) Recipients() int { return len(d.To) + len(d.Cc) + len(d.Bcc) }
-
 // threading is what a reply takes from the message it answers.
 type threading struct{ messageID, references string }
 
-func addresses(list []string) (string, error) {
+func addresses(list []string) ([]string, error) {
 	var out []string
 	for _, s := range list {
 		if strings.TrimSpace(s) == "" {
@@ -227,22 +232,22 @@ func addresses(list []string) (string, error) {
 		}
 		parsed, err := mail.ParseAddressList(s)
 		if err != nil {
-			return "", fmt.Errorf("%q is not an email address: %v", s, err)
+			return nil, fmt.Errorf("%q is not an email address: %v", s, err)
 		}
 		for _, a := range parsed {
 			// String() puts a non-ASCII display name in RFC 2047 words.
 			out = append(out, a.String())
 		}
 	}
-	return strings.Join(out, ", "), nil
+	return out, nil
 }
 
 // buildMIME renders d as an RFC 5322 message, UTF-8 and quoted-printable,
 // with a non-ASCII subject or name encoded as RFC 2047 words. th, when not
-// zero, adds the reply headers.
-func buildMIME(d MailDraft, th threading) ([]byte, error) {
+// zero, adds the reply headers. n counts the recipients.
+func buildMIME(d MailDraft, th threading) (raw []byte, n int, err error) {
 	if strings.ContainsAny(d.Subject, "\r\n") {
-		return nil, errors.New("the subject must be one line")
+		return nil, 0, errors.New("the subject must be one line")
 	}
 	var b bytes.Buffer
 	for _, h := range []struct {
@@ -251,11 +256,12 @@ func buildMIME(d MailDraft, th threading) ([]byte, error) {
 	}{{"To", d.To}, {"Cc", d.Cc}, {"Bcc", d.Bcc}} {
 		v, err := addresses(h.list)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		if v != "" {
-			fmt.Fprintf(&b, "%s: %s\r\n", h.name, v)
+		if len(v) > 0 {
+			fmt.Fprintf(&b, "%s: %s\r\n", h.name, strings.Join(v, ", "))
 		}
+		n += len(v)
 	}
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", d.Subject))
 	if th.messageID != "" {
@@ -266,9 +272,10 @@ func buildMIME(d MailDraft, th threading) ([]byte, error) {
 	w := quotedprintable.NewWriter(&b)
 	body := strings.ReplaceAll(strings.ReplaceAll(d.Body, "\r\n", "\n"), "\n", "\r\n")
 	if _, err := w.Write([]byte(body)); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return b.Bytes(), w.Close()
+	err = w.Close()
+	return b.Bytes(), n, err
 }
 
 // MailSent is the answer of send.
@@ -277,10 +284,19 @@ type MailSent struct {
 	ThreadID string `json:"thread_id"`
 }
 
-// SendMail sends d. For a reply, the thread, the subject ("Re: …" unless
-// d.Subject is set) and the recipient (the original's Reply-To or From, unless
-// d.To is set) come from the message d.ReplyTo names.
-func (g *Auth) SendMail(ctx context.Context, tok *Token, d MailDraft) (*MailSent, error) {
+// PreparedMail is a draft checked and rendered, ready to hand to Gmail.
+type PreparedMail struct {
+	Recipients int // everyone it reaches, for the audit line
+	raw        []byte
+	thread     string
+}
+
+// PrepareMail checks and renders d without sending it, so that a draft that
+// cannot be sent is refused before the owner's approval is spent. For a
+// reply, the thread, the subject ("Re: …" unless d.Subject is set) and the
+// recipient (the original's Reply-To or From, unless d.To is set) come from
+// the message d.ReplyTo names.
+func (g *Auth) PrepareMail(ctx context.Context, tok *Token, d MailDraft) (*PreparedMail, error) {
 	var th threading
 	var thread string
 	if d.ReplyTo != "" {
@@ -289,7 +305,7 @@ func (g *Auth) SendMail(ctx context.Context, tok *Token, d MailDraft) (*MailSent
 			return nil, err
 		}
 		thread = orig.ThreadID
-		th = threading{messageID: orig.header("Message-ID"), references: orig.header("References")}
+		th = threading{messageID: orig.rawHeader("Message-ID"), references: orig.rawHeader("References")}
 		if d.Subject == "" {
 			d.Subject = orig.header("Subject")
 			if !strings.HasPrefix(strings.ToLower(d.Subject), "re:") {
@@ -297,23 +313,30 @@ func (g *Auth) SendMail(ctx context.Context, tok *Token, d MailDraft) (*MailSent
 			}
 		}
 		if len(d.To) == 0 {
-			to := orig.header("Reply-To")
+			// Raw: ParseAddressList decodes RFC 2047 names itself, and keeps
+			// one like "Müller, Hans" in one piece.
+			to := orig.rawHeader("Reply-To")
 			if to == "" {
-				to = orig.header("From")
+				to = orig.rawHeader("From")
 			}
 			d.To = []string{to}
 		}
 	}
-	if d.Recipients() == 0 {
-		return nil, errors.New("give at least one recipient (--to)")
-	}
-	raw, err := buildMIME(d, th)
+	raw, n, err := buildMIME(d, th)
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]string{"raw": base64.RawURLEncoding.EncodeToString(raw)}
-	if thread != "" {
-		body["threadId"] = thread
+	if n == 0 {
+		return nil, errors.New("give at least one recipient (--to)")
+	}
+	return &PreparedMail{Recipients: n, raw: raw, thread: thread}, nil
+}
+
+// SendMail hands a prepared message to Gmail.
+func (g *Auth) SendMail(ctx context.Context, tok *Token, p *PreparedMail) (*MailSent, error) {
+	body := map[string]string{"raw": base64.RawURLEncoding.EncodeToString(p.raw)}
+	if p.thread != "" {
+		body["threadId"] = p.thread
 	}
 	var sent struct{ ID, ThreadID string }
 	if err := g.gmail(ctx, tok, "POST", "/messages/send", nil, body, &sent); err != nil {

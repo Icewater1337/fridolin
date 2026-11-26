@@ -16,7 +16,7 @@ import (
 
 func TestBuildMIMENonASCII(t *testing.T) {
 	t.Parallel()
-	raw, err := buildMIME(MailDraft{To: []string{"Jörg Müller <joerg@example.com>"}, Cc: []string{"a@example.com, b@example.com"},
+	raw, _, err := buildMIME(MailDraft{To: []string{"Jörg Müller <joerg@example.com>"}, Cc: []string{"a@example.com, b@example.com"},
 		Subject: "Grüße – Café ☕", Body: "Schöne Grüße\nZeile zwei"}, threading{})
 	if err != nil {
 		t.Fatal(err)
@@ -51,17 +51,17 @@ func TestBuildMIMENonASCII(t *testing.T) {
 
 func TestBuildMIMERejectsHeaderInjection(t *testing.T) {
 	t.Parallel()
-	if _, err := buildMIME(MailDraft{To: []string{"a@example.com"}, Subject: "hi\r\nBcc: evil@example.com"}, threading{}); err == nil {
+	if _, _, err := buildMIME(MailDraft{To: []string{"a@example.com"}, Subject: "hi\r\nBcc: evil@example.com"}, threading{}); err == nil {
 		t.Fatal("a subject with a line break was accepted")
 	}
-	if _, err := buildMIME(MailDraft{To: []string{"not an address"}}, threading{}); err == nil {
+	if _, _, err := buildMIME(MailDraft{To: []string{"not an address"}}, threading{}); err == nil {
 		t.Fatal("a bad address was accepted")
 	}
 }
 
 func TestBuildMIMEReplyThreading(t *testing.T) {
 	t.Parallel()
-	raw, err := buildMIME(MailDraft{To: []string{"a@example.com"}, Subject: "Re: x", Body: "ok"},
+	raw, _, err := buildMIME(MailDraft{To: []string{"a@example.com"}, Subject: "Re: x", Body: "ok"},
 		threading{messageID: "<m2@example.com>", references: "<m0@example.com> <m1@example.com>"})
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +85,9 @@ func gmailFake(t *testing.T, sent *map[string]string) *httptest.Server {
 				{"name":"From","value":"=?UTF-8?Q?J=C3=B6rg?= <joerg@example.com>"},
 				{"name":"Subject","value":"Termin"},{"name":"Message-ID","value":"<o@example.com>"},
 				{"name":"References","value":"<p@example.com>"}]}}`)
+		case r.URL.Path == "/gmail/v1/users/me/messages/comma" && r.Method == "GET":
+			fmt.Fprint(w, `{"id":"comma","threadId":"T2","payload":{"headers":[
+				{"name":"From","value":"=?UTF-8?Q?M=C3=BCller=2C_Hans?= <hans@example.com>"},{"name":"Subject","value":"x"}]}}`)
 		case r.URL.Path == "/gmail/v1/users/me/messages/send" && r.Method == "POST":
 			var b map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&b)
@@ -105,7 +108,11 @@ func TestSendMailReplyStaysInThread(t *testing.T) {
 	srv := gmailFake(t, &sent)
 	g := New(googleTestOptions(Options{CredsDir: t.TempDir, ClientPath: t.TempDir() + "/c.json"}, srv))
 	tok := &Token{Token: "x", Scopes: []string{GmailScope}}
-	if _, err := g.SendMail(t.Context(), tok, MailDraft{Body: "ja", ReplyTo: "orig"}); err != nil {
+	p, err := g.PrepareMail(t.Context(), tok, MailDraft{Body: "ja", ReplyTo: "orig"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.SendMail(t.Context(), tok, p); err != nil {
 		t.Fatal(err)
 	}
 	if sent["threadId"] != "T1" {
@@ -118,6 +125,28 @@ func TestSendMailReplyStaysInThread(t *testing.T) {
 	}
 	if to, _ := m.Header.AddressList("To"); len(to) != 1 || to[0].Address != "joerg@example.com" || to[0].Name != "Jörg" {
 		t.Fatalf("To %v", to)
+	}
+}
+
+// TestReplyToEncodedNameWithComma: a sender whose encoded display name has
+// a comma ("Müller, Hans", Outlook's form) is one recipient, name intact
+// (#806).
+func TestReplyToEncodedNameWithComma(t *testing.T) {
+	t.Parallel()
+	sent := map[string]string{}
+	srv := gmailFake(t, &sent)
+	g := New(googleTestOptions(Options{CredsDir: t.TempDir, ClientPath: t.TempDir() + "/c.json"}, srv))
+	tok := &Token{Token: "x", Scopes: []string{GmailScope}}
+	p, err := g.PrepareMail(t.Context(), tok, MailDraft{Body: "ja", ReplyTo: "comma"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Recipients != 1 {
+		t.Fatalf("recipients %d", p.Recipients)
+	}
+	m, _ := mail.ReadMessage(strings.NewReader(string(p.raw)))
+	if to, err := m.Header.AddressList("To"); err != nil || len(to) != 1 || to[0].Address != "hans@example.com" || to[0].Name != "Müller, Hans" {
+		t.Fatalf("To %v %v", to, err)
 	}
 }
 

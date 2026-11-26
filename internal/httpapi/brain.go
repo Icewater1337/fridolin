@@ -30,7 +30,8 @@ type BrainCalendarService interface {
 	Note(string, error)
 	ListMail(context.Context, *google.Token, string, int) (*google.MailListing, error)
 	GetMail(context.Context, *google.Token, string) (*google.MailMessage, error)
-	SendMail(context.Context, *google.Token, google.MailDraft) (*google.MailSent, error)
+	PrepareMail(context.Context, *google.Token, google.MailDraft) (*google.PreparedMail, error)
+	SendMail(context.Context, *google.Token, *google.PreparedMail) (*google.MailSent, error)
 	ModifyMailLabels(context.Context, *google.Token, string, []string, []string) error
 	TrashMail(context.Context, *google.Token, string) error
 	DeleteMail(context.Context, *google.Token, string) error

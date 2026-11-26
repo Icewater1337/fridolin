@@ -91,7 +91,9 @@ the HTML part with its tags removed, at most 100 KiB, and lists attachments
 - **`send` and permanent `delete` cannot be undone**, so they always need the
   owner's yes: the brain calls `request_approval` and passes the
   `approval_id` it answers approved with. An approval is used up by one
-  action. Nothing reaches Gmail without it.
+  action. Nothing reaches Gmail without it. A draft that cannot be sent (no
+  recipient, an address that does not parse) is refused before the approval
+  is used.
 - Label, archive and trash are writes: a run whose risk level is read, or any
   run in a lockdown, may not do them (trash is the way back for 30 days).
 - Each write is an audit line (`mail_write`) with the action, the message id,
