@@ -136,3 +136,34 @@ func TestDocumentCarriesTheCalendar(t *testing.T) {
 		t.Errorf("no free times: %+v %v", d.Calendar, err)
 	}
 }
+
+func TestWindowAllows(t *testing.T) {
+	t.Parallel()
+	w := &Window{Days: []string{"Monday", "tue"}, From: "13:00", To: "18:00"}
+	if err := w.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	at := func(s string) Span {
+		st, _ := time.Parse("2006-01-02 15:04", s)
+		return Span{Start: st, End: st.Add(time.Hour)}
+	}
+	for s, want := range map[string]bool{"2026-11-23 14:00": true, "2026-11-23 17:30": false, "2026-11-23 12:30": false, "2026-11-25 14:00": false} {
+		if got := w.Allows(at(s), time.UTC); got != want {
+			t.Errorf("%s: %v, want %v", s, got, want)
+		}
+	}
+	if (&Window{Days: []string{"xyz"}}).Validate() == nil {
+		t.Error("bad day accepted")
+	}
+}
+
+func TestParsePollAnswer(t *testing.T) {
+	t.Parallel()
+	a, err := ParseAnswer(`{"action":"poll","text":"hi","slots":["2026-11-23 14:00"],"book_minutes":30}`)
+	if err != nil || a.Action != Poll || len(a.Slots) != 1 {
+		t.Fatalf("%+v %v", a, err)
+	}
+	if _, err := ParseAnswer(`{"action":"poll","slots":[],"book_minutes":30}`); err == nil {
+		t.Error("empty poll accepted")
+	}
+}

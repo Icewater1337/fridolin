@@ -555,6 +555,34 @@ far as brain.json allows:
   conversation they begin uses brain.json's and theirs.
 - One booking per errand. The Errands page shows an errand's booking.
 
+#### Scheduling by poll
+
+To arrange a meeting, tell the brain who, and your limits ("Monday suits
+me", "afternoons only", an hour, online or at an address). The brain
+passes them to `contact_person` as `window`:
+`{"days": ["mon"], "from": "13:00", "to": "18:00", "minutes": 60, "place": "online"}`
+(all optional; 60 minutes by default). The errand needs `calendar` of
+`offer` or more, and the errand run is told the window with the free
+times.
+
+- **The poll.** The run answers `poll` with up to 12 start times. The
+  bridge keeps only those that are free and inside the window (and
+  `days`, `from`, `to` of brain.json), and sends the person a real
+  WhatsApp poll with them and a "🤷 None of these work" option, after
+  the run's text. One poll at a time; the person picks one time.
+- **A vote is their choice.** The bridge checks the time is still free,
+  and books it as the mode says: `book` books it and you hear of it
+  (📅 Booked …); `book_after_yes` asks you in a poll first; `offer` books
+  nothing and the run says you will confirm. A time taken meanwhile goes
+  back to the run, which offers other free times; "none" goes back to
+  it too, to ask what suits them or poll again. The person is told in
+  their chat by the run.
+- **Owner setup.** brain.json of the core brain needs `errands`
+  (with `owner_name`) and `errands.calendar`, e.g. `{"mode": "book"}`
+  (or `book_after_yes` to confirm each one), plus a Google calendar
+  connected to the brain.
+- The polls are for message errands; on a call the run reads times aloud.
+
 **Why a person cannot turn Fridolin against you.** The protection is the
 bridge's, not a model's judgement:
 
@@ -612,7 +640,7 @@ The brain's tools:
 
 | Tool | What |
 | --- | --- |
-| `contact_person(number, name, goal, brief, message, days, call, calendar)` | Opens an errand, or asks you for it. `calendar` narrows what it may do with your calendar ([Calendar in errands](#calendar-in-errands)). Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. With `call: true` (and [calls](CALLS.md) on) Fridolin calls them instead of writing: only someone it wrote to before, at most five errand calls a day; see [CALLS.md](CALLS.md#errand-calls). A write action. When you name a person rather than a number, the brain looks them up with `find_contact` first and asks you which one when several match. |
+| `contact_person(number, name, goal, brief, message, days, call, calendar, window)` | Opens an errand, or asks you for it. `calendar` narrows what it may do with your calendar ([Calendar in errands](#calendar-in-errands)); `window` (days, from, to, minutes, place) limits the times it offers by poll ([Scheduling by poll](#scheduling-by-poll)). Refused for a number in `allowed_numbers` (write to them in their chat), for someone Fridolin ignores, and while an errand with them has not ended. With `call: true` (and [calls](CALLS.md) on) Fridolin calls them instead of writing: only someone it wrote to before, at most five errand calls a day; see [CALLS.md](CALLS.md#errand-calls). A write action. When you name a person rather than a number, the brain looks them up with `find_contact` first and asks you which one when several match. |
 | `find_contact(query)` | Looks someone up by name in your Google Contacts: at most 10 people, each number written with its country code as `contact_person` takes it, with whether it is on WhatsApp; one written without as it is written, to ask you for the country code. Only once the core brain's **Google Contacts** card is connected ([CALENDAR.md](CALENDAR.md#google-contacts)). It only reads, and keeps nothing. |
 | `errands(id)` | This brain's errands: those that have not ended, then the last ten others. With `id`, one errand with its conversation. |
 | `errand_answer(id, text)` | Passes on what you said to an open errand. Only in a run that answers your own message in your direct chat. A write action. |

@@ -720,6 +720,10 @@ errandWarnedHistory
 	⚠️ Alex tried to make me do what I must not (errand e1a2b3c4), and I warned them. Why, and their message, are left out here: `errands` with id e1a2b3c4 shows them, as their words. A second try within 30 days ends the conversation and blocks them.
 errandBookedNotice
 	📅 Booked Fri 2026-11-06 14:00–15:00 with Alex in your calendar (errand e1a2b3c4).
+errandSlotsQuestion
+	📅 Which time suits you?
+errandSlotsNone
+	🤷 None of these work
 errandBookingDraft
 	📅 Alex would like to meet Fri 2026-11-06 14:00–15:00. Shall I put it in your calendar (errand e1a2b3c4)?
 errandBookingFailedNotice

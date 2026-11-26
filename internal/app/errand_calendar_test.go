@@ -405,3 +405,67 @@ func TestErrandBookingEndsDuringTheCalendarCheck(t *testing.T) {
 		t.Errorf("%d events booked for an errand that ended during the calendar check", n)
 	}
 }
+
+func pollAnswer(text string, minutes int, starts ...time.Time) string {
+	var slots []string
+	for _, s := range starts {
+		slots = append(slots, s.Format("2006-01-02 15:04"))
+	}
+	b, _ := json.Marshal(map[string]any{"action": "poll", "text": text, "slots": slots, "book_minutes": minutes})
+	return string(b)
+}
+
+// TestErrandPollsTimesInsideTheWindow: a run's poll keeps only the times
+// inside the errand's window, goes to the person as a real poll with a
+// "none" option, and their vote books the time (mode book) and tells the
+// owner; "none" goes back to the run.
+func TestErrandPollsTimesInsideTheWindow(t *testing.T) {
+	t.Parallel()
+	h, runs, f := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarBook, Days: everyDay, DaysAhead: 5})
+	ctx := context.Background()
+	loc := RuntimeConfig(h.b.cfgs).Location()
+	req := dinner
+	req.Window = &errand.Window{From: "13:00", To: "18:00", Minutes: 60}
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), req); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	at := h.inTwoDays(14)
+	when := func(s time.Time) string { return errand.FormatSpan(errand.Span{Start: s, End: s.Add(time.Hour)}, loc) }
+	runs.say(pollAnswer("Here are some times:", 60, h.inTwoDays(10), at, h.inTwoDays(15)), `{"action":"reply","text":"Booked, see you!"}`)
+	h.theyWrite("Sure, send me times")
+	h.WaitSent(errandJID, "Here are some times:")
+	poll := h.waitPoll(errandJID, outboundmsg.ErrandSlotsQuestion)
+	if want := []string{when(at), when(h.inTwoDays(15)), outboundmsg.ErrandSlotsNone}; !slices.Equal(poll.Poll, want) {
+		t.Errorf("poll options %q, want %q (10:00 is outside the window)", poll.Poll, want)
+	}
+	if cal := runs.handed()[0].Calendar; cal == nil || cal.Window == nil || cal.Window.From != "13:00" {
+		t.Errorf("the run was not told the window: %+v", cal)
+	}
+	h.vote(poll.ID, errandNumber, when(at))
+	h.WaitSent(harnessDM, outboundmsg.ErrandBookedNotice("Alex", e.ID, when(at)))
+	h.WaitSent(errandJID, "Booked, see you!")
+	f.mu.Lock()
+	n := len(f.inserted)
+	f.mu.Unlock()
+	if n != 1 {
+		t.Errorf("%d events made", n)
+	}
+}
+
+func TestErrandPollNone(t *testing.T) {
+	t.Parallel()
+	h, runs, _ := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarBook, Days: everyDay, DaysAhead: 5})
+	if _, err := h.b.openErrand(context.Background(), h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	runs.say(pollAnswer("Pick one:", 60, h.inTwoDays(14)), `{"action":"reply","text":"What suits you then?"}`)
+	h.theyWrite("ok")
+	poll := h.waitPoll(errandJID, outboundmsg.ErrandSlotsQuestion)
+	h.vote(poll.ID, errandNumber, outboundmsg.ErrandSlotsNone)
+	h.WaitSent(errandJID, "What suits you then?")
+	handed := runs.handed()
+	if l := handed[len(handed)-1].Lines; l[len(l)-1].From != errand.FromCalendar || !strings.Contains(l[len(l)-1].Text, "none of the offered times") {
+		t.Errorf("what the run heard: %+v", l[len(l)-1])
+	}
+}

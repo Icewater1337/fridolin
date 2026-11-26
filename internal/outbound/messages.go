@@ -1480,3 +1480,10 @@ func UndoRunningReply(run string) string {
 func UndoNotRecordedReply(run, why string) string {
 	return fmt.Sprintf("❓ The files of run `%s` were not recorded (%s), so there is nothing to put back.", run, why)
 }
+
+// ErrandSlotsQuestion is the question of the poll an errand sends to offer
+// times, and ErrandSlotsNone its option for "none of these".
+const (
+	ErrandSlotsQuestion = "📅 Which time suits you?"
+	ErrandSlotsNone     = "🤷 None of these work"
+)
