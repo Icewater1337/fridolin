@@ -24,7 +24,9 @@ for compatibility.
   setting is now in seconds (30–14400, was 2–240 minutes); a saved
   number of minutes carries over. A missed check-in still backs off from
   the interval, doubling. Build the app again to update the phones.
-
+- **Longer node agent sessions.** A `node_agent_run` session may now run 24
+  hours instead of 2; `node.json`'s `agent_max_runtime` (e.g. `"48h"`) sets it.
+  Restart the node to apply.
 - **Per-folder node policy.** brain.json's new `node_policy` says, per
   folder and everything in it, where its copies may land (`storage`:
   nodes, backup targets, `cloud`) and which nodes may run backups,

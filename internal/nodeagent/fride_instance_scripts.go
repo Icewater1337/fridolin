@@ -67,7 +67,9 @@ set -eu
 // stopping. FrIDE runs in a session of its own, with two forwarders:
 // the VM's port $1 (where sbx publishes it) to FrIDE on the loopback,
 // and the loopback's $2 to the node's webhook on the host. A run left
-// over (its group in fride.pid) is ended first.
+// over (its group in fride.pid) is ended first. FRIDE_PORT goes to FrIDE
+// and so to its agents: their `fride pr` calls it, and a FrIDE older than
+// its serve.port file would call :7777 instead, where nothing answers.
 const frideInstanceServe = `# fride-instance: serve
 set -u
 c="$HOME/fride-companion"
@@ -85,7 +87,7 @@ else
 	[ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 	[ -n "$ip" ] || { echo "the sandbox has no network address" >&2; exit 2; }
 	cd "$h"
-	FRIDE_HOME="$h" setsid sh -c 'socat "TCP-LISTEN:$1,bind=$2,fork,reuseaddr" "TCP:127.0.0.1:$1" &
+	FRIDE_HOME="$h" FRIDE_PORT="$1" setsid sh -c 'socat "TCP-LISTEN:$1,bind=$2,fork,reuseaddr" "TCP:127.0.0.1:$1" &
 socat "TCP-LISTEN:$3,bind=127.0.0.1,fork,reuseaddr" "TCP:host.docker.internal:$3" &
 exec "$0" serve --under-fridolin --port "$1"' "$f" "$1" "$ip" "$2" >>"$h/serve.log" 2>&1 </dev/null &
 	pid=$!

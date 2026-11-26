@@ -608,3 +608,19 @@ func TestParseReadError(t *testing.T) {
 		t.Errorf("a result that arrived should stand, got %+v", res)
 	}
 }
+
+func TestAgentMaxRuntime(t *testing.T) {
+	t.Parallel()
+	a := &Agent{}
+	if got := a.agentMaxRuntime(); got != 24*time.Hour {
+		t.Fatalf("default = %v, want 24h", got)
+	}
+	a.Config.AgentMaxRuntime = "48h"
+	if got := a.agentMaxRuntime(); got != 48*time.Hour {
+		t.Fatalf("configured = %v, want 48h", got)
+	}
+	c := Config{Core: "h:1", Name: "n", AgentMaxRuntime: "soon"}
+	if c.Check() == nil {
+		t.Fatal("a bad agent_max_runtime passed Check")
+	}
+}
