@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
@@ -184,6 +186,58 @@ func TestFrideThroughNodes(t *testing.T) {
 	}
 	h.Inject(inbound{JID: harnessDM, Text: "!move 2 laptop"})
 	h.WaitSent(harnessDM, outboundmsg.LockdownRefusedNotice)
+}
+
+// A task that is no longer in FrIDE when its thread is closed: FrIDE put a
+// follow-up into the task of an earlier thread, and closing that one
+// archived and removed it, so the follow-up's thread closes with its
+// archive; a task removed on the machine closes with none. Neither stays
+// open, which would keep its FrIDE from stopping.
+func TestFrideCloseOfAGoneTask(t *testing.T) {
+	t.Parallel()
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	ff := testutil.StartFakeFride(t, "api")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"news": "all"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	h.fakeFrideNode("laptop", addr, ff)
+	for _, msg := range []string{"Add a health endpoint", "Also log the checks", "Write docs"} {
+		if reply := h.coreSays(msg, step("fride_task", `{"message":"`+msg+`","repos":["api"]}`)); !strings.Contains(reply, "Handed to FrIDE on laptop") {
+			t.Fatalf("fride_task %q:\n%s", msg, reply)
+		}
+	}
+	// FrIDE puts the follow-up (its thread 2) into the task of thread 1.
+	for thread, task := range map[int]string{1: "health", 2: "health", 3: "docs"} {
+		ff.Start(thread, task, "feat/"+task)
+		h.WaitFor("FrIDE #"+strconv.Itoa(thread)+" on task "+task, func() bool {
+			th, err := h.b.store.GetFrideThread(context.Background(), int64(thread))
+			return err == nil && th.TaskID == task
+		})
+	}
+
+	reply := h.coreSays("close it", step("fride_close", `{"thread":1}`))
+	if !strings.Contains(reply, "Its workspace is archived in the vault as vault/workspaces/health.fride.tar.gz") {
+		t.Fatalf("closing the first:\n%s", reply)
+	}
+	reply = h.coreSays("and the follow-up", step("fride_close", `{"thread":2}`))
+	if !strings.Contains(reply, "Task health on laptop was closed already, with FrIDE #1, so FrIDE #2 is closed too. Its workspace is archived in the vault as vault/workspaces/health.fride.tar.gz.") {
+		t.Fatalf("closing the follow-up:\n%s", reply)
+	}
+	ff.Drop("docs")
+	reply = h.coreSays("and the docs", step("fride_close", `{"thread":3}`))
+	if !strings.Contains(reply, "Task docs is no longer on laptop, so there was nothing to close or archive there: FrIDE #3 is closed.") {
+		t.Fatalf("closing a removed task:\n%s", reply)
+	}
+	for id, archive := range map[int64]string{2: "vault/workspaces/health.fride.tar.gz", 3: ""} {
+		th, err := h.b.store.GetFrideThread(context.Background(), id)
+		if err != nil || th.State != store.FrideClosed || th.Archive != archive {
+			t.Errorf("FrIDE #%d: %s %q %v", id, th.State, th.Archive, err)
+		}
+	}
+	reply = h.coreSays("close it again", step("fride_close", `{"thread":2}`))
+	if !strings.Contains(reply, "FrIDE #2 is closed already; its archive is vault/workspaces/health.fride.tar.gz.") {
+		t.Fatalf("closing it twice:\n%s", reply)
+	}
 }
 
 // fride_repo_add through a node: a clone and a new repository land in the

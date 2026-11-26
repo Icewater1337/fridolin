@@ -162,6 +162,15 @@ func (f *FakeFride) Task(id string) (exists bool, status string) {
 	return false, ""
 }
 
+// Drop removes task, as a workspace deleted on the machine by hand.
+func (f *FakeFride) Drop(task string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if t := f.tasks[task]; t != nil {
+		t.Exists = false
+	}
+}
+
 // Message is the brief thread was started with.
 func (f *FakeFride) Message(thread int) string {
 	f.mu.Lock()

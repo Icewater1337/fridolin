@@ -450,6 +450,13 @@ for compatibility.
 
 ### Fixed
 
+- **A FrIDE thread whose task is gone closes.** FrIDE puts a follow-up
+  into the task of an earlier thread, so two threads can share one task.
+  Closing the first archived the task and removed it, and closing the
+  second then failed with "no task", leaving it open for good, which also
+  kept its FrIDE instance from stopping. Such a thread now closes with the
+  first one's archive. One whose task was removed on the machine closes
+  with none.
 - **A core move carries any credentials folder config accepts.** A
   `sandbox.credentials_dir` with a space, a non-ASCII name or more than
   four levels below ~ (`~/Library/Application Support/fridolin`) stopped

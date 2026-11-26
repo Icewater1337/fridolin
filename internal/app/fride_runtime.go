@@ -1288,6 +1288,11 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	}
 	name := f.where(t.Node, t.Instance)
 	closed, err := f.b.nodes.FrideCloseOn(ctx, t.Node, t.Instance, t.TaskID)
+	if pe, ok := errors.AsType[*nodeproto.Error](err); ok && pe.Code == nodeproto.CodeNotFound {
+		// reachable made sure that FrIDE runs there, so it is the task
+		// that is gone: closed with another thread of it, or removed.
+		return f.closeGone(ctx, id, name)
+	}
 	if err != nil {
 		return "", fmt.Errorf("closing task %s on %s: %w", t.TaskID, name, err)
 	}
@@ -1341,6 +1346,47 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	}
 	fmt.Fprintf(&b, " Its workspace is archived in the vault as %s (%d bytes), %s.", t.Archive, size, removed)
 	return b.String(), nil
+}
+
+// closeGone closes thread id, whose task is no longer in the FrIDE on its
+// node (name), so nothing is left to close or archive there. FrIDE puts a
+// follow-up that belongs to a task into that task, so two threads may have
+// one: the first close archives it and removes it, and the other then
+// shares that thread's archive. A task removed some other way has none.
+func (f *frideRuntime) closeGone(ctx context.Context, id int64, name string) (string, error) {
+	unlock := f.lock(id)
+	defer unlock()
+	t, err := f.thread(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	var with store.FrideThread
+	closed, err := f.b.store.FrideThreads(ctx, store.FrideClosed)
+	if err != nil {
+		return "", err
+	}
+	for _, o := range closed { // oldest first: the last one closed it
+		if o.ID != id && o.Node == t.Node && o.Instance == t.Instance && o.TaskID == t.TaskID && o.Archive != "" {
+			with = o
+		}
+	}
+	t.State = store.FrideClosed
+	if with.ID != 0 {
+		t.Archive = with.Archive
+		if t.Branch == "" {
+			t.Branch = with.Branch
+		}
+		if t.Rationale == "" {
+			t.Rationale = with.Rationale
+		}
+	}
+	if err := f.b.store.SaveFrideThread(ctx, t); err != nil {
+		return "", err
+	}
+	if with.ID != 0 {
+		return fmt.Sprintf("Task %s on %s was closed already, with FrIDE #%d, so FrIDE #%d is closed too. Its workspace is archived in the vault as %s.", t.TaskID, name, with.ID, id, with.Archive), nil
+	}
+	return fmt.Sprintf("Task %s is no longer on %s, so there was nothing to close or archive there: FrIDE #%d is closed.", t.TaskID, name, id), nil
 }
 
 // moveCommand runs !move: it says the move began, and how it ended.
