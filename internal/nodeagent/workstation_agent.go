@@ -62,6 +62,9 @@ func (a *Agent) agentMaxRuntime() time.Duration {
 	if a.AgentMaxRuntime > 0 {
 		return a.AgentMaxRuntime
 	}
+	if d, err := time.ParseDuration(a.Config.AgentMaxRuntime); err == nil && d > 0 {
+		return d
+	}
 	return DefaultAgentMaxRuntime
 }
 

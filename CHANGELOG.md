@@ -20,6 +20,9 @@ for compatibility.
   and permanent delete need the owner's approval; mail read is marked
   untrusted. Enable the Gmail API and add the scope to the consent screen
   first: [docs/GMAIL.md](docs/GMAIL.md)
+- **Longer node agent sessions.** A `node_agent_run` session may now run 24
+  hours instead of 2; `node.json`'s `agent_max_runtime` (e.g. `"48h"`) sets it.
+  Restart the node to apply.
 - **Per-folder node policy.** brain.json's new `node_policy` says, per
   folder and everything in it, where its copies may land (`storage`:
   nodes, backup targets, `cloud`) and which nodes may run backups,
