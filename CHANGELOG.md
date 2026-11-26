@@ -14,6 +14,17 @@ for compatibility.
   closes a thread whose task FrIDE answers `not-found` for, and
   `node_update` and `fride_stop` close such threads instead of refusing.
   Both tools take an optional `force`, for when the owner asked.
+- **Brains commit in their own folders in the container core again.**
+  git there stopped with "detected dubious ownership" in a brain's folder,
+  so scheduled agents and the owner's chat could not commit memory or
+  prompt changes. The image marks every folder safe for git: each folder a
+  run sees is the owner's, bound in from the host. Build the core image
+  again to get it.
+- **Full access no longer asks for a command an exec rule allows.** A
+  `node_exec` command that a rule without `approve` allows as it is, such
+  as the go-build cache cleanup, ran without a poll before full access
+  and asked every time with it. It runs again without one; full access
+  still asks before a risky command no rule allows that way.
 
 ### Added
 

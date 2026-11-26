@@ -370,8 +370,14 @@ func (b *App) callNodeExec(ctx context.Context, c mcpCaller, raw json.RawMessage
 	full := b.fullAccess(c, v, nodeproto.MethodExec)
 	var why string
 	switch {
+	case full && v.Effective.PermitsExec(args.Argv) == nil && !v.Effective.ExecNeedsApproval(args.Argv):
+		// A rule the owner approved allows this very command without
+		// asking: full access asks no more than that rule, so a cleanup
+		// allowed as it is (find … -delete) runs without a poll.
 	case full:
-		why = b.fullAccessRisk(v, strings.Join(args.Argv, " "))
+		if why = b.fullAccessRisk(v, strings.Join(args.Argv, " ")); why != "" {
+			why = "Full access asks you first: " + why + "."
+		}
 	case v.Effective.PermitsExec(args.Argv) != nil:
 		err := v.Effective.PermitsExec(args.Argv)
 		return mcp.ErrorResult(fmt.Sprintf("%s does not run this: %v. %s\n\n%s", v.Name, err, execRulesNote, execRulesText(v))), nil
@@ -380,9 +386,6 @@ func (b *App) callNodeExec(ctx context.Context, c mcpCaller, raw json.RawMessage
 	}
 	if why == "" {
 		return b.runNodeExec(ctx, c, v, args, full, store.Approval{}), nil
-	}
-	if full {
-		why = "Full access asks you first: " + why + "."
 	}
 	action, details := execApproval(v, args.Argv, args.Dir, why)
 	a, res, err := b.askFirst(ctx, c, action, details, args.ApprovalID, args.WaitSeconds, askAgain{

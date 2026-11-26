@@ -2788,8 +2788,11 @@ keychain); and anything naming a hidden file or folder of secrets
 (`~/.app-secrets`), `~/.personal-calendar`, `~/.ssh`, `~/.gitconfig`, `~/.git-credentials`,
 `~/.*-token`, `~/.*-api-key`, `~/.config/gh`, `~/.fridolin` (with
 `bridge.db`) or the keychains. In a terminal it checks each command line
-as its Enter completes it, and types nothing until the yes. It is a
-tripwire against a brain talked into harm by what it reads, not a
+as its Enter completes it, and types nothing until the yes. A
+`node_exec` command that an exec rule without `approve` allows as it is
+(say an `exact` rule for `find ~/Library/Caches/go-build … -delete`) does
+not ask: you approved that rule, and full access asks no more than it. It
+is a tripwire against a brain talked into harm by what it reads, not a
 sandbox: a command that hides what it does (a variable, base64, a script)
 passes it.
 
