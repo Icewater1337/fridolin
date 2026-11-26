@@ -24,6 +24,8 @@ set -eu
 : "${FRIDE_HOME:=$HOME/fride}"
 : "${FRIDE_PORT:=17840}"
 : "${FRIDE_WEBHOOK_PORT:=17841}"
+# Exported for FrIDE's agents, whose `fride pr` calls it (fridolin#815).
+export FRIDE_PORT
 # The node service's name on the box network.
 : "${FRIDOLIN_NODE_HOST:=node}"
 token_file="$HOME/.config/fridolin-box/claude-token"
