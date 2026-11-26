@@ -585,7 +585,7 @@ func TestRepairBootTarget(t *testing.T) {
 	if moved, err := RepairBootTarget(home, systemctl); moved || err != nil || calls != nil {
 		t.Fatalf("no unit: %v %v %q", moved, err, calls)
 	}
-	unit := LinuxUnitPath(home)
+	unit := LinuxUnitPath(home, ServiceName)
 	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
 		t.Fatal(err)
 	}

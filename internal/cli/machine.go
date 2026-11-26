@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,6 +46,11 @@ type nodeService struct {
 	// (nodeagent.ServiceStateDir), "" where it is not known; nil for none.
 	stateDir func() (string, error)
 	pkg      appPackage
+	// name is the service's name (nodeagent.NodeServiceConfig), ""
+	// for nodeagent.ServiceName.
+	name string
+	// redact writes $USER for the user name, for doctor --redact.
+	redact bool
 }
 
 // boxHealthMaxAge is how old a box agent's last word may be for it to
@@ -153,26 +161,30 @@ func nodeChecks(dir string, svc nodeService) []doctor.Check {
 			if _, err := loaded(); err != nil {
 				return notJoined
 			}
-			if _, err := env.Stat(nodeagent.LinuxUnitPath(env.Home)); err != nil {
-				return doctor.Result{Status: doctor.Fail, Detail: "no systemd user unit " + nodeagent.ServiceName + ".service", Fix: "fridolin node install, then fridolin node start"}
+			name := cmp.Or(svc.name, nodeagent.ServiceName)
+			if _, err := env.Stat(nodeagent.LinuxUnitPath(env.Home, name)); err != nil {
+				return doctor.Result{Status: doctor.Fail, Detail: "no systemd user unit " + name + ".service", Fix: "fridolin node install, then fridolin node start"}
 			}
-			want := nodeagent.LinuxWantsLink(env.Home, nodeagent.LinuxBootTarget)
+			want := nodeagent.LinuxWantsLink(env.Home, nodeagent.LinuxBootTarget, name)
 			if _, err := env.Stat(want); err == nil {
 				return doctor.Result{Status: doctor.OK, Detail: "enabled in " + filepath.Base(filepath.Dir(want))}
 			}
-			if _, err := env.Stat(nodeagent.LinuxWantsLink(env.Home, "multi-user.target")); err == nil {
+			if _, err := env.Stat(nodeagent.LinuxWantsLink(env.Home, "multi-user.target", name)); err == nil {
 				return doctor.Result{Status: doctor.Fail, Detail: "enabled in multi-user.target.wants, which a user's systemd never starts: the node stays off after a reboot",
 					Fix: "fridolin node start (moves it to " + nodeagent.LinuxBootTarget + ")"}
 			}
-			return doctor.Result{Status: doctor.Fail, Detail: "not enabled: the node stays off after a reboot", Fix: "systemctl --user enable " + nodeagent.ServiceName}
+			return doctor.Result{Status: doctor.Fail, Detail: "not enabled: the node stays off after a reboot", Fix: "systemctl --user enable " + name}
 		}},
 		{ID: "node-linger", Title: "systemd keeps your services without a login (linger)", Applies: nativeLinux, Run: func(ctx context.Context, env *doctor.Env) doctor.Result {
 			user := env.Getenv("USER")
 			if user == "" {
 				return doctor.Result{Status: doctor.Warn, Detail: "cannot tell: USER is not set", Fix: "loginctl show-user $USER -p Linger"}
 			}
-			fix := "sudo loginctl enable-linger " + user
 			out, err := env.Run(ctx, "loginctl", "show-user", user, "-p", "Linger")
+			if svc.redact {
+				user = "$USER"
+			}
+			fix := "sudo loginctl enable-linger " + user
 			if err != nil {
 				return doctor.Result{Status: doctor.Warn, Detail: "cannot tell: " + err.Error(), Fix: fix}
 			}
@@ -335,7 +347,7 @@ func setupMachineCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "fridolin setup-machine: %v\n", err)
 			return 1
 		}
-		return nodeMachineReport(stdout, dir, *asJSON)
+		return nodeMachineReport(stdout, dir, *asJSON, false)
 	}
 	d := defaultHostDeps(coreEnv{environ: os.Environ(), stdout: stdout, stderr: stderr})
 	rep := doctor.Run(context.Background(), app.SystemDoctorEnv(""), coreMachineChecks(d))
@@ -391,33 +403,57 @@ func systemNodeService(dir string) nodeService {
 		failed := func() (string, error) { return "", err }
 		return nodeService{status: failed, stateDir: failed, pkg: thisAppPackage()}
 	}
-	cfg := nodeagent.ServiceConfig(runtime.GOOS, exe, dir)
+	// The service node.json names, as fridolin node status checks (#810).
+	cfg := nodeagent.NodeServiceConfig(runtime.GOOS, exe, dir)
 	return nodeService{
 		status:   func() (string, error) { return nodeagent.ServiceStatus(cfg) },
 		stateDir: func() (string, error) { return nodeagent.ServiceStateDir(cfg) },
 		pkg:      thisAppPackage(),
+		name:     cfg.Name,
 	}
 }
 
 // nodeDoctor is `fridolin doctor --node`: the node machine's checks.
-func nodeDoctor(stateDir string, asJSON bool, stdout io.Writer) int {
+func nodeDoctor(stateDir string, asJSON, redact bool, stdout io.Writer) int {
 	dir, err := nodeStateDirFlag(stateDir)
 	if err != nil {
 		fmt.Fprintf(stdout, "fridolin doctor --node: %v\n", err)
 		return 1
 	}
-	return nodeMachineReport(stdout, dir, asJSON)
+	return nodeMachineReport(stdout, dir, asJSON, redact)
 }
 
 // nodeMachineReport runs the node machine's checks on the state dir and
 // prints them with the next step: what doctor --node and setup-machine
 // --node both print.
-func nodeMachineReport(w io.Writer, dir string, asJSON bool) int {
-	rep := doctor.Run(context.Background(), app.SystemDoctorEnv(""), nodeChecks(dir, systemNodeService(dir)))
-	if !asJSON {
-		fmt.Fprintf(w, "Node machine (state dir %s):\n", dir)
+func nodeMachineReport(w io.Writer, dir string, asJSON, redact bool) int {
+	svc := systemNodeService(dir)
+	svc.redact = redact
+	return writeNodeReport(w, app.SystemDoctorEnv(""), dir, svc, asJSON)
+}
+
+// writeNodeReport is nodeMachineReport on env and svc: with svc.redact
+// it masks what doctor --redact masks in the core's report (#808).
+func writeNodeReport(w io.Writer, env *doctor.Env, dir string, svc nodeService, asJSON bool) int {
+	var red *doctor.Redactor
+	if svc.redact {
+		red = doctor.NewRedactor(env.Home)
+		prev := log.Writer()
+		log.SetOutput(red.Writer(prev))
+		defer log.SetOutput(prev)
 	}
-	return writeMachineReport(w, rep, dir, asJSON)
+	rep := doctor.Run(context.Background(), env, nodeChecks(dir, svc))
+	var buf bytes.Buffer
+	if !asJSON {
+		fmt.Fprintf(&buf, "Node machine (state dir %s):\n", dir)
+	}
+	code := writeMachineReport(&buf, rep, dir, asJSON)
+	out := buf.String()
+	if red != nil {
+		out = red.Text(out)
+	}
+	_, _ = io.WriteString(w, out)
+	return code
 }
 
 // isNodeMachine says whether doctor without --node should check this

@@ -137,14 +137,14 @@ WantedBy=` + LinuxBootTarget + `
 
 // LinuxUnitPath is where kardianos/service writes the systemd user unit
 // under the home folder home.
-func LinuxUnitPath(home string) string {
-	return filepath.Join(home, ".config", "systemd", "user", ServiceName+".service")
+func LinuxUnitPath(home, name string) string {
+	return filepath.Join(home, ".config", "systemd", "user", name+".service")
 }
 
 // LinuxWantsLink is the link `systemctl --user enable` makes for the
 // unit in target's .wants folder.
-func LinuxWantsLink(home, target string) string {
-	return filepath.Join(home, ".config", "systemd", "user", target+".wants", ServiceName+".service")
+func LinuxWantsLink(home, target, name string) string {
+	return filepath.Join(home, ".config", "systemd", "user", target+".wants", name+".service")
 }
 
 // RepairBootTarget moves a systemd user unit written before issue #171
@@ -157,7 +157,7 @@ func LinuxWantsLink(home, target string) string {
 // kardianos/service's template say WantedBy=multi-user.target; `node
 // install`, `start`, `join` and `run` call this, so they move once.
 func RepairBootTarget(home string, systemctl func(args ...string) error) (bool, error) {
-	unit := LinuxUnitPath(home)
+	unit := LinuxUnitPath(home, ServiceName)
 	data, err := os.ReadFile(unit)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
