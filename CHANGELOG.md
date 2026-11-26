@@ -10,6 +10,13 @@ for compatibility.
 
 ### Fixed
 
+- **FrIDE's agents may mark their pull request ready and comment on it.**
+  The companion config of the box and the instances' template
+  (`container/fride/companion.json`) allows `gh pr ready`, `gh pr
+  comment`, `gh pr view`, `gh pr checks` and `gh run rerun` besides `gh pr
+  merge`: Claude's auto mode refused marking a PR ready when FrIDE's review
+  could not run, so green PRs stayed drafts. A node's own template gets it
+  with its next `fridolin node fride host setup`.
 - **FrIDE threads whose task is gone no longer block.** FrIDE puts a
   follow-up into the task of an earlier thread, so two threads can share
   one task; closing the second then failed with "no task", which left it

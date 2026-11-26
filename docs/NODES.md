@@ -1954,7 +1954,7 @@ more with the owner later (see FrIDE's SETUP.md).
   "companion": {
     "enabled": true,
     "claudePlugins": ["~/fride-companion/plugins/ponytail"],
-    "claudeAllow": ["Bash(gh pr merge:*)"]
+    "claudeAllow": ["Bash(gh pr merge:*)", "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr ready:*)", "Bash(gh pr comment:*)", "Bash(gh run rerun:*)"]
   }
 }
 ```
@@ -1968,13 +1968,16 @@ approval in its Review tab before a task is Done: nobody approves there,
 and without it the core's close of a finished task
 (`POST /api/companion/tasks/<id>/close`) is refused.
 
-`claudeAllow` lets every task agent merge its own pull request once CI is
-green, as the bug fixer asks: Claude Code's auto mode, which FrIDE's agents
-run in, otherwise refuses by default to merge a pull request no human
-approved, now and then (FrIDE's docs/COMPANION.md, "Rules for task
-agents"). Leave it out where a person is to merge every pull request. The
-FrIDE instances' template and the box's FrIDE carry the same rule
-(`container/fride/companion.json`).
+`claudeAllow` lets every task agent finish its own pull request once CI
+is green, as the bug fixer asks: merge it, read its state and checks,
+mark it ready and comment on it, and rerun a failed job. Claude Code's
+auto mode, which FrIDE's agents run in, otherwise refuses by default to
+merge a pull request no human approved, or to mark one ready whose review
+could not run, as "Undermining Oversight" (FrIDE's docs/COMPANION.md,
+"Rules for task agents"). Leave it out where a person is to merge every
+pull request. The FrIDE instances' template and the box's FrIDE carry the
+same rules (`container/fride/companion.json`); an instance made before
+keeps the rules its own config has.
 
 ### Ponytail for every agent
 
