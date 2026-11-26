@@ -8,6 +8,13 @@ for compatibility.
 
 ## Unreleased
 
+### Fixed
+
+- **FrIDE threads whose task is gone no longer block.** `fride_close`
+  closes a thread whose task FrIDE answers `not-found` for, and
+  `node_update` and `fride_stop` close such threads instead of refusing.
+  Both tools take an optional `force`, for when the owner asked.
+
 ### Added
 
 - **Gmail for brains.** `fridolin gmail` lists, searches, reads, sends

@@ -93,8 +93,11 @@ func (b *App) registerFrideInstanceTools(r *tools.Set[mcpCaller]) {
 		Available: b.frideInstanceTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Stop a FrIDE instance that has no open thread, when the person asks: its machine gets its memory back, its disk stays, and it starts again when work needs it. Instances stop on their own after a while idle.",
-				InputSchema: tools.Schema(map[string]any{"instance": instanceProp()}, "instance"),
+				Description: "Stop a FrIDE instance that has no open thread, when the person asks: its machine gets its memory back, its disk stays, and it starts again when work needs it. Instances stop on their own after a while idle. force=true stops it although threads are open, which interrupts their work: only when the owner asked for that.",
+				InputSchema: tools.Schema(map[string]any{
+					"instance": instanceProp(),
+					"force":    map[string]any{"type": "boolean", "description": "Stop although threads are open. Only when the owner asked for it."},
+				}, "instance"),
 			}
 		},
 		Call: r.Guarded(skill.RiskWrite, b.callFrideStop),
@@ -106,6 +109,7 @@ type instanceArgs struct {
 	Instance string `json:"instance"`
 	Size     string `json:"size"`
 	Reason   string `json:"reason"`
+	Force    bool   `json:"force"`
 }
 
 func readInstanceArgs(raw json.RawMessage) (instanceArgs, *mcp.CallResult) {
@@ -201,7 +205,7 @@ func (b *App) callFrideStop(ctx context.Context, _ mcpCaller, raw json.RawMessag
 	if bad != nil {
 		return bad, nil
 	}
-	text, err := b.fride.inst.stop(ctx, a.Instance, "core brain", "the core brain asked", false)
+	text, err := b.fride.inst.stop(ctx, a.Instance, "core brain", "the core brain asked", a.Force)
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
