@@ -1233,6 +1233,45 @@ func droppable(status string) bool {
 	return false
 }
 
+// taskGone reports whether err is FrIDE saying the task is not there:
+// its 404 for a task, `no task "…"`. A node's own not-found, such as an
+// instance that is not on it, says nothing about the task, and keeps the
+// thread.
+func taskGone(err error) bool {
+	var pe *nodeproto.Error
+	return errors.As(err, &pe) && pe.Code == nodeproto.CodeNotFound && strings.HasPrefix(pe.Message, "no task ")
+}
+
+// dropGone closes thread id here because its task no longer exists in
+// FrIDE: there is nothing to close or archive there.
+func (f *frideRuntime) dropGone(ctx context.Context, id int64, where string) (string, error) {
+	unlock := f.lock(id)
+	defer unlock()
+	cur, err := f.thread(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	cur.State = store.FrideClosed
+	if err := f.b.store.SaveFrideThread(ctx, cur); err != nil {
+		return "", err
+	}
+	log.Printf("fride: FrIDE #%d: task %s is gone from %s: closed here", id, cur.TaskID, where)
+	return fmt.Sprintf("FrIDE #%d: task %s no longer exists in FrIDE on %s: closed here, with nothing to archive.", id, cur.TaskID, where), nil
+}
+
+// reapGone closes open thread t when FrIDE says its task is gone, and
+// reports whether it did. An unreachable node or any other answer keeps it.
+func (f *frideRuntime) reapGone(ctx context.Context, t store.FrideThread) bool {
+	if t.TaskID == "" || t.Node == "" {
+		return false
+	}
+	if _, err := f.b.nodes.FrideTaskInfoOn(ctx, t.Node, t.Instance, t.TaskID); !taskGone(err) {
+		return false
+	}
+	_, err := f.dropGone(ctx, t.ID, f.where(t.Node, t.Instance))
+	return err == nil
+}
+
 // close closes thread id's task in FrIDE, archives its workspace into the
 // vault (workspaces/<task>.fride.tar.gz), which keeps it cold, and removes
 // the workspace from the node once the archive reads whole. Work still
@@ -1288,6 +1327,9 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	}
 	name := f.where(t.Node, t.Instance)
 	closed, err := f.b.nodes.FrideCloseOn(ctx, t.Node, t.Instance, t.TaskID)
+	if taskGone(err) {
+		return f.dropGone(ctx, id, name)
+	}
 	if err != nil {
 		return "", fmt.Errorf("closing task %s on %s: %w", t.TaskID, name, err)
 	}

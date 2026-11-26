@@ -43,7 +43,13 @@ type fakeHost struct {
 	threads int
 	// failStart makes a start fail with its text.
 	failStart string
+	// gone makes task info and close answer that the task does not exist.
+	gone bool
 }
+
+func (f *fakeHost) setGone(v bool) { f.mu.Lock(); f.gone = v; f.mu.Unlock() }
+
+func (f *fakeHost) isGone() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.gone }
 
 // fakeBundle is a task's export: a gzip'd tar with one file.
 func fakeBundle() []byte {
@@ -281,6 +287,9 @@ func (f *fakeHost) handle(req nodeproto.Request) (any, *nodeproto.Error) {
 		if perr := running(on.Instance); perr != nil {
 			return nil, perr
 		}
+	}
+	if (req.Method == nodeproto.MethodFrideTaskInfo || req.Method == nodeproto.MethodFrideClose) && f.isGone() {
+		return nil, nodeproto.Errorf(nodeproto.CodeNotFound, "no task %q", "gone")
 	}
 	bundle := fakeBundle()
 	switch req.Method {

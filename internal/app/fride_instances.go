@@ -232,6 +232,9 @@ func (i *frideInstances) blockingThreads(ctx context.Context) (map[string][]stor
 	for name, ts := range open {
 		var keep []store.FrideThread
 		for _, t := range ts {
+			if i.f.reapGone(ctx, t) {
+				continue
+			}
 			news, err := i.f.b.store.FrideNews(ctx, t.ID)
 			if err != nil {
 				return nil, err
