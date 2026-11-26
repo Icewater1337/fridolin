@@ -26,7 +26,7 @@ func TestFrideStaleThreads(t *testing.T) {
 	h.coreSays("go", step("fride_task", `{"message":"a","instance":"work"}`), step("fride_status", `{"thread":1}`))
 	mini.setGone(true)
 	reply := h.coreSays("close", step("fride_close", `{"thread":1}`))
-	if !strings.Contains(reply, "no longer exists in FrIDE") || strings.Contains(reply, "failed") {
+	if !strings.Contains(reply, "nothing to close or archive") || strings.Contains(reply, "failed") {
 		t.Fatalf("fride_close of a gone task:\n%s", reply)
 	}
 

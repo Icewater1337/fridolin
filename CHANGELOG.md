@@ -10,10 +10,14 @@ for compatibility.
 
 ### Fixed
 
-- **FrIDE threads whose task is gone no longer block.** `fride_close`
-  closes a thread whose task FrIDE answers `not-found` for, and
-  `node_update` and `fride_stop` close such threads instead of refusing.
-  Both tools take an optional `force`, for when the owner asked.
+- **FrIDE threads whose task is gone no longer block.** FrIDE puts a
+  follow-up into the task of an earlier thread, so two threads can share
+  one task; closing the second then failed with "no task", which left it
+  open for good and kept its node from updating and its FrIDE instance
+  from stopping. `fride_close` now closes such a thread, with the first
+  one's archive when it shares its task, and `node_update` and
+  `fride_stop` close threads whose task is gone instead of refusing. Both
+  tools take an optional `force`, for when the owner asked.
 - **Brains commit in their own folders in the container core again.**
   git there stopped with "detected dubious ownership" in a brain's folder,
   so scheduled agents and the owner's chat could not commit memory or

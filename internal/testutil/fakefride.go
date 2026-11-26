@@ -162,6 +162,15 @@ func (f *FakeFride) Task(id string) (exists bool, status string) {
 	return false, ""
 }
 
+// Drop removes task, as a workspace deleted on the machine by hand.
+func (f *FakeFride) Drop(task string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if t := f.tasks[task]; t != nil {
+		t.Exists = false
+	}
+}
+
 // Message is the brief thread was started with.
 func (f *FakeFride) Message(thread int) string {
 	f.mu.Lock()
@@ -412,7 +421,7 @@ func (f *FakeFride) answer(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(rest, "tasks/"), "/")
 		t := f.tasks[parts[0]]
 		if t == nil || !t.Exists {
-			fail(http.StatusNotFound, "no such task")
+			fail(http.StatusNotFound, fmt.Sprintf("no task %q", parts[0])) // FrIDE's wording
 			return
 		}
 		switch {
