@@ -555,6 +555,31 @@ far as brain.json allows:
   conversation they begin uses brain.json's and theirs.
 - One booking per errand. The Errands page shows an errand's booking.
 
+#### Asked about your time
+
+When someone Fridolin knows writes first ("When does Sam have time?"), the
+conversation they begin may use the calendar as above, with `mode` of
+`offer` or more, and only on these terms, which the bridge enforces and
+no prompt alone:
+
+- **Free or busy, nothing else.** The run is handed free times only, never
+  an event, a title, a place or who you meet, and says nothing more of your
+  calendar.
+- **In person.** Weekdays 08:00 to 17:00 (your local time) are always
+  blocked: no in-person time is offered or booked inside them, whatever the
+  calendar says. Outside them the calendar's free times are offered.
+- **Remote.** Fridolin never offers or confirms a remote time on its own: it
+  asks you in your chat and relays your answer; only after your word in the
+  conversation may it offer or book one.
+- **Unclear.** If it is not clear whether the meeting is in person or
+  remote, it asks them first. A booking or poll must say which
+  (`meeting`); the bridge refuses one that does not.
+
+Change the blocked hours with `in_person_blocked` in `errands.calendar`:
+`{"days": ["mon","tue","wed","thu","fri"], "from": "08:00", "to": "17:00"}`
+(these are the defaults). The remote rule has no setting. Errands your brain
+opens are not held to these, since you named the times yourself.
+
 #### Scheduling by poll
 
 To arrange a meeting, tell the brain who, and your limits ("Monday suits

@@ -65,6 +65,9 @@ type Calendar struct {
 	// Window is what the owner limited this errand's times to, nil for
 	// nothing beyond the calendar's own hours.
 	Window *Window
+	// Meetings is set for a conversation the person began: the rules for
+	// in-person and remote meetings (Instructions, rule 14).
+	Meetings string
 }
 
 // calendarDoc is Calendar in the document.
@@ -74,6 +77,7 @@ type calendarDoc struct {
 	MaxMinutes int      `json:"max_minutes"`
 	Note       string   `json:"note,omitempty"`
 	Window     *Window  `json:"window,omitempty"`
+	Meetings   string   `json:"meeting_rules,omitempty"`
 }
 
 // Span is a stretch of time.
@@ -123,6 +127,26 @@ func FreeTimes(busy []Span, from, to time.Time, h Hours) []Span {
 		}
 	}
 	return out
+}
+
+// BlockedSpans are the stretches from..to that lie on days between
+// fromMin and toMin (minutes after midnight), in loc: the hours that are
+// never free for an in-person meeting.
+func BlockedSpans(from, to time.Time, days []time.Weekday, fromMin, toMin int, loc *time.Location) []Span {
+	var out []Span
+	f := from.In(loc)
+	for day := time.Date(f.Year(), f.Month(), f.Day(), 0, 0, 0, 0, loc); day.Before(to); day = day.AddDate(0, 0, 1) {
+		if slices.Contains(days, day.Weekday()) {
+			y, m, d := day.Date()
+			out = append(out, Span{Start: time.Date(y, m, d, 0, fromMin, 0, 0, loc), End: time.Date(y, m, d, 0, toMin, 0, 0, loc)})
+		}
+	}
+	return out
+}
+
+// Overlaps reports whether s shares any time with one of spans.
+func Overlaps(s Span, spans []Span) bool {
+	return slices.ContainsFunc(spans, func(o Span) bool { return s.Start.Before(o.End) && o.Start.Before(s.End) })
 }
 
 // merge sorts spans and joins those that touch or overlap.
