@@ -10,6 +10,22 @@ for compatibility.
 
 ### Fixed
 
+- **FrIDE's agents merge their own green pull requests and delete their
+  branches again.** An instance's agent had its `gh pr merge … --delete-branch`
+  refused by Claude's auto mode: its instance kept the allow rules it was
+  made with, which lacked the `gh pr view` it chained after the merge, and
+  auto mode takes what FrIDE's instruction files ask for as data, so it
+  refused the merge as unreviewed. An instance's config, when its sandbox
+  is made anew, and the box's, at each start, now gain the template's
+  newer `companion.claudeAllow` rules, and the template allows `git push
+  origin --delete` too. FrIDE 4cca2c5 (was 90aa927) passes
+  `companion.claudeAutoMode`, Claude Code's `autoMode` rules, to its
+  agents; the template's say that merging the task's own green pull
+  request and deleting its branch is the owner's standing rule. An
+  instance whose `claudeAllow` is an empty list keeps it and gets no such
+  rules: a person merges there. Instances get it when their sandbox is
+  made anew on the new template; the native companion's config takes the
+  rules by hand. [docs/NODES.md](docs/NODES.md#setting-up-fride-on-a-node)
 - **FrIDE's agents may mark their pull request ready and comment on it.**
   The companion config of the box and the instances' template
   (`container/fride/companion.json`) allows `gh pr ready`, `gh pr

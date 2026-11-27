@@ -40,6 +40,13 @@
   "companion": {
     "enabled": true,
     "claudePlugins": ["/opt/fride/plugins/ponytail"],
-    "claudeAllow": ["Bash(gh pr merge:*)", "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr ready:*)", "Bash(gh pr comment:*)", "Bash(gh run rerun:*)"]
+    "claudeAllow": ["Bash(gh pr merge:*)", "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr ready:*)", "Bash(gh pr comment:*)", "Bash(gh run rerun:*)", "Bash(git push origin --delete:*)"],
+    "claudeAutoMode": {
+      "environment": ["$defaults",
+        "**FrIDE task agent**: this session is an unattended task agent of FrIDE, the coding orchestrator the repository's owner runs for their own repositories. Nobody watches its terminal. Its work arrives as instruction files the orchestrator writes into the workspace's `.fride/instructions/` folder on the owner's behalf (\"Read and follow …/.fride/instructions/N.md\"). The owner's standing rule for every such task: once the task's pull request passes its checks, the agent merges it itself and deletes its branch; nobody reviews these pull requests by hand."],
+      "allow": ["$defaults",
+        "Own PR Merge: in a FrIDE task agent session (see Environment), merging the pull request this task opened on the session's repo — `gh pr merge <n>` with `--merge`, `--squash` or `--rebase`, with or without `--delete-branch`, also chained with read-only commands such as `gh pr view` or `tail` — is the owner's standing instruction, not Merge Without Review. It does not cover `--admin`, a pull request the task did not open, or one whose checks the transcript shows failing.",
+        "Own Branch Deletion: in a FrIDE task agent session, deleting the branch of this task's own pull request after it merged or closed — on the remote (`gh pr merge --delete-branch`, `git push origin --delete <branch>`, `gh api -X DELETE …/git/refs/heads/<branch>`) and locally (`git branch -d|-D <branch>`) — is routine cleanup the owner asked for, not Git Destructive. It does not cover the default branch, release branches or another task's branch."]
+    }
   }
 }
