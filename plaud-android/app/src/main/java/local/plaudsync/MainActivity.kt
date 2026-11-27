@@ -3,6 +3,7 @@ package local.plaudsync
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
@@ -20,6 +21,8 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import java.io.File
 
 /** Status, a few buttons and the log. All the work happens in [SyncService]. */
@@ -199,9 +202,18 @@ class MainActivity : Activity() {
         startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
     }
 
+    /**
+     * The whole log as a file. As EXTRA_TEXT it was cut off by the receiving app (the 27.11 share
+     * ended mid-line and lost the newest hours), and a text is cut at its end, where the news is.
+     */
     private fun shareLog() {
+        val copy = File(cacheDir, "shared/plaud-sync-log.txt")
+        if (!AppLog.copyTo(copy)) return Toast.makeText(this, "No log yet", Toast.LENGTH_SHORT).show()
+        val uri = FileProvider.getUriForFile(this, "$packageName.logs", copy)
         val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-            .putExtra(Intent.EXTRA_TEXT, AppLog.tail(500).joinToString("\n"))
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        send.clipData = ClipData.newRawUri("log", uri)
         startActivity(Intent.createChooser(send, "Share log"))
     }
 

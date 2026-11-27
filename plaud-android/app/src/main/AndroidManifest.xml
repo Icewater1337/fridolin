@@ -48,6 +48,17 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- Share log hands the whole log over as a file: text in an intent gets cut off by the receiving app -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false" />
