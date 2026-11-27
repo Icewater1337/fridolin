@@ -166,4 +166,10 @@ func TestParsePollAnswer(t *testing.T) {
 	if _, err := ParseAnswer(`{"action":"poll","slots":[],"book_minutes":30}`); err == nil {
 		t.Error("empty poll accepted")
 	}
+	// #829: the bridge adds "none of these", so 12 times would make 13
+	// options, one more than WhatsApp takes.
+	slots, _ := json.Marshal(make([]string, 12))
+	if _, err := ParseAnswer(`{"action":"poll","text":"hi","slots":` + string(slots) + `,"book_minutes":30}`); err == nil {
+		t.Error("a poll of 12 times accepted")
+	}
 }
