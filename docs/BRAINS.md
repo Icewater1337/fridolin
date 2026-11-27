@@ -565,7 +565,7 @@ passes them to `contact_person` as `window`:
 `offer` or more, and the errand run is told the window with the free
 times.
 
-- **The poll.** The run answers `poll` with up to 12 start times. The
+- **The poll.** The run answers `poll` with up to 11 start times. The
   bridge keeps only those that are free and inside the window (and
   `days`, `from`, `to` of brain.json), and sends the person a real
   WhatsApp poll with them and a "🤷 None of these work" option, after
