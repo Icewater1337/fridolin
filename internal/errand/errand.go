@@ -22,15 +22,15 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // The limits of an errand.
 const (
 	// MaxSlots is how many times a poll offers: WhatsApp's limit on
-	// options, less the "none of these" one the bridge adds.
-	MaxSlots = outbound.MaxPollOptions - 1
+	// options (outbound.MaxPollOptions, which errand may not import),
+	// less the "none of these" one the bridge adds.
+	MaxSlots = 11
 	// MaxMessages is how many messages Fridolin writes in one errand,
 	// the first one included; the errand ends at the next answer after it.
 	MaxMessages = 20

@@ -549,3 +549,12 @@ func TestErrandPollVoteChangedFromNone(t *testing.T) {
 	h.WaitSent(harnessDM, outboundmsg.ErrandBookedNotice("Alex", e.ID, when))
 	h.WaitSent(errandJID, "Booked, see you!")
 }
+
+// TestErrandSlotPollFitsWhatsApp: #829. A full slot poll, its times and
+// "none of these", is no more than WhatsApp takes.
+func TestErrandSlotPollFitsWhatsApp(t *testing.T) {
+	t.Parallel()
+	if errand.MaxSlots+1 != outboundmsg.MaxPollOptions {
+		t.Errorf("a full slot poll has %d options; WhatsApp takes %d", errand.MaxSlots+1, outboundmsg.MaxPollOptions)
+	}
+}
