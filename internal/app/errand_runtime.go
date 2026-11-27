@@ -267,6 +267,17 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		if err := r.Window.Validate(); err != nil {
 			return "", err
 		}
+		longest := manifest.ErrandCalendarMaxMinutes
+		if s.Calendar != nil {
+			longest = s.Calendar.Longest()
+		}
+		switch {
+		case r.Window.Minutes > longest:
+			return "", fmt.Errorf("window minutes is at most %d, brain.json's errands.calendar.max_minutes", longest)
+		case r.Window.Minutes == 0:
+			// The default length, but never one no vote could book.
+			r.Window.Minutes = min(errand.DefaultMinutes, longest)
+		}
 		j, _ := json.Marshal(r.Window)
 		window = string(j)
 	}

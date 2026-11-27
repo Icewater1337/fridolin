@@ -146,8 +146,12 @@ func (o *Outbox) Notice(ctx context.Context, brain, chat, text, history, ref str
 // Poll puts a poll of the bridge's own into the outbox, for ref (an
 // approval, "approval:<id>"), whose votes go there: single choice,
 // recorded in no history. WhatsApp refusing it as a poll sends it as a
-// numbered list, whose answers then come as messages.
+// numbered list, whose answers then come as messages. More than
+// MaxPollOptions options are refused, not sent.
 func (o *Outbox) Poll(ctx context.Context, chat, question string, options []string, ref string) error {
+	if len(options) > MaxPollOptions {
+		return fmt.Errorf("a poll has at most %d options, not %d", MaxPollOptions, len(options))
+	}
 	return o.add(ctx, store.OutboxRow{Chat: chat, Parts: []store.OutboxPart{{Question: question, Options: options, Max: 1, Ref: ref}}})
 }
 

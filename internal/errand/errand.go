@@ -27,8 +27,10 @@ import (
 
 // The limits of an errand.
 const (
-	// MaxSlots is how many times a poll offers.
-	MaxSlots = 12
+	// MaxSlots is how many times a poll offers: WhatsApp's limit on
+	// options (outbound.MaxPollOptions, which errand may not import),
+	// less the "none of these" one the bridge adds.
+	MaxSlots = 11
 	// MaxMessages is how many messages Fridolin writes in one errand,
 	// the first one included; the errand ends at the next answer after it.
 	MaxMessages = 20
@@ -200,7 +202,7 @@ Rules:
 10. Write short WhatsApp messages in the language the person writes in, as formal or informal as they are ("du" or "Sie"), or else in the language of the conversation so far. No markup, no [POLL] blocks.
 11. When the document's channel is "phone call", what you write is read aloud and what they said was transcribed: short spoken sentences, no emoji, lists or links, and allow for words the transcription got wrong.
 12. If the document has a calendar, you may help find a time to meet: offer only times inside calendar.free_times, and claim to know nothing else of the owner's calendar. With calendar.may "book" or "book_after_yes", once the person agrees on a time inside free_times, answer "book" with book_start (local time, "YYYY-MM-DD HH:MM") and book_minutes (at most calendar.max_minutes). With "book" your text goes out only once it is booked, so write it as the confirmation; with "book_after_yes" it goes out at once, so say the owner will confirm. Lines from "calendar" are the bridge's word on what was booked or not: tell the person what they say.
-13. To find a time, answer "poll" instead of listing times in text: slots are up to 12 start times ("YYYY-MM-DD HH:MM") inside calendar.free_times and inside calendar.window when it has one, each book_minutes long (calendar.window.minutes, else 60); your text introduces the poll. The bridge sends the person a poll with those times and a "none of these" option; a line from "calendar" tells you what they voted. Use it only when calendar.may is not "off"; when they vote none, ask what suits them or poll again with other times.
+13. To find a time, answer "poll" instead of listing times in text: slots are up to 11 start times ("YYYY-MM-DD HH:MM") inside calendar.free_times and inside calendar.window when it has one, each book_minutes long (calendar.window.minutes, else 60 or calendar.max_minutes if less); your text introduces the poll. The bridge sends the person a poll with those times and a "none of these" option; a line from "calendar" tells you what they voted. Use it only when calendar.may is not "off"; when they vote none, ask what suits them or poll again with other times.
 
 Answer with one JSON object and nothing else:
 {"action": "reply" | "done" | "ask_owner" | "abort" | "book" | "poll", "text": "", "summary": "", "question": "", "reason": "", "note": "", "severe": false, "stop": false, "book_start": "", "book_minutes": 0, "slots": []}
