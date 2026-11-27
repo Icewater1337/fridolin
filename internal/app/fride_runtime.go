@@ -1138,10 +1138,12 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 	if len(targets) == 0 {
 		return "", errors.New(f.noFrideNode(want, t.Repos))
 	}
-	target := targets[0]
-	if target.ID == t.Node {
-		return "", fmt.Errorf("FrIDE #%d is on %s already", id, target.Name)
+	// Its own node is no target, but another with the same tag is (#831).
+	others := slices.DeleteFunc(slices.Clone(targets), func(v nodes.View) bool { return v.ID == t.Node })
+	if len(others) == 0 {
+		return "", fmt.Errorf("FrIDE #%d is on %s already", id, targets[0].Name)
 	}
+	target := others[0]
 	if why := f.unreachable(t.Node); why != "" {
 		return "", fmt.Errorf("its node cannot hand it over: %s", why)
 	}

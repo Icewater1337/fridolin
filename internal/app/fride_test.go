@@ -383,6 +383,38 @@ func TestFrideNotLoggedInPingPong(t *testing.T) {
 	}
 }
 
+// A move to a tag the thread's own node carries too goes to the other
+// node with it (#831), and says "already there" only when the own node
+// is the one match.
+func TestFrideMoveToATag(t *testing.T) {
+	t.Parallel()
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	boxFride, miniFride := testutil.StartFakeFride(t, "api"), testutil.StartFakeFride(t, "api")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	miniFride.SetCanStart(false)
+	box, _ := h.fakeFrideNode("box", addr, boxFride)
+	mini, _ := h.fakeFrideNode("mini", addr, miniFride)
+	for id, tags := range map[string][]string{box: {"mac", "solo"}, mini: {"mac"}} {
+		if w := h.Do("PUT", "/api/nodes/"+id+"/tags", map[string]any{"tags": tags}); w.Code != http.StatusOK {
+			t.Fatalf("tags: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if reply := h.coreSays("add a health endpoint", step("fride_task", `{"message":"Add a health endpoint","repos":["api"]}`)); !strings.Contains(reply, "Handed to FrIDE on box as FrIDE #1") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	boxFride.Start(1, "health", "feat/health")
+	h.WaitFor("FrIDE #1 on task health", func() bool {
+		th, err := h.b.store.GetFrideThread(context.Background(), 1)
+		return err == nil && th.TaskID == "health"
+	})
+	reply := h.coreSays("move it", step("fride_move", `{"thread":1,"node":"solo"}`), step("fride_move", `{"thread":1,"node":"mac"}`))
+	if !strings.Contains(reply, "[core:fride_move failed] FrIDE #1 is on box already") || !strings.Contains(reply, "🚚 *FrIDE #1* moved from box to mini") {
+		t.Fatalf("fride_move:\n%s", reply)
+	}
+}
+
 // FrIDE's news in a chat that handed it work, quiet by default: one text
 // the node sends for every thread goes out once naming the threads;
 // bookkeeping, progress, progress dressed up as a question and a stall
