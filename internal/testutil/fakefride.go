@@ -65,6 +65,7 @@ type fakeThread struct {
 	Question string `json:"question"`
 	Message  string `json:"-"`
 	Ref      string `json:"-"`
+	Source   string `json:"-"`
 	Replies  []string
 }
 
@@ -363,16 +364,19 @@ func (f *FakeFride) answer(w http.ResponseWriter, r *http.Request) {
 			Message string   `json:"message"`
 			Repos   []string `json:"repos"`
 			Ref     string   `json:"ref"`
+			Source  string   `json:"source"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&p)
+		// As FrIDE's orchestrator.ReceiveAs: the same source and ref
+		// get the thread they started back.
 		for _, th := range f.threads {
-			if p.Ref != "" && th.Ref == p.Ref {
+			if p.Ref != "" && th.Ref == p.Ref && th.Source == p.Source {
 				reply(http.StatusOK, map[string]any{"thread_id": th.ID, "status": th.Status, "task_id": th.TaskID, "existing": true})
 				return
 			}
 		}
 		f.nextID++
-		th := &fakeThread{ID: f.nextID, Status: "queued", Message: p.Message, Ref: p.Ref}
+		th := &fakeThread{ID: f.nextID, Status: "queued", Message: p.Message, Ref: p.Ref, Source: p.Source}
 		// The orchestrator sends a message that names a task to it.
 		for id, t := range f.tasks {
 			if t.Exists && strings.Contains(p.Message, "task "+id) {

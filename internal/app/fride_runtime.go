@@ -362,8 +362,11 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 	if kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) {
 		// FrIDE there cannot think (#288): the work goes to another
 		// FrIDE if one takes it, and stays here for a retry otherwise.
+		// It keeps its branch, and a fresh ref: the same ref would get
+		// back the failed thread from a node it was on before (#826).
 		moved := t
-		moved.State, moved.Node, moved.FrideThread, moved.FrideStatus, moved.TaskID, moved.Branch = store.FrideQueued, "", 0, "", "", ""
+		moved.State, moved.Node, moved.FrideThread, moved.FrideStatus, moved.TaskID = store.FrideQueued, "", 0, "", ""
+		moved.Failovers++
 		pctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		placed, _ := f.place(pctx, &moved, node)
 		cancel()
@@ -1135,10 +1138,12 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 	if len(targets) == 0 {
 		return "", errors.New(f.noFrideNode(want, t.Repos))
 	}
-	target := targets[0]
-	if target.ID == t.Node {
-		return "", fmt.Errorf("FrIDE #%d is on %s already", id, target.Name)
+	// Its own node is no target, but another with the same tag is (#831).
+	others := slices.DeleteFunc(slices.Clone(targets), func(v nodes.View) bool { return v.ID == t.Node })
+	if len(others) == 0 {
+		return "", fmt.Errorf("FrIDE #%d is on %s already", id, targets[0].Name)
 	}
+	target := others[0]
 	if why := f.unreachable(t.Node); why != "" {
 		return "", fmt.Errorf("its node cannot hand it over: %s", why)
 	}
@@ -1245,14 +1250,20 @@ func taskGone(err error) bool {
 // reapGone closes open thread t when FrIDE says its task is gone, and
 // reports whether it did. An unreachable node or any other answer keeps it.
 func (f *frideRuntime) reapGone(ctx context.Context, t store.FrideThread) bool {
-	if t.TaskID == "" || t.Node == "" {
-		return false
-	}
-	if _, err := f.b.nodes.FrideTaskInfoOn(ctx, t.Node, t.Instance, t.TaskID); !taskGone(err) {
+	if !f.isGone(ctx, t) {
 		return false
 	}
 	_, err := f.closeGone(ctx, t.ID, f.where(t.Node, t.Instance))
 	return err == nil
+}
+
+// isGone reports whether FrIDE says open thread t's task is gone.
+func (f *frideRuntime) isGone(ctx context.Context, t store.FrideThread) bool {
+	if t.TaskID == "" || t.Node == "" {
+		return false
+	}
+	_, err := f.b.nodes.FrideTaskInfoOn(ctx, t.Node, t.Instance, t.TaskID)
+	return taskGone(err)
 }
 
 // close closes thread id's task in FrIDE, archives its workspace into the
@@ -1382,6 +1393,26 @@ func (f *frideRuntime) closeGone(ctx context.Context, id int64, name string) (st
 	if err != nil {
 		return "", err
 	}
+	return f.closeGoneLocked(ctx, t, name)
+}
+
+// closeStillGone is closeGone for thread seen, which isGone checked
+// earlier without its lock: only while it is still where it was then, as
+// work moved or put back since lives on (#828).
+func (f *frideRuntime) closeStillGone(ctx context.Context, seen store.FrideThread) error {
+	unlock := f.lock(seen.ID)
+	defer unlock()
+	t, err := f.thread(ctx, seen.ID)
+	if err != nil || t.State != seen.State || t.Node != seen.Node || t.Instance != seen.Instance || t.TaskID != seen.TaskID || t.FrideThread != seen.FrideThread {
+		return err
+	}
+	_, err = f.closeGoneLocked(ctx, t, f.where(t.Node, t.Instance))
+	return err
+}
+
+// closeGoneLocked is closeGone with thread t's lock held.
+func (f *frideRuntime) closeGoneLocked(ctx context.Context, t store.FrideThread, name string) (string, error) {
+	id := t.ID
 	var with store.FrideThread
 	closed, err := f.b.store.FrideThreads(ctx, store.FrideClosed)
 	if err != nil {

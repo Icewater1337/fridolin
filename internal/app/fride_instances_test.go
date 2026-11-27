@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -247,6 +248,87 @@ func TestFrideInstanceStopAfterLoginFailure(t *testing.T) {
 	h.WaitSent(harnessDM, "Claude there is not logged in")
 	if reply := h.coreSays("renewed", step("fride_stop", `{"instance":"work"}`)); !strings.Contains(reply, "Stopped the FrIDE instance work on mini") {
 		t.Fatalf("fride_stop after a login failure:\n%s", reply)
+	}
+}
+
+// A reply and a stop at once (#828): the reply holds the thread's lock
+// and starts the instance (it runs without a login), while the stop holds
+// the instance's and finds the thread's task gone. Neither waits on the
+// other for ever.
+func TestFrideInstanceReplyAndStopAtOnce(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, frideInstancesConfig)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	mini := h.fakeHostNode("mini", h.StartNodes(), 32768, 16000, 6144)
+	if reply := h.coreSays("fix it", step("fride_task", `{"message":"Fix it","instance":"work"}`)); !strings.Contains(reply, "as FrIDE #1") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	ctx := context.Background()
+	th, err := h.b.store.GetFrideThread(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.TaskID = "gone"
+	if err := h.b.store.SaveFrideThread(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	mini.setNoLogin("", map[string]string{"work": "no Claude token"})
+	h.WaitFor("work running without a login", func() bool {
+		w, ok := locate("work", h.b.fride.inst.views())
+		return ok && w.running() && w.in.NoLogin != ""
+	})
+	mini.setGone(true)
+
+	stopHolds, release := make(chan struct{}), make(chan struct{})
+	mini.mu.Lock()
+	mini.beforeTaskInfo = func() { close(stopHolds); <-release }
+	mini.mu.Unlock()
+	done := make(chan string, 2)
+	go func() {
+		_, err := h.b.fride.inst.stop(ctx, "work", "test", "test", true)
+		done <- fmt.Sprint("stop: ", err)
+	}()
+	<-stopHolds
+	go func() {
+		_, err := h.b.fride.reply(ctx, 1, "go on")
+		done <- fmt.Sprint("reply: ", err)
+	}()
+	h.WaitFor("the reply holding FrIDE #1's lock", func() bool {
+		h.b.fride.mu.Lock()
+		l := h.b.fride.locks[1]
+		h.b.fride.mu.Unlock()
+		if l == nil || l.TryLock() {
+			if l != nil {
+				l.Unlock()
+			}
+			return false
+		}
+		return true
+	})
+	close(release)
+	for range 2 {
+		select {
+		case r := <-done:
+			t.Log(r)
+		case <-time.After(10 * time.Second):
+			t.Fatal("the reply and the stop wait on each other")
+		}
+	}
+	if got, err := h.b.store.GetFrideThread(ctx, 1); err != nil || got.State != store.FrideClosed {
+		t.Fatalf("FrIDE #1, whose task is gone, is %+v (%v)", got, err)
+	}
+
+	// Work placed again after the stop saw it gone is not closed late.
+	th.State, th.TaskID = store.FrideSent, "again"
+	if err := h.b.store.SaveFrideThread(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	th.TaskID = "gone"
+	h.b.fride.inst.closeGone(ctx, []store.FrideThread{th})
+	if got, err := h.b.store.GetFrideThread(ctx, 1); err != nil || got.State != store.FrideSent {
+		t.Errorf("FrIDE #1, placed again, is %+v (%v)", got, err)
 	}
 }
 
