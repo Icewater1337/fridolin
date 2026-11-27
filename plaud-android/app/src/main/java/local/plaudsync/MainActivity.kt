@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var statusView: TextView
     private lateinit var logView: TextView
     private lateinit var allowUpdates: Button
+    private lateinit var installUpdate: Button
     private val own by lazy { Updater.own(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,6 +68,11 @@ class MainActivity : Activity() {
         statusView = TextView(this).apply { textSize = 16f }
         // Android lets the app install Fridolin's builds only once this is allowed (Updater.kt).
         allowUpdates = button("Allow app updates") { startActivity(Updater.allowIntent(this)) }
+        // Updates install only on this tap; nothing in the background does (Updater.kt).
+        installUpdate = button("Install update") {
+            SyncService.installUpdate(this)
+            Toast.makeText(this, "Installing once the sync is idle", Toast.LENGTH_SHORT).show()
+        }
         logView = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 11f; setTextIsSelectable(true) }
         setContentView(ScrollView(this).apply {
             fitsSystemWindows = true
@@ -75,6 +81,7 @@ class MainActivity : Activity() {
                 setPadding(pad, pad, pad, pad)
                 addView(statusView)
                 if (Fridolin.enabled) {
+                    addView(installUpdate)
                     addView(allowUpdates)
                     addView(voice)
                     addView(ask)
@@ -188,11 +195,13 @@ class MainActivity : Activity() {
             if (Fridolin.enabled && VoicePrefs.enabled(this@MainActivity)) appendLine("Voice mode: on")
             appendLine("App: ${own.name} (${own.code})")
             if (Fridolin.enabled) {
+                Updater.available(this@MainActivity).takeIf { it > 0 }?.let { appendLine("New version available: build $it, tap Install update") }
                 Updater.describe(this@MainActivity)?.let { appendLine(it) }
                 if (!Updater.allowed(this@MainActivity)) appendLine("App updates: NOT allowed, tap the button below")
             }
             append("Files: Documents/PlaudSync")
         }
+        installUpdate.visibility = if (Fridolin.enabled && Updater.available(this) > 0) View.VISIBLE else View.GONE
         allowUpdates.visibility = if (Updater.allowed(this)) View.GONE else View.VISIBLE
         logView.text = AppLog.tail(200).asReversed().joinToString("\n")
     }

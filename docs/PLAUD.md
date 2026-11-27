@@ -141,15 +141,17 @@ phone is paired), or ask the core brain, which has `plaud_app_update` and
 4. The app checks what it got: the SHA-256 Fridolin named, and that
    Android reads it as Plaud Sync, at that version, signed with the app's
    own key. A build that fails these checks is not fetched again; the next
-   one is. Once the sync is idle (not looking for the pin, fetching from
-   it, while the pin records or an answer is read aloud), the app hands it
-   to Android's PackageInstaller and asks it not to ask the owner
-   (`USER_ACTION_NOT_REQUIRED`). The update ends the app; Android starts
+   one is. The app keeps the build and shows **New version available** with
+   an **Install update** button when it is opened; nothing installs, asks
+   or notifies in the background. On the tap, once the sync is idle (not
+   looking for the pin, fetching from it, while the pin records or an
+   answer is read aloud), the app hands it to Android's PackageInstaller
+   and asks it not to ask the owner (`USER_ACTION_NOT_REQUIRED`). The
+   update ends the app; Android starts
    the new version, which carries on the sync. The pairing, the keys, the
    settings and the recordings, transcripts and questions that wait are in
    the app's own storage and keystore, which an update keeps. A build
-   Android refuses is tried again after six hours, or when the app is
-   opened.
+   Android refuses is tried again at the next tap.
 
 **Once per phone:**
 
@@ -158,12 +160,11 @@ phone is paired), or ask the core brain, which has `plaud_app_update` and
   over the old one. It keeps its pairing.
 - Allow Plaud Sync to install apps: its **Allow app updates** button opens
   Android's **Install unknown apps** page for it (Settings → Apps →
-  Special app access). Until then, the app shows a notification and the
-  card says the update waits for it.
+  Special app access). Until then, the app's screen and the card say the
+  update waits for it.
 - The first update asks for a tap: Android asks to confirm it, since the
   app was installed by hand, not by itself. With the app open the
-  question shows at once, else in a notification, **Plaud Sync update
-  ready**. Declined, it asks again when the app is next opened. From then
+  question shows at once. Declined, **Install update** asks again. From then
   on the app installed itself, and Android 12 and newer install its
   updates without asking.
 
@@ -187,7 +188,7 @@ reaches WhatsApp unless you turn that off.
 1. Dashboard → **Integrations → Plaud**: turn on **Voice mode** (`voice`),
    pick the **Brain for voice questions** (`voice_brain`, default: the
    brain that gets your DMs) and save. Build the app again: the phone
-   installs it at its next check-in ([Updates](#updates)), and keeps its
+   offers it in its screen ([Updates](#updates)), and keeps its
    pairing.
 2. In the app, turn on **Voice mode**. Its notification says so, and offers
    **Ask**, **Stop** and **Skip**.

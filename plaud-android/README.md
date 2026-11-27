@@ -34,11 +34,12 @@ Two ways, both in [docs/PLAUD.md](../docs/PLAUD.md#without-plauds-cloud-the-phon
 Built by Fridolin, the app updates itself to each new build from the dashboard
 ([docs/PLAUD.md](../docs/PLAUD.md#updates)): at check-ins it asks Fridolin for the current
 build, saying which version it runs, fetches a newer one encrypted for its keystore, checks its
-SHA-256 and that Android reads it as this app, signed with its own key, and installs it with
-`PackageInstaller` once the sync is idle (`Updater.kt`, `UpdateReceiver.kt`; the decisions and
+SHA-256 and that Android reads it as this app, signed with its own key, and keeps it. Nothing
+installs in the background: when the app is opened it shows **New version available** and an
+**Install update** button, and the tap installs it with `PackageInstaller` once the sync is idle (`Updater.kt`, `UpdateReceiver.kt`; the decisions and
 the decryption are in `AppUpdate.kt`). The first update asks for a tap on the phone, and the app
 needs **Install unknown apps** (its **Allow app updates** button); later ones install without
-asking. Fridolin numbers its builds past `versionCode` in `app/build.gradle`
+Android asking, still on the tap. Fridolin numbers its builds past `versionCode` in `app/build.gradle`
 (`version_code`).
 
 ## Voice mode

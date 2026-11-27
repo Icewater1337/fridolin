@@ -16,7 +16,7 @@ import (
 
 // The core brain updates the Plaud Sync phone app (docs/PLAUD.md,
 // "Updates"): plaud_app_update builds it as the Plaud card's button does,
-// and the paired phones install the build at their next check-in;
+// and the paired phones offer the build in the app, to install with a tap;
 // plaud_app_status says how that went. A core run has them while the
 // phone app uploads through the site (plaud.phone_upload); a sub-brain
 // and a delegated run never do.
@@ -34,7 +34,7 @@ func (b *App) registerPlaudTools(r *tools.Set[mcpCaller]) {
 		Available: b.plaudAppTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Update the Plaud Sync app on the owner's phone: build it again from the source Fridolin runs (on this machine or a node that builds Android apps), which takes a few minutes. Each paired phone then fetches the build at its next check-in, usually within 10 minutes, and installs it; the first update may wait for a tap on the phone. Only when the owner asks for it. Check how it went with plaud_app_status.",
+				Description: "Update the Plaud Sync app on the owner's phone: build it again from the source Fridolin runs (on this machine or a node that builds Android apps), which takes a few minutes. Each paired phone then fetches the build at its next check-in, usually within 10 minutes, but installs it only when the owner opens Plaud Sync and taps Install update; nothing installs in the background. Only when the owner asks for it. Check how it went with plaud_app_status.",
 				InputSchema: tools.Schema(nil),
 			}
 		},
@@ -61,7 +61,7 @@ func (b *App) callPlaudAppUpdate(_ context.Context, _ mcpCaller, _ json.RawMessa
 	if err != nil {
 		return mcp.ErrorResult("the app cannot be built: " + err.Error()), nil
 	}
-	return mcp.TextResult("Building the Plaud Sync app. It takes a few minutes; then each paired phone installs it at its next check-in.\n\n" + plaudAppSummary(b.plaud.Status().App, time.Now())), nil
+	return mcp.TextResult("Building the Plaud Sync app. It takes a few minutes; then each paired phone offers it in the app, and installs it when the owner taps Install update.\n\n" + plaudAppSummary(b.plaud.Status().App, time.Now())), nil
 }
 
 func (b *App) callPlaudAppStatus(_ context.Context, _ mcpCaller, _ json.RawMessage) (*mcp.CallResult, error) {
@@ -117,7 +117,7 @@ func phoneAppLine(d plaud.PhoneRow, rel *plaud.Release, ago func(time.Time) stri
 	case rel != nil && a.VersionCode >= rel.VersionCode:
 		out += "; up to date"
 	case rel != nil:
-		out += fmt.Sprintf("; updates to %d at its next check-in", rel.VersionCode)
+		out += fmt.Sprintf("; offers the update to %d when the app is opened, installed by a tap", rel.VersionCode)
 	}
 	if u := a.Update; u != nil && (rel == nil || u.VersionCode <= rel.VersionCode) {
 		out += fmt.Sprintf(". Last update, to %d: %s", u.VersionCode, updateStateText(u))
@@ -129,11 +129,11 @@ func phoneAppLine(d plaud.PhoneRow, rel *plaud.Release, ago func(time.Time) stri
 func updateStateText(u *plaud.AppUpdate) string {
 	switch u.State {
 	case "waiting":
-		return "downloaded, installs once the app is not syncing"
+		return "downloaded, waits for the owner to tap Install update in the app"
 	case "installing":
 		return "handed to Android to install"
 	case "confirm":
-		return "waits for a tap on the phone (the Plaud Sync notification)"
+		return "waits for a tap on the phone (Android's question; Install update in the app asks again)"
 	case "not_allowed":
 		return "waits until Plaud Sync may install apps (Settings → Apps → Special app access → Install unknown apps)"
 	case "installed":

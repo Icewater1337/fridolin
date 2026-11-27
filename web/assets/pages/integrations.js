@@ -311,20 +311,20 @@ export default /** @satisfies {PageModule} */ ({
             kind: built ? undefined : 'primary', icon: 'phone', disabled: running || !site || !saved || !!noBuilder,
             onClick: async () => {
               await post('/api/plaud/app/build');
-              toast(phones ? 'Building the phone app; the phones install it at their next check-in' : 'Building the phone app…', 'info');
+              toast(phones ? 'Building the phone app; the phones offer it in the app; tap Install update there' : 'Building the phone app…', 'info');
               await refresh();
             },
           }),
           built && !running ? btn('Download app (APK)', { kind: 'primary', icon: 'download', onClick: () => download('/api/plaud/app.apk', 'plaud-sync.apk') }) : null),
         h('p.muted.small', 'Copy it to the phone and install it, remove the NotePin from Plaud’s app, then tap Pair NotePin in Plaud Sync. On its first start the app makes a key that never leaves the phone and pairs it with Fridolin; build again for another phone.'),
-        h('p.muted.small', 'Paired phones update themselves: each new build is fetched at the phone’s next check-in, encrypted for that phone, and installed. The first update asks for a tap on the phone, and Plaud Sync must be allowed to install unknown apps; later ones install without asking.'),
+        h('p.muted.small', 'Paired phones update themselves: each new build is fetched at the phone’s next check-in, encrypted for that phone, and kept. It installs only when you open Plaud Sync and tap Install update; nothing installs in the background. The first update also asks for a confirmation from Android, and Plaud Sync must be allowed to install unknown apps.'),
       ];
     }
 
     /** @param {PlaudAppUpdate} u */
     function updateText(u) {
       switch (u.state) {
-        case 'waiting': return 'downloaded, installs once the app is not syncing';
+        case 'waiting': return 'downloaded, waits for a tap on Install update in the app';
         case 'installing': return 'handed to Android to install';
         case 'confirm': return 'waits for a tap on the phone: open the Plaud Sync notification';
         case 'not_allowed': return 'waits until Plaud Sync may install apps: Settings → Apps → Special app access → Install unknown apps';
