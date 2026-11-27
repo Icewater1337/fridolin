@@ -109,7 +109,17 @@
             "from": {"type": "string", "pattern": "^([01][0-9]|2[0-4]):[0-5][0-9]$", "description": "Start of the hours, HH:MM. Default 08:00."},
             "to": {"type": "string", "pattern": "^([01][0-9]|2[0-4]):[0-5][0-9]$", "description": "End of the hours, HH:MM. Default 20:00."},
             "days_ahead": {"type": "integer", "minimum": 0, "maximum": 60, "description": "How many days ahead. Default 14."},
-            "max_minutes": {"type": "integer", "minimum": 0, "maximum": 480, "description": "The longest booking, 15 or more. Default 90."}
+            "max_minutes": {"type": "integer", "minimum": 0, "maximum": 480, "description": "The longest booking, 15 or more. Default 90."},
+            "in_person_blocked": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "description": "In a conversation the other person began, the hours that are never offered for an in-person meeting. Default Monday to Friday, 08:00 to 17:00 (docs/BRAINS.md, Asked about your time).",
+              "properties": {
+                "days": {"type": ["array", "null"], "items": {"type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}, "description": "The weekdays. Default Monday to Friday."},
+                "from": {"type": "string", "pattern": "^([01][0-9]|2[0-4]):[0-5][0-9]$", "description": "Start of the blocked hours, HH:MM. Default 08:00."},
+                "to": {"type": "string", "pattern": "^([01][0-9]|2[0-4]):[0-5][0-9]$", "description": "End of the blocked hours, HH:MM. Default 17:00."}
+              }
+            }
           }
         }
       }
