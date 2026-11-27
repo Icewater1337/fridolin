@@ -316,6 +316,20 @@ func TestFrideInstanceReplyAndStopAtOnce(t *testing.T) {
 			t.Fatal("the reply and the stop wait on each other")
 		}
 	}
+	if got, err := h.b.store.GetFrideThread(ctx, 1); err != nil || got.State != store.FrideClosed {
+		t.Fatalf("FrIDE #1, whose task is gone, is %+v (%v)", got, err)
+	}
+
+	// Work placed again after the stop saw it gone is not closed late.
+	th.State, th.TaskID = store.FrideSent, "again"
+	if err := h.b.store.SaveFrideThread(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	th.TaskID = "gone"
+	h.b.fride.inst.closeGone(ctx, []store.FrideThread{th})
+	if got, err := h.b.store.GetFrideThread(ctx, 1); err != nil || got.State != store.FrideSent {
+		t.Errorf("FrIDE #1, placed again, is %+v (%v)", got, err)
+	}
 }
 
 func TestFrideInstanceIdleStop(t *testing.T) {

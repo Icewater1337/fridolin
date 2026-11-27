@@ -1393,6 +1393,26 @@ func (f *frideRuntime) closeGone(ctx context.Context, id int64, name string) (st
 	if err != nil {
 		return "", err
 	}
+	return f.closeGoneLocked(ctx, t, name)
+}
+
+// closeStillGone is closeGone for thread seen, which isGone checked
+// earlier without its lock: only while it is still where it was then, as
+// work moved or put back since lives on (#828).
+func (f *frideRuntime) closeStillGone(ctx context.Context, seen store.FrideThread) error {
+	unlock := f.lock(seen.ID)
+	defer unlock()
+	t, err := f.thread(ctx, seen.ID)
+	if err != nil || t.State != seen.State || t.Node != seen.Node || t.Instance != seen.Instance || t.TaskID != seen.TaskID || t.FrideThread != seen.FrideThread {
+		return err
+	}
+	_, err = f.closeGoneLocked(ctx, t, f.where(t.Node, t.Instance))
+	return err
+}
+
+// closeGoneLocked is closeGone with thread t's lock held.
+func (f *frideRuntime) closeGoneLocked(ctx context.Context, t store.FrideThread, name string) (string, error) {
+	id := t.ID
 	var with store.FrideThread
 	closed, err := f.b.store.FrideThreads(ctx, store.FrideClosed)
 	if err != nil {

@@ -252,10 +252,11 @@ func (i *frideInstances) blockingThreads(ctx context.Context) (open map[string][
 	return open, gone, nil
 }
 
-// closeGone closes threads whose task FrIDE says is gone.
+// closeGone closes threads whose task FrIDE said is gone, unless they
+// moved on since.
 func (i *frideInstances) closeGone(ctx context.Context, gone []store.FrideThread) {
 	for _, t := range gone {
-		if _, err := i.f.closeGone(ctx, t.ID, i.f.where(t.Node, t.Instance)); err != nil {
+		if err := i.f.closeStillGone(ctx, t); err != nil {
 			log.Printf("fride: closing FrIDE #%d, whose task is gone: %v", t.ID, err)
 		}
 	}
