@@ -82,14 +82,14 @@ WORKDIR /dl
 RUN set -eu; \
     fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o "$1" "$2"; }; \
     case "${TARGETARCH}" in \
-      amd64) restic_sha=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c; \
+      amd64) restic_sha=0ccd9fa7885074a24603b051e01bf9bd8b5e45d6a1791e9d9887e9e9372107f7; \
              rclone_sha=b00f00b3266c3764413afe599d3ec316f6f43b3e0ea8a0bc1d186d2133e46df7; \
              ls_arch=x86_64; ls_sha=d3687b9fd0f2e9426bbd3da828429ff3f1dfc5c9b74d54fdf028e4ee510e7dea; \
              gh_sha=79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f; \
              cf_sha=97bb3b02d23a5980fc9c15a1a270e692da1923f103f920d5b16d4931d5ab55e7; \
              agy_path=linux-x64/cli_linux_x64; \
              agy_sha=83311d3f354567612dc16c1ae2ea9b503d6f6833aa4e138d39aa229da3f3bb99b0e4d7cca0bce4796b0060d6a51d8113eb7449ed5dc0e7900bf217107ea5bff9 ;; \
-      arm64) restic_sha=a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465; \
+      arm64) restic_sha=1188daded239bccb5952a01d2ad33e77a0d3dc34f9d9fc1e7fdda618d44938ef; \
              rclone_sha=ee169016675e23a69d77240565133ff7dbc9b33d16fa8f7053d4af39f1eaeb78; \
              ls_arch=arm64; ls_sha=922a09e6a7ac67f2095571894dc6382e94e1dd4cdd9674883ddf1a8e74ab982d; \
              gh_sha=b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02; \
