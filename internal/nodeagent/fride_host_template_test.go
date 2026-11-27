@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -145,6 +147,76 @@ func TestFrideInstancePrepareConfig(t *testing.T) {
 	}
 	if allow, _ := get(cfg, "companion", "claudeAllow").([]any); len(allow) != 0 {
 		t.Errorf("claudeAllow: %v, want the owner's empty list", allow)
+	}
+	// There a person merges: auto mode gets no rules that say agents do.
+	if am := get(cfg, "companion", "claudeAutoMode"); am != nil {
+		t.Errorf("claudeAutoMode: %v, want none where claudeAllow is empty", am)
+	}
+
+	var template map[string]any
+	if err := json.Unmarshal(given, &template); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := get(template, "companion", "claudeAutoMode", "allow").([]any); len(a) < 2 || a[0] != "$defaults" {
+		t.Errorf("the template's claudeAutoMode.allow: %v, want $defaults and rules", a)
+	}
+	if got := get(prepare(t.TempDir(), string(given)), "companion", "claudeAutoMode"); !reflect.DeepEqual(got, get(template, "companion", "claudeAutoMode")) {
+		t.Errorf("a new instance's claudeAutoMode: %v", got)
+	}
+
+	// A config made from an older template, whose claudeAllow had only the
+	// merge (and a rule the owner added) and whose auto mode rules are old,
+	// gains the template's newer rules and takes its auto mode rules: without
+	// gh pr view, `gh pr merge … ; gh pr view …` went to auto mode, which
+	// refused the merge.
+	home = t.TempDir()
+	writeTestFile(t, filepath.Join(home, "fride-companion", "home", "config.json"),
+		`{"version":1,"companion":{"enabled":true,"claudeAllow":["Bash(gh pr merge:*)","Bash(make check:*)"],`+
+			`"claudeAutoMode":{"allow":["$defaults","an old rule"],"soft_deny":["$defaults","mine"]}}}`)
+	cfg = prepare(home, string(given))
+	if got, want := get(cfg, "companion", "claudeAutoMode"), get(template, "companion", "claudeAutoMode"); !reflect.DeepEqual(got, want) {
+		t.Errorf("claudeAutoMode: %v, want the template's %v", got, want)
+	}
+	want, _ := get(template, "companion", "claudeAllow").([]any)
+	allow, _ := get(cfg, "companion", "claudeAllow").([]any)
+	if len(allow) < 2 || allow[0] != "Bash(gh pr merge:*)" || allow[1] != "Bash(make check:*)" {
+		t.Errorf("claudeAllow: %v, want the instance's own rules first", allow)
+	}
+	for _, r := range want {
+		if n := slices.Index(allow, r); n < 0 || slices.Index(allow[n+1:], r) >= 0 {
+			t.Errorf("claudeAllow: %v, want %v in it once", allow, r)
+		}
+	}
+	if len(want) < 2 {
+		t.Errorf("the template's claudeAllow: %v, want more than the merge", want)
+	}
+
+	// A config with no claudeAllow at all gets the template's, and no empty
+	// list where it had none.
+	home = t.TempDir()
+	writeTestFile(t, filepath.Join(home, "fride-companion", "home", "config.json"), `{"version":1,"maxSlots":3}`)
+	cfg = prepare(home, string(given))
+	if got := get(cfg, "companion", "claudeAllow"); !reflect.DeepEqual(got, get(template, "companion", "claudeAllow")) {
+		t.Errorf("claudeAllow: %v, want the template's", got)
+	}
+	home = t.TempDir()
+	writeTestFile(t, filepath.Join(home, "fride-companion", "home", "config.json"), `{"version":1,"maxSlots":3}`)
+	cfg = prepare(home, `{"version":1,"companion":{"enabled":true}}`)
+	if c, _ := get(cfg, "companion").(map[string]any); c == nil || c["claudeAllow"] != nil {
+		t.Errorf("companion: %v, want no claudeAllow from a template without one", c)
+	}
+}
+
+// The box's entrypoint merges its kept FrIDE config with the image's by
+// the same program as an instance's prepare script.
+func TestBoxEntrypointMergesConfigLikeInstances(t *testing.T) {
+	t.Parallel()
+	b, err := os.ReadFile(filepath.Join("..", "..", "container", "fride", "entrypoint.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "jq -s '"+frideConfigMerge+"'") {
+		t.Errorf("container/fride/entrypoint.sh does not merge with frideConfigMerge:\n%s", frideConfigMerge)
 	}
 }
 

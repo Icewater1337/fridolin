@@ -17,9 +17,7 @@ const frideInstanceScriptPrefix = "# fride-instance: "
 // the published template has), named for an instance, with the VM's own
 // base folder and workspaces, marks ponytail's statusline offer as made
 // and the workspaces as trusted by Claude Code. A config put back from
-// history keeps what it has and gains what it lacks of that config, key
-// by key (jq's *), so that a setting a newer FrIDE needs reaches an
-// instance made anew.
+// history is merged with that config by frideConfigMerge.
 const frideInstancePrepare = `# fride-instance: prepare
 set -eu
 c="$HOME/fride-companion"
@@ -32,7 +30,7 @@ if [ ! -s "$h/config.json.new" ] && [ -s "$t" ]; then
 	jq '.name = "fridolin companion (instance)"' "$t" >"$h/config.json.new"
 fi
 if [ -s "$h/config.json" ] && [ -s "$h/config.json.new" ]; then
-	jq -s '.[0] * .[1]' "$h/config.json.new" "$h/config.json" >"$h/config.json.old"
+	jq -s '` + frideConfigMerge + `' "$h/config.json.new" "$h/config.json" >"$h/config.json.old"
 elif [ -s "$h/config.json" ]; then
 	cp "$h/config.json" "$h/config.json.old"
 elif [ -s "$h/config.json.new" ]; then
@@ -52,6 +50,26 @@ s="$HOME/.claude.json"
 jq --arg w "$c/workspaces" '.projects[$w].hasTrustDialogAccepted = true' "$s" >"$s.tmp"
 mv "$s.tmp" "$s"
 `
+
+// frideConfigMerge is the jq program (for jq -s) that merges a FrIDE
+// config from a template, .[0], with one an instance or the box kept,
+// .[1]: the kept one keeps what it has and gains what it lacks, key by
+// key (jq's *), so that a setting a newer FrIDE needs reaches it. Two
+// keys are the template's to keep current, because a config made before
+// would otherwise keep its old ones for good and agents stopped at a step
+// the template now lets them take: companion.claudeAllow, a list, which
+// * keeps whole, gains the rules it lacks (gh pr view, which agents chain
+// after a merge), and companion.claudeAutoMode, auto mode's own rules, is
+// the template's. A kept empty claudeAllow says a person merges there: it
+// stays empty and gets no claudeAutoMode of the template's.
+// container/fride/entrypoint.sh, the box's, carries the same program.
+const frideConfigMerge = `(.[0].companion // {}) as $t | (.[1].companion // {}) as $o
+	| .[0] * .[1]
+	| if $o.claudeAllow == [] then (if $o | has("claudeAutoMode") then . else del(.companion.claudeAutoMode) end)
+	  else (($o.claudeAllow // []) + (($t.claudeAllow // []) - ($o.claudeAllow // []))) as $a
+	  | (if $a == [] then . else .companion.claudeAllow = $a end)
+	  | (if $t | has("claudeAutoMode") then .companion.claudeAutoMode = $t.claudeAutoMode else . end)
+	  end`
 
 // frideInstanceGit sets the git identity FrIDE's agents commit with in
 // workspaces of no identity: $1 the name, $2 the email, each only when

@@ -1955,10 +1955,18 @@ more with the owner later (see FrIDE's SETUP.md).
   "companion": {
     "enabled": true,
     "claudePlugins": ["~/fride-companion/plugins/ponytail"],
-    "claudeAllow": ["Bash(gh pr merge:*)", "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr ready:*)", "Bash(gh pr comment:*)", "Bash(gh run rerun:*)"]
+    "claudeAllow": ["Bash(gh pr merge:*)", "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr ready:*)", "Bash(gh pr comment:*)", "Bash(gh run rerun:*)", "Bash(git push origin --delete:*)"],
+    "claudeAutoMode": {
+      "environment": ["$defaults", "**FrIDE task agent**: … nobody reviews these pull requests by hand."],
+      "allow": ["$defaults", "Own PR Merge: …", "Own Branch Deletion: …"]
+    }
   }
 }
 ```
+
+(`claudeAutoMode`'s rules are spelled out in
+[container/fride/companion.json](../container/fride/companion.json);
+copy them from there.)
 
 FrIDE's task agents open pull requests with `fride pr`, which runs the
 repository's `build` and `test` first and refuses a repository that has
@@ -1978,15 +1986,30 @@ so the question costs the companion nothing (FrIDE's docs/PANELS.md,
 "Safety").
 
 `claudeAllow` lets every task agent finish its own pull request once CI
-is green, as the bug fixer asks: merge it, read its state and checks,
-mark it ready and comment on it, and rerun a failed job. Claude Code's
-auto mode, which FrIDE's agents run in, otherwise refuses by default to
-merge a pull request no human approved, or to mark one ready whose review
-could not run, as "Undermining Oversight" (FrIDE's docs/COMPANION.md,
-"Rules for task agents"). Leave it out where a person is to merge every
-pull request. The FrIDE instances' template and the box's FrIDE carry the
-same rules (`container/fride/companion.json`); an instance made before
-keeps the rules its own config has.
+is green, as the bug fixer asks: merge it and delete its branch, read its
+state and checks, mark it ready and comment on it, and rerun a failed
+job. Claude Code's auto mode, which FrIDE's agents run in, otherwise
+refuses by default to merge a pull request no human approved, or to mark
+one ready whose review could not run, as "Undermining Oversight" (FrIDE's
+docs/COMPANION.md, "Rules for task agents"). A rule covers only the
+command it names, alone or chained with other allowed ones: `gh pr merge
+837 --merge --delete-branch 2>&1 | tail -5; gh pr view 837 …` needs
+`gh pr view` listed too. Any other shape goes to auto mode's classifier,
+which takes what FrIDE's instruction files ask for as data, not as the
+owner's word, and refused the merge however clearly the task asked.
+`claudeAutoMode` (Claude Code's `autoMode` setting, which FrIDE passes in
+the same `--settings`) tells the classifier that a task agent merging its
+own green pull request and deleting its branch is the owner's standing
+rule; in a test it turned 3 refusals out of 3 into 3 merges. Leave both
+out where a person is to merge every pull request.
+
+The FrIDE instances' template and the box's FrIDE carry the same rules
+(`container/fride/companion.json`). An instance's config put back when
+its sandbox is made anew, and the box's at each start, gain the
+template's `claudeAllow` rules they lack and take its `claudeAutoMode`,
+unless their `claudeAllow` is an empty list, which says a person merges
+there. The native companion's config is the owner's: add the rules by
+hand, and reload it (`curl -X POST http://127.0.0.1:17840/api/config`).
 
 ### Ponytail for every agent
 

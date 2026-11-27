@@ -78,8 +78,18 @@ if [ ! -e "$cfg" ]; then
 	cp /opt/fride/companion.json "$cfg"
 # A config from an older image keeps what it has and gains what it lacks
 # of this image's, key by key, so that a setting a newer FrIDE needs
-# reaches the box; one jq cannot read stays as it is.
-elif jq -s '.[0] * .[1]' /opt/fride/companion.json "$cfg" >"$cfg.tmp" 2>/dev/null; then
+# reaches the box; one jq cannot read stays as it is. companion.claudeAllow
+# gains the rules it lacks and companion.claudeAutoMode is this image's,
+# unless an empty claudeAllow says a person merges here (the program is
+# frideConfigMerge in internal/nodeagent/fride_instance_scripts.go).
+elif jq -s '(.[0].companion // {}) as $t | (.[1].companion // {}) as $o
+	| .[0] * .[1]
+	| if $o.claudeAllow == [] then (if $o | has("claudeAutoMode") then . else del(.companion.claudeAutoMode) end)
+	  else (($o.claudeAllow // []) + (($t.claudeAllow // []) - ($o.claudeAllow // []))) as $a
+	  | (if $a == [] then . else .companion.claudeAllow = $a end)
+	  | (if $t | has("claudeAutoMode") then .companion.claudeAutoMode = $t.claudeAutoMode else . end)
+	  end' \
+	/opt/fride/companion.json "$cfg" >"$cfg.tmp" 2>/dev/null; then
 	mv "$cfg.tmp" "$cfg"
 else
 	rm -f "$cfg.tmp"
