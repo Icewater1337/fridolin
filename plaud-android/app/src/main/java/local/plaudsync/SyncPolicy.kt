@@ -115,6 +115,17 @@ object SyncPolicy {
     /** Whether the app watches for the pin with its own low-power scan while it is not connected. */
     fun watch(mode: SyncMode, away: Boolean) = away || mode == SyncMode.SMART
 
+    /** The SDK's link is up while the app neither uses nor builds one: a leak (see SyncService.closeStaleLink). */
+    fun staleLink(sdkConnected: Boolean, connected: Boolean, connecting: Boolean) = sdkConnected && !connected && !connecting
+
+    /** What the SDK's bleConnectState values mean (not Android's BluetoothProfile states). */
+    fun connectState(state: Int) = when (state) {
+        0 -> "disconnected"
+        1 -> "GATT link up"
+        2 -> "the SDK's connect attempt failed"
+        else -> "unknown"
+    }
+
     /** The positions at which two advertisements differ (a length change counts from the shorter end). */
     fun changedBytes(old: ByteArray, new: ByteArray): List<Int> =
         (0 until maxOf(old.size, new.size)).filter { i -> old.getOrNull(i) != new.getOrNull(i) }
