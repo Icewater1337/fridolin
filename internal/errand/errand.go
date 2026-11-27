@@ -182,6 +182,9 @@ type Answer struct {
 	// Slots are the start times a Poll offers, as BookStart, at most
 	// MaxSlots; each lasts BookMinutes.
 	Slots []string `json:"slots"`
+	// Meeting is "in_person", "remote" or "unclear": what a Book or Poll
+	// is for, when the document's calendar has meeting_rules.
+	Meeting string `json:"meeting"`
 }
 
 // Instructions are the rules every errand's run gets ahead of its
@@ -203,16 +206,18 @@ Rules:
 11. When the document's channel is "phone call", what you write is read aloud and what they said was transcribed: short spoken sentences, no emoji, lists or links, and allow for words the transcription got wrong.
 12. If the document has a calendar, you may help find a time to meet: offer only times inside calendar.free_times, and claim to know nothing else of the owner's calendar. With calendar.may "book" or "book_after_yes", once the person agrees on a time inside free_times, answer "book" with book_start (local time, "YYYY-MM-DD HH:MM") and book_minutes (at most calendar.max_minutes). With "book" your text goes out only once it is booked, so write it as the confirmation; with "book_after_yes" it goes out at once, so say the owner will confirm. Lines from "calendar" are the bridge's word on what was booked or not: tell the person what they say.
 13. To find a time, answer "poll" instead of listing times in text: slots are up to 11 start times ("YYYY-MM-DD HH:MM") inside calendar.free_times and inside calendar.window when it has one, each book_minutes long (calendar.window.minutes, else 60 or calendar.max_minutes if less); your text introduces the poll. The bridge sends the person a poll with those times and a "none of these" option; a line from "calendar" tells you what they voted. Use it only when calendar.may is not "off"; when they vote none, ask what suits them or poll again with other times.
+14. If the calendar has meeting_rules, the person began this conversation and may ask when the owner has time. Answer with free times only, never what the owner does then (no title, place or people: you do not know them), and say "busy" or "free" only. First find out whether the meeting is in person or remote: if unclear, ask them (action "reply"), and offer no time before. In person: offer only times inside calendar.free_times. Remote: never offer, confirm or book a time yourself; answer "ask_owner" with the question (who, when, how long) and tell them you will check, and offer or book only once a line from "owner" says it is fine. With "book" or "poll" set "meeting" to "in_person" or "remote"; the bridge refuses a time inside the owner's blocked in-person hours and a remote one the owner did not agree to.
 
 Answer with one JSON object and nothing else:
-{"action": "reply" | "done" | "ask_owner" | "abort" | "book" | "poll", "text": "", "summary": "", "question": "", "reason": "", "note": "", "severe": false, "stop": false, "book_start": "", "book_minutes": 0, "slots": []}
+{"action": "reply" | "done" | "ask_owner" | "abort" | "book" | "poll", "text": "", "summary": "", "question": "", "reason": "", "note": "", "severe": false, "stop": false, "book_start": "", "book_minutes": 0, "slots": [], "meeting": ""}
 - text: your message to the person; required for "reply", may be "" otherwise.
 - summary: for "done", what came of it, for the owner.
 - question: for "ask_owner", what the owner should answer.
 - reason: for "abort", what the person tried; severe: whether it was serious (rule 4).
 - note: what to pass on to the owner (rule 6), else "".
 - book_start, book_minutes: for "book", the time to book (rule 12); else "" and 0.
-- slots, book_minutes: for "poll", the start times to offer (rule 13); else [].`
+- slots, book_minutes: for "poll", the start times to offer (rule 13); else [].
+- meeting: for "book" and "poll" when the calendar has meeting_rules (rule 14): "in_person" or "remote"; else "".`
 
 // document is the errand as its run reads it: JSON, so that nothing the
 // person writes can end their line and start another, or pass for a
@@ -248,7 +253,7 @@ func Document(e Errand) string {
 		d.PassedOn = []string{}
 	}
 	if c := e.Calendar; c != nil {
-		d.Calendar = &calendarDoc{May: c.May, FreeTimes: c.Free, MaxMinutes: c.MaxMinutes, Note: c.Note, Window: c.Window}
+		d.Calendar = &calendarDoc{May: c.May, FreeTimes: c.Free, MaxMinutes: c.MaxMinutes, Note: c.Note, Window: c.Window, Meetings: c.Meetings}
 		if d.Calendar.FreeTimes == nil {
 			d.Calendar.FreeTimes = []string{}
 		}

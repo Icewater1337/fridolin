@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -67,8 +68,9 @@ func googleZone(loc *time.Location) string {
 }
 
 // errandFreeTimes are the free times of brain's calendar from now on,
-// within c's hours, in loc.
-func (b *App) errandFreeTimes(ctx context.Context, brain string, c manifest.ErrandCalendar, now time.Time, loc *time.Location) ([]errand.Span, error) {
+// within c's hours, in loc; with inPerson, without c's blocked in-person
+// hours.
+func (b *App) errandFreeTimes(ctx context.Context, brain string, c manifest.ErrandCalendar, now time.Time, loc *time.Location, inPerson bool) ([]errand.Span, error) {
 	br := b.brainMgr.Get(brain)
 	if br == nil {
 		return nil, fmt.Errorf("brain %s is not running", brain)
@@ -98,6 +100,10 @@ func (b *App) errandFreeTimes(ctx context.Context, brain string, c manifest.Erra
 		}
 		spans = append(spans, errand.Span{Start: start, End: end})
 	}
+	if inPerson {
+		days, bFrom, bTo := c.Blocked()
+		spans = append(spans, errand.BlockedSpans(from, to, days, bFrom, bTo, loc)...)
+	}
 	hFrom, hTo := c.Hours()
 	return errand.FreeTimes(spans, from, to, errand.Hours{Days: c.Weekdays(), From: hFrom, To: hTo, Location: loc}), nil
 }
@@ -120,7 +126,10 @@ func (b *App) errandCalendarDoc(ctx context.Context, e store.Errand, s manifest.
 			doc.Note = "The owner is asked to confirm " + when + ": no other booking meanwhile."
 		}
 	}
-	free, err := b.errandFreeTimes(ctx, e.Brain, c, now, loc)
+	if e.OpenedBy == store.OpenedByThem {
+		doc.Meetings = meetingRules(c)
+	}
+	free, err := b.errandFreeTimes(ctx, e.Brain, c, now, loc, e.OpenedBy == store.OpenedByThem)
 	if err != nil {
 		log.Printf("errand %s: reading the calendar: %v", e.ID, err)
 		doc.Note = strings.TrimSpace(doc.Note + " The calendar cannot be read just now: offer no times, and say the owner will come back to them about one.")
@@ -146,7 +155,10 @@ func (b *App) errandRespond(ctx context.Context, e store.Errand, s manifest.Erra
 			return ans, err
 		}
 		var said string
-		if ans.Action == errand.Poll {
+		if why := b.meetingRefusal(ctx, e, s, ans, lines); why != "" {
+			b.auditErrand(e, "not booked", why)
+			said, err = "Not done: "+why+".", errNotBooked
+		} else if ans.Action == errand.Poll {
 			said, err = b.pollInErrand(ctx, e, s, &ans, call)
 		} else {
 			said, err = b.bookInErrand(ctx, e, s, ans)
@@ -197,7 +209,7 @@ func (b *App) bookInErrand(ctx context.Context, e store.Errand, s manifest.Erran
 	}
 	span := errand.Span{Start: start, End: start.Add(time.Duration(ans.BookMinutes) * time.Minute)}
 	when := errand.FormatSpan(span, loc)
-	free, err := b.errandFreeTimes(ctx, e.Brain, c, time.Now(), loc)
+	free, err := b.errandFreeTimes(ctx, e.Brain, c, time.Now(), loc, false)
 	if err != nil {
 		log.Printf("errand %s: reading the calendar: %v", e.ID, err)
 		return notBooked("the calendar cannot be read just now")
@@ -314,7 +326,7 @@ func (b *App) errandBookingDecided(a store.Approval) {
 		return
 	}
 	mode, c := b.errandCalendarOf(ctx, e, s)
-	free, err := b.errandFreeTimes(ctx, e.Brain, c, time.Now(), loc)
+	free, err := b.errandFreeTimes(ctx, e.Brain, c, time.Now(), loc, false)
 	switch {
 	case !errand.MayBook(mode):
 		clear()
@@ -415,4 +427,56 @@ func (b *App) pollInErrand(ctx context.Context, e store.Errand, s manifest.Erran
 		ans.Slots = append(ans.Slots, sp.Start.In(loc).Format("2006-01-02 15:04"))
 	}
 	return fmt.Sprintf("Poll with %d times goes to them. Say nothing more about times until they vote.", len(spans)), nil
+}
+
+// meetingRules is what a run is told of in-person and remote meetings in
+// a conversation the person began.
+func meetingRules(c manifest.ErrandCalendar) string {
+	days, from, to := c.Blocked()
+	names := make([]string, len(days))
+	for i, d := range days {
+		names[i] = d.String()[:3]
+	}
+	return fmt.Sprintf("free_times hold no in-person time on %s from %02d:%02d to %02d:%02d, and no remote time at all: ask the owner first.",
+		strings.Join(names, ", "), from/60, from%60, to/60, to%60)
+}
+
+// meetingRefusal says why the bridge refuses the time errand e's run asks
+// to book or poll (ans), "" when it may go on. Only conversations the
+// person began are held to it (docs/BRAINS.md, "Asked about your time"):
+// an in-person meeting never lies in the owner's blocked hours, a remote
+// one needs the owner's word in the conversation first, and a meeting
+// of which it is unclear whether it is in person or remote is not offered.
+func (b *App) meetingRefusal(ctx context.Context, e store.Errand, s manifest.Errands, ans errand.Answer, lines []store.ErrandLine) string {
+	if e.OpenedBy != store.OpenedByThem || (ans.Action != errand.Book && ans.Action != errand.Poll) {
+		return ""
+	}
+	switch ans.Meeting {
+	case "remote":
+		if !slices.ContainsFunc(lines, func(l store.ErrandLine) bool { return l.Sender == errand.FromOwner }) {
+			return "a remote meeting is not yours to offer or confirm: answer ask_owner and wait for their word"
+		}
+		return ""
+	case "in_person":
+	default:
+		return "say in meeting whether it is in person or remote; if unclear, ask them first"
+	}
+	_, c := b.errandCalendarOf(ctx, e, s)
+	loc := RuntimeConfig(b.cfgs).Location()
+	days, from, to := c.Blocked()
+	starts := ans.Slots
+	if ans.Action == errand.Book {
+		starts = []string{ans.BookStart}
+	}
+	for _, str := range starts {
+		start, err := errand.ParseBookStart(str, loc)
+		if err != nil {
+			continue // the booking or poll says so itself
+		}
+		span := errand.Span{Start: start, End: start.Add(time.Duration(ans.BookMinutes) * time.Minute)}
+		if errand.Overlaps(span, errand.BlockedSpans(span.Start.Add(-24*time.Hour), span.End, days, from, to, loc)) {
+			return errand.FormatSpan(span, loc) + " is inside the owner's blocked hours for in-person meetings: offer only times from calendar.free_times"
+		}
+	}
+	return ""
 }

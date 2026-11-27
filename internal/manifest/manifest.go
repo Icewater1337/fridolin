@@ -159,6 +159,39 @@ type ErrandCalendar struct {
 	DaysAhead int `json:"days_ahead,omitempty"`
 	// MaxMinutes is the longest booking; 0 is 90.
 	MaxMinutes int `json:"max_minutes,omitempty"`
+	// InPersonBlocked is when a conversation the other person began may
+	// never be offered an in-person meeting; nil is Monday to Friday,
+	// 08:00 to 17:00. Remote meetings always go to the owner first.
+	InPersonBlocked *ErrandBlocked `json:"in_person_blocked,omitempty"`
+}
+
+// ErrandBlocked is errands.calendar.in_person_blocked: the hours of the
+// owner's working days that are never free for an in-person meeting,
+// whatever the calendar says (docs/BRAINS.md, "Asked about your time").
+type ErrandBlocked struct {
+	// Days are the weekdays, "mon" to "sun"; none is Monday to Friday.
+	Days []string `json:"days,omitempty"`
+	// From and To are "HH:MM"; "" is 08:00 and 17:00.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+}
+
+// Blocked returns the blocked weekdays and hours (minutes after
+// midnight) of c, the defaults when it sets none.
+func (c ErrandCalendar) Blocked() (days []time.Weekday, from, to int) {
+	b := ErrandBlocked{}
+	if c.InPersonBlocked != nil {
+		b = *c.InPersonBlocked
+	}
+	days = ErrandCalendar{Days: b.Days}.Weekdays()
+	from, to = 8*60, 17*60
+	if m, ok := clockMinutes(b.From); ok {
+		from = m
+	}
+	if m, ok := clockMinutes(b.To); ok {
+		to = m
+	}
+	return days, from, to
 }
 
 // The defaults and limits of errands.calendar.
@@ -261,6 +294,14 @@ func validateErrandCalendar(c ErrandCalendar) error {
 	}
 	if from, to := c.Hours(); to <= from {
 		return errors.New("errands.calendar.to must come after its from")
+	}
+	if b := c.InPersonBlocked; b != nil {
+		if err := validateErrandCalendar(ErrandCalendar{Days: b.Days, From: b.From, To: b.To}); err != nil {
+			return errors.New(strings.Replace(err.Error(), "errands.calendar.", "errands.calendar.in_person_blocked.", 1))
+		}
+		if _, from, to := c.Blocked(); to <= from {
+			return errors.New("errands.calendar.in_person_blocked.to must come after its from")
+		}
 	}
 	return nil
 }

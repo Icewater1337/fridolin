@@ -49,7 +49,7 @@ func (b *App) pollSlots(ctx context.Context, e store.Errand, s manifest.Errands,
 		// A vote books through bookInErrand, which takes no other length.
 		return nil, fmt.Errorf("a booking is 15 to %d minutes long", c.Longest())
 	}
-	free, err := b.errandFreeTimes(ctx, e.Brain, c, time.Now(), loc)
+	free, err := b.errandFreeTimes(ctx, e.Brain, c, time.Now(), loc, false)
 	if err != nil {
 		log.Printf("errand %s: reading the calendar: %v", e.ID, err)
 		return nil, errors.New("the calendar cannot be read just now")
