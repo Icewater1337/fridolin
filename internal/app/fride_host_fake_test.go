@@ -48,6 +48,8 @@ type fakeHost struct {
 	failStart string
 	// gone makes task info and close answer that the task does not exist.
 	gone bool
+	// beforeTaskInfo runs once, before the next task info is answered.
+	beforeTaskInfo func()
 }
 
 func (f *fakeHost) setGone(v bool) { f.mu.Lock(); f.gone = v; f.mu.Unlock() }
@@ -289,6 +291,15 @@ func (f *fakeHost) handle(req nodeproto.Request) (any, *nodeproto.Error) {
 		}
 		if perr := running(on.Instance); perr != nil {
 			return nil, perr
+		}
+	}
+	if req.Method == nodeproto.MethodFrideTaskInfo {
+		f.mu.Lock()
+		hook := f.beforeTaskInfo
+		f.beforeTaskInfo = nil
+		f.mu.Unlock()
+		if hook != nil {
+			hook()
 		}
 	}
 	if (req.Method == nodeproto.MethodFrideTaskInfo || req.Method == nodeproto.MethodFrideClose) && f.isGone() {

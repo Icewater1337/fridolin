@@ -1250,14 +1250,20 @@ func taskGone(err error) bool {
 // reapGone closes open thread t when FrIDE says its task is gone, and
 // reports whether it did. An unreachable node or any other answer keeps it.
 func (f *frideRuntime) reapGone(ctx context.Context, t store.FrideThread) bool {
-	if t.TaskID == "" || t.Node == "" {
-		return false
-	}
-	if _, err := f.b.nodes.FrideTaskInfoOn(ctx, t.Node, t.Instance, t.TaskID); !taskGone(err) {
+	if !f.isGone(ctx, t) {
 		return false
 	}
 	_, err := f.closeGone(ctx, t.ID, f.where(t.Node, t.Instance))
 	return err == nil
+}
+
+// isGone reports whether FrIDE says open thread t's task is gone.
+func (f *frideRuntime) isGone(ctx context.Context, t store.FrideThread) bool {
+	if t.TaskID == "" || t.Node == "" {
+		return false
+	}
+	_, err := f.b.nodes.FrideTaskInfoOn(ctx, t.Node, t.Instance, t.TaskID)
+	return taskGone(err)
 }
 
 // close closes thread id's task in FrIDE, archives its workspace into the

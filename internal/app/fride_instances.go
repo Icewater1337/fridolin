@@ -223,21 +223,24 @@ func (i *frideInstances) openThreads(ctx context.Context) (map[string][]store.Fr
 
 // blockingThreads are the open threads of each instance that a stop would
 // interrupt: not those whose last news is a login failure, which wait for
-// the stop that gives the instance its new login (#453).
-func (i *frideInstances) blockingThreads(ctx context.Context) (map[string][]store.FrideThread, error) {
-	open, err := i.openThreads(ctx)
+// the stop that gives the instance its new login (#453), nor those whose
+// task FrIDE says is gone, which are gone, for the caller to close once
+// it holds no instance lock (closing takes the thread's lock: #828).
+func (i *frideInstances) blockingThreads(ctx context.Context) (open map[string][]store.FrideThread, gone []store.FrideThread, err error) {
+	open, err = i.openThreads(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for name, ts := range open {
 		var keep []store.FrideThread
 		for _, t := range ts {
-			if i.f.reapGone(ctx, t) {
+			if i.f.isGone(ctx, t) {
+				gone = append(gone, t)
 				continue
 			}
 			news, err := i.f.b.store.FrideNews(ctx, t.ID)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if n := len(news); n > 0 && news[n-1].Kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(news[n-1].Text) {
 				continue
@@ -246,7 +249,16 @@ func (i *frideInstances) blockingThreads(ctx context.Context) (map[string][]stor
 		}
 		open[name] = keep
 	}
-	return open, nil
+	return open, gone, nil
+}
+
+// closeGone closes threads whose task FrIDE says is gone.
+func (i *frideInstances) closeGone(ctx context.Context, gone []store.FrideThread) {
+	for _, t := range gone {
+		if _, err := i.f.closeGone(ctx, t.ID, i.f.where(t.Node, t.Instance)); err != nil {
+			log.Printf("fride: closing FrIDE #%d, whose task is gone: %v", t.ID, err)
+		}
+	}
 }
 
 // threadList names threads as the chat does: #1, #3.
@@ -689,6 +701,8 @@ func (i *frideInstances) stopOn(ctx context.Context, id, nodeName, name, by, why
 // stop stops instance name wherever it runs. One with open threads only
 // with force. It returns what to say.
 func (i *frideInstances) stop(ctx context.Context, name, by, why string, force bool) (string, error) {
+	var gone []store.FrideThread
+	defer func() { i.closeGone(ctx, gone) }() // runs after i.mu is unlocked
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	views := i.views()
@@ -708,7 +722,7 @@ func (i *frideInstances) stop(ctx context.Context, name, by, why string, force b
 	if len(where) == 0 {
 		return fmt.Sprintf("The FrIDE instance %s does not run.", name), nil
 	}
-	open, err := i.blockingThreads(ctx)
+	open, gone, err := i.blockingThreads(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -820,11 +834,12 @@ func (i *frideInstances) refreshAll(ctx context.Context, again bool) {
 // the default's), and starts counting for one it sees run first.
 func (i *frideInstances) idleStop(ctx context.Context) {
 	views := i.views()
-	open, err := i.blockingThreads(ctx)
+	open, gone, err := i.blockingThreads(ctx)
 	if err != nil {
 		log.Printf("fride: reading the FrIDE threads for the idle stop: %v", err)
 		return
 	}
+	i.closeGone(ctx, gone)
 	cfg := i.configured()
 	now := time.Now()
 	seen := map[string]bool{}
