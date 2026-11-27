@@ -41,6 +41,9 @@ type fakeHost struct {
 	starts  []nodeproto.FrideInstanceStartParams
 	calls   []string
 	threads int
+	// refs are the threads by instance, source and ref, which FrIDE
+	// dedupes by (orchestrator.ReceiveAs).
+	refs map[string]int
 	// failStart makes a start fail with its text.
 	failStart string
 	// gone makes task info and close answer that the task does not exist.
@@ -348,11 +351,20 @@ func (f *fakeHost) handle(req nodeproto.Request) (any, *nodeproto.Error) {
 	case nodeproto.MethodFrideInstanceStatus:
 		return nodeproto.FrideInstances{Instances: f.declared().FrideHost.Instances}, nil
 	case nodeproto.MethodFrideTask:
+		var p nodeproto.FrideTaskParams
+		_ = json.Unmarshal(req.Params, &p)
+		key := p.Instance + "\x00" + p.Source + "\x00" + p.Ref
 		f.mu.Lock()
+		defer f.mu.Unlock()
+		if n, ok := f.refs[key]; ok && p.Ref != "" {
+			return nodeproto.FrideThread{ThreadID: n, Status: "queued"}, nil
+		}
 		f.threads++
-		n := f.threads
-		f.mu.Unlock()
-		return nodeproto.FrideThread{ThreadID: n, Status: "queued"}, nil
+		if f.refs == nil {
+			f.refs = map[string]int{}
+		}
+		f.refs[key] = f.threads
+		return nodeproto.FrideThread{ThreadID: f.threads, Status: "queued"}, nil
 	case nodeproto.MethodFrideReply:
 		var p nodeproto.FrideReplyParams
 		_ = json.Unmarshal(req.Params, &p)

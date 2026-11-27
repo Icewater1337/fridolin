@@ -362,8 +362,11 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 	if kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) {
 		// FrIDE there cannot think (#288): the work goes to another
 		// FrIDE if one takes it, and stays here for a retry otherwise.
+		// It keeps its branch, and a fresh ref: the same ref would get
+		// back the failed thread from a node it was on before (#826).
 		moved := t
-		moved.State, moved.Node, moved.FrideThread, moved.FrideStatus, moved.TaskID, moved.Branch = store.FrideQueued, "", 0, "", "", ""
+		moved.State, moved.Node, moved.FrideThread, moved.FrideStatus, moved.TaskID = store.FrideQueued, "", 0, "", ""
+		moved.Failovers++
 		pctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		placed, _ := f.place(pctx, &moved, node)
 		cancel()
