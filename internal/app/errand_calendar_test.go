@@ -469,3 +469,83 @@ func TestErrandPollNone(t *testing.T) {
 		t.Errorf("what the run heard: %+v", l[len(l)-1])
 	}
 }
+
+// TestErrandPollVoteInOfferMode: #825. With errands.calendar offer, a vote
+// books nothing and is not taken for a failed booking: the run hears their
+// choice, to say the owner will confirm, and the owner hears it too.
+func TestErrandPollVoteInOfferMode(t *testing.T) {
+	t.Parallel()
+	h, runs, f := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarOffer, Days: everyDay, DaysAhead: 5})
+	if _, err := h.b.openErrand(context.Background(), h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	at := h.inTwoDays(14)
+	when := errand.FormatSpan(errand.Span{Start: at, End: at.Add(time.Hour)}, RuntimeConfig(h.b.cfgs).Location())
+	runs.say(pollAnswer("Pick one:", 60, at), `{"action":"reply","text":"Sam will confirm."}`)
+	h.theyWrite("ok")
+	poll := h.waitPoll(errandJID, outboundmsg.ErrandSlotsQuestion)
+	h.vote(poll.ID, errandNumber, when)
+	h.WaitSent(harnessDM, outboundmsg.ErrandChosenNotice("Alex", e.ID, when))
+	h.WaitSent(errandJID, "Sam will confirm.")
+	handed := runs.handed()
+	if l := handed[len(handed)-1].Lines; !strings.Contains(l[len(l)-1].Text, "They chose "+when) || strings.Contains(l[len(l)-1].Text, "Not booked") {
+		t.Errorf("what the run heard: %+v", l[len(l)-1])
+	}
+	f.mu.Lock()
+	n := len(f.inserted)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Errorf("%d events made in offer mode", n)
+	}
+}
+
+// TestErrandPollLengthIsBookable: #827. A poll offers only a length a vote
+// can book (15..max_minutes); a window longer than that is refused when the
+// errand opens, and a window without a length gets one no longer.
+func TestErrandPollLengthIsBookable(t *testing.T) {
+	t.Parallel()
+	h, _, _ := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarBook, Days: everyDay, DaysAhead: 5, MaxMinutes: 30})
+	ctx := context.Background()
+	req := dinner
+	req.Window = &errand.Window{Minutes: 120}
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), req); err == nil || !strings.Contains(err.Error(), "at most 30") {
+		t.Fatalf("a window of 120 minutes with max_minutes 30: %v", err)
+	}
+	req.Window = &errand.Window{From: "09:00"}
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), req); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	if w := errandWindow(e); w == nil || w.Minutes != 30 {
+		t.Errorf("the default length is not capped at max_minutes: %+v", w)
+	}
+	s, _ := h.b.errandSettings(e.Brain)
+	for _, minutes := range []int{10, 60} {
+		ans := errand.Answer{Action: errand.Poll, Slots: []string{h.inTwoDays(14).Format("2006-01-02 15:04")}, BookMinutes: minutes}
+		if _, err := h.b.pollSlots(ctx, e, s, ans); err == nil || !strings.Contains(err.Error(), "15 to 30 minutes") {
+			t.Errorf("a poll of %d-minute times with max_minutes 30: %v", minutes, err)
+		}
+	}
+}
+
+// TestErrandPollVoteChangedFromNone: #830. A vote changed from "none" to a
+// time is their choice, and is booked.
+func TestErrandPollVoteChangedFromNone(t *testing.T) {
+	t.Parallel()
+	h, runs, _ := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarBook, Days: everyDay, DaysAhead: 5})
+	if _, err := h.b.openErrand(context.Background(), h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	at := h.inTwoDays(14)
+	when := errand.FormatSpan(errand.Span{Start: at, End: at.Add(time.Hour)}, RuntimeConfig(h.b.cfgs).Location())
+	runs.say(pollAnswer("Pick one:", 60, at), `{"action":"reply","text":"What suits you then?"}`, `{"action":"reply","text":"Booked, see you!"}`)
+	h.theyWrite("ok")
+	poll := h.waitPoll(errandJID, outboundmsg.ErrandSlotsQuestion)
+	h.vote(poll.ID, errandNumber, outboundmsg.ErrandSlotsNone)
+	h.WaitSent(errandJID, "What suits you then?")
+	h.vote(poll.ID, errandNumber, when)
+	h.WaitSent(harnessDM, outboundmsg.ErrandBookedNotice("Alex", e.ID, when))
+	h.WaitSent(errandJID, "Booked, see you!")
+}

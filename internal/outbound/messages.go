@@ -1343,6 +1343,12 @@ func ErrandBookedNotice(name, id, when string) string {
 	return fmt.Sprintf("📅 Booked %s with %s in your calendar (errand %s).", when, name, id)
 }
 
+// ErrandChosenNotice says the person of errand id with name chose when
+// in a poll that may book nothing (calendar offer).
+func ErrandChosenNotice(name, id, when string) string {
+	return fmt.Sprintf("📅 %s chose %s (errand %s). Nothing is booked: put it in your calendar and confirm it with them.", name, when, id)
+}
+
 // ErrandBookingDraft goes ahead of the poll that asks the owner to
 // confirm booking when with name, for errand id.
 func ErrandBookingDraft(name, id, when string) string {

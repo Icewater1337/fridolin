@@ -45,6 +45,9 @@ func (b *App) pollSlots(ctx context.Context, e store.Errand, s manifest.Errands,
 		return nil, errors.New("this conversation may not use the calendar")
 	case e.Booked != "":
 		return nil, errors.New("this conversation has its booking already")
+	case ans.BookMinutes < 15 || ans.BookMinutes > c.Longest():
+		// A vote books through bookInErrand, which takes no other length.
+		return nil, fmt.Errorf("a booking is 15 to %d minutes long", c.Longest())
 	}
 	free, err := b.errandFreeTimes(ctx, e.Brain, c, time.Now(), loc)
 	if err != nil {
@@ -95,8 +98,11 @@ func (b *App) sendSlotPoll(ctx context.Context, e store.Errand, spans []errand.S
 }
 
 // errandSlotsVote takes the person's vote in errand id's poll: a time is
-// booked (bookInErrand honours the mode and checks it is still free), none
+// booked (bookInErrand honours the mode and checks it is still free), or
+// in offer mode passed to the run and the owner as their choice; none
 // goes back to the run. Either way the run hears of it and tells them.
+// The poll's times stay until a time is taken, so that a vote changed
+// from none to a time still counts.
 func (b *App) errandSlotsVote(id string, v pollVote) {
 	ctx := context.Background()
 	e, err := b.store.GetErrand(ctx, id)
@@ -110,7 +116,6 @@ func (b *App) errandSlotsVote(id string, v pollVote) {
 	s, _ := b.errandSettings(e.Brain)
 	loc := RuntimeConfig(b.cfgs).Location()
 	tell := func(text string) {
-		_ = b.store.SetErrandSlots(ctx, e.ID, "")
 		if err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromCalendar, Text: text, At: time.Now()}, false); err != nil {
 			log.Printf("errand %s: recording the vote: %v", e.ID, err)
 			return
@@ -127,7 +132,13 @@ func (b *App) errandSlotsVote(id string, v pollVote) {
 		if errand.FormatSpan(span, loc) != v.Selected[0] {
 			continue
 		}
+		_ = b.store.SetErrandSlots(ctx, e.ID, "")
 		b.auditErrand(e, "voted", v.Selected[0])
+		if mode, _ := b.errandCalendarOf(ctx, e, s); !errand.MayBook(mode) {
+			b.tellErrandOwner(ctx, e, outboundmsg.ErrandChosenNotice(e.Name, e.ID, v.Selected[0]))
+			tell(fmt.Sprintf("They chose %s; nothing is booked. Say %s will confirm.", v.Selected[0], strings.TrimSpace(s.OwnerName)))
+			return
+		}
 		said, err := b.bookInErrand(ctx, e, s, errand.Answer{BookStart: span.Start.In(loc).Format("2006-01-02 15:04"), BookMinutes: int(span.End.Sub(span.Start) / time.Minute)})
 		if err != nil {
 			said += " Tell them, and offer the next free times."
