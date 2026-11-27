@@ -87,11 +87,14 @@ func (b *App) sendSlotPoll(ctx context.Context, e store.Errand, spans []errand.S
 	if err := b.store.SetErrandSlots(ctx, e.ID, string(j)); err != nil {
 		return err
 	}
-	if err := b.outbox.Poll(ctx, chat.DMJID(e.Contact), outboundmsg.ErrandSlotsQuestion, options, errandSlotsRef+e.ID); err != nil {
-		return err
-	}
+	// The poll's line goes in first: a vote quicker than recording it
+	// would land before it, and the next turn would see Fridolin's line
+	// last and leave the vote unanswered.
 	if err := b.store.AddErrandLine(ctx, e.ID, store.ErrandLine{Sender: errand.FromYou, Text: "[poll] " + strings.Join(options, " | "), At: time.Now()}, true); err != nil {
 		log.Printf("errand %s: recording the poll: %v", e.ID, err)
+	}
+	if err := b.outbox.Poll(ctx, chat.DMJID(e.Contact), outboundmsg.ErrandSlotsQuestion, options, errandSlotsRef+e.ID); err != nil {
+		return err
 	}
 	b.auditErrand(e, "polled", fmt.Sprintf("%d times", len(spans)))
 	return nil
