@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 FROM ${RUNTIME_IMAGE} AS tools
 ARG TARGETARCH
 # renovate: datasource=github-releases depName=restic/restic
-ARG RESTIC_VERSION=0.19.1
+ARG RESTIC_VERSION=0.20.0
 # renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=1.76.0
 # renovate: datasource=github-releases depName=benbjohnson/litestream
