@@ -246,6 +246,10 @@ class SyncService : Service() {
             exporting = null; recordingSid = null; listAgain = false
             queue.clear()
             if (wakeLock.isHeld) wakeLock.release()
+            // The SDK keeps its link whatever our flags say: make sure it is closed, and give the
+            // pin a moment to advertise again before the scan starts over
+            closeStaleLink("watchdog", force = true)
+            delay(2_000)
             checkIn(Trigger.TIMER)
         }
     }
@@ -390,12 +394,18 @@ class SyncService : Service() {
             when (t) {
                 Trigger.SYNC_NOW -> requestFileList()
                 Trigger.SETTINGS -> if (exporting == null && queue.isEmpty()) syncDone()
-                else -> {}
+                else -> AppLog.d("check-in (${t.key}) skipped: connected already")
             }
             return false
         }
-        if (connecting || searching) return false
-        if (!SyncPolicy.checkInOn(t, mode, SystemClock.elapsedRealtime() - lastCheckIn)) return false
+        if (connecting || searching) {
+            if (t != Trigger.TIMER) AppLog.i("check-in (${t.key}) skipped: already ${if (connecting) "connecting to" else "looking for"} the NotePin")
+            return false
+        }
+        if (!SyncPolicy.checkInOn(t, mode, SystemClock.elapsedRealtime() - lastCheckIn)) {
+            AppLog.d("check-in (${t.key}) skipped: too soon after the last one")
+            return false
+        }
         if (t != Trigger.TIMER) AppLog.i("checking in with the NotePin (${t.key})")
         checkIn(t)
         return true
@@ -411,6 +421,7 @@ class SyncService : Service() {
         advertCheckIn = t == Trigger.ADVERT
         advertHit = false
         wakeLock.acquire(3 * 60_000L)
+        closeStaleLink("check-in (${t.key})")
         val dev = device ?: SyncPrefs.device(this, sn)?.also { device = it }
         // Look for the pin with the app's own scan (it runs with the screen off) and connect to the
         // address it uses now; the SDK's scan only when the company id is not known yet
@@ -485,6 +496,19 @@ class SyncService : Service() {
         }
     }
 
+    /**
+     * The SDK holds one link at a time and keeps it whatever our flags say (a sync that timed out
+     * or a connect that failed left it up). A connected pin stops advertising, so the scan never
+     * sees it again. Closes the link when it is up and we are not using it ([force]: whatever our
+     * flags say, for the watchdog).
+     */
+    private fun closeStaleLink(why: String, force: Boolean = false) {
+        val up = runCatching { PlaudDeviceAgent.isConnected() }.getOrDefault(false)
+        if (!force && !SyncPolicy.staleLink(up, connected, connecting)) return
+        if (up) AppLog.i("stale link to the NotePin ($why): closing it")
+        runCatching { PlaudDeviceAgent.disconnect() }
+    }
+
     private fun onConnectState(state: Int) {
         if (state == 1) return // GATT link only; success is bleBind(status 0) after the E2EE handshake
         val wasConnecting = connecting && !connected
@@ -498,7 +522,10 @@ class SyncService : Service() {
         idleJob?.cancel()
         when {
             wasConnecting -> {
-                AppLog.i("connect failed (state $state)" + if (pairing) ". If this repeats, the NotePin is probably still bound to the Plaud app" else ", will retry")
+                // Not Android's BluetoothProfile.STATE_CONNECTED: the SDK reports 0 = disconnected,
+                // 1 = GATT link up, 2 = its connect attempt failed (bleConnectFail). Close whatever it half opened.
+                runCatching { PlaudDeviceAgent.disconnect() }
+                AppLog.i("connect failed (state $state: ${SyncPolicy.connectState(state)})" + if (pairing) ". If this repeats, the NotePin is probably still bound to the Plaud app" else ", will retry")
                 missed(seen = true)
             }
             wasConnected && leaving -> {
@@ -572,7 +599,12 @@ class SyncService : Service() {
             }
             PlaudDeviceAgent.disconnect()
             delay(10_000)
-            if (leaving && connected) onConnectState(0) // the SDK said nothing: count it as gone
+            if (leaving && connected) {
+                // The SDK said nothing: close the link again before counting it as gone, or it leaks
+                AppLog.i("the SDK did not confirm the disconnect, closing the link again")
+                runCatching { PlaudDeviceAgent.disconnect() }
+                onConnectState(0)
+            }
         }
     }
 
@@ -716,7 +748,11 @@ class SyncService : Service() {
 
     /** The device can't list files mid-download, so a request during one is replayed afterwards. */
     private fun requestFileList() {
-        if (exporting != null) listAgain = true else if (connected) PlaudDeviceAgent.getFileList()
+        when {
+            exporting != null -> listAgain = true
+            connected -> PlaudDeviceAgent.getFileList()
+            else -> AppLog.i("no file list asked for: the NotePin is not connected")
+        }
     }
 
     private fun onFileList(files: List<BleFile>) {
@@ -1055,7 +1091,10 @@ class SyncService : Service() {
                 recordingSid = null
                 AppLog.i("recording stopped, fetching it")
                 delay(1_500)
-                requestFileList()
+                if (connected) return@launch requestFileList()
+                // The pin talks to us over a link we do not know of: drop it and connect afresh
+                closeStaleLink("recording stopped")
+                if (!trigger(Trigger.SYNC_NOW)) AppLog.i("recording stopped: no check-in started, it is fetched at the next one")
             }
         }
 

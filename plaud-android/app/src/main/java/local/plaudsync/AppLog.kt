@@ -41,6 +41,15 @@ object AppLog {
         Log.d("PlaudSync", msg)
     }
 
+    /** Copies the whole log to [dest] for sharing; false when there is none. */
+    @Synchronized
+    fun copyTo(dest: File): Boolean {
+        val f = file?.takeIf { it.exists() } ?: return false
+        dest.parentFile?.mkdirs()
+        f.copyTo(dest, overwrite = true)
+        return true
+    }
+
     @Synchronized
     fun tail(n: Int): List<String> = file?.takeIf { it.exists() }?.readLines()?.takeLast(n).orEmpty()
 }

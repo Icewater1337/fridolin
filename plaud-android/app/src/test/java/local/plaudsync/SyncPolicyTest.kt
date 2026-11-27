@@ -164,4 +164,17 @@ class SyncPolicyTest {
         s = s.tried(false)
         assertFalse(s.trusted)
     }
+
+    @Test
+    fun staleLinkIsAnSdkLinkWeDoNotUse() {
+        assertTrue(SyncPolicy.staleLink(sdkConnected = true, connected = false, connecting = false))
+        assertFalse(SyncPolicy.staleLink(sdkConnected = true, connected = true, connecting = false))
+        assertFalse(SyncPolicy.staleLink(sdkConnected = true, connected = false, connecting = true))
+        assertFalse(SyncPolicy.staleLink(sdkConnected = false, connected = false, connecting = false))
+    }
+
+    @Test
+    fun connectStateTwoIsAFailureNotAndroidsConnected() {
+        assertEquals("the SDK's connect attempt failed", SyncPolicy.connectState(2))
+    }
 }
