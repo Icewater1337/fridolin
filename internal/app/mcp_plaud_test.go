@@ -73,7 +73,7 @@ func TestPlaudAppSummary(t *testing.T) {
 	got := plaudAppSummary(s, now)
 	for _, want := range []string{
 		"Latest build: 0.7 (9), built 1h0m0s ago on node mac-mini.",
-		"Phone dev_a: runs 0.7 (8), asked 5m0s ago; updates to 9 at its next check-in. Last update, to 9: waits for a tap on the phone",
+		"Phone dev_a: runs 0.7 (8), asked 5m0s ago; offers the update to 9 when the app is opened, installed by a tap. Last update, to 9: waits for a tap on the phone",
 		"Phone dev_b: runs 0.7 (9), asked 1m0s ago; up to date. Last update, to 9: installed.",
 		"Phone dev_c: runs 0.7 (8), asked 0s ago; the latest build is signed with another key",
 		"Phone dev_d: its app has not asked for updates yet",

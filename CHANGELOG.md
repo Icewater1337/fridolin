@@ -376,16 +376,18 @@ for compatibility.
 - **The Plaud Sync phone app updates itself.** Each build on the Plaud
   card (**Build and update phones**), or one the core brain starts with
   `plaud_app_update` when you ask it, is the release the paired phones
-  install at their next check-in. The app fetches it through your site,
+  offer in the app. The app fetches it through your site,
   encrypted for its own keystore key, checks its SHA-256 and that it is
-  signed with the app's own key, and installs it with Android's
-  PackageInstaller once the sync is idle; its pairing and what waits to
+  signed with the app's own key, and keeps it; when you open the app it
+  shows **New version available** and an **Install update** button, and
+  your tap installs it with Android's PackageInstaller once the sync is
+  idle. Nothing installs or notifies in the background. Its pairing and what waits to
   be sent stay. The card shows the version each phone runs against the
   latest build, and how its last update went. Once per phone: install
   one build from the card by hand (0.6 and older cannot update
   themselves), allow Plaud Sync to **install unknown apps** (the app's
-  **Allow app updates** button), and tap the notification of the first
-  update; later ones install without asking. Builds must keep being
+  **Allow app updates** button), and confirm the first
+  update when Android asks. Builds must keep being
   made on the same machine, whose debug key signs them: the card says
   when a phone cannot update to a build signed with another key.
   [docs/PLAUD.md](docs/PLAUD.md#updates)

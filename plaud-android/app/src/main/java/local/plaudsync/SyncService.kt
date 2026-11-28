@@ -67,6 +67,7 @@ class SyncService : Service() {
         const val ACTION_SKIP = "skip"
         const val ACTION_REFRESH = "refresh"
         const val ACTION_CHECK_IN = "check_in"
+        const val ACTION_INSTALL_UPDATE = "install_update"
         const val EXTRA_TEXT = "text"
         const val EXTRA_TRIGGER = "trigger"
 
@@ -85,6 +86,10 @@ class SyncService : Service() {
         fun start(ctx: Context, action: String? = null) {
             ctx.startForegroundService(Intent(ctx, SyncService::class.java).setAction(action))
         }
+
+        /** The owner tapped Install in the app's screen. */
+        fun installUpdate(ctx: Context) =
+            ctx.startForegroundService(Intent(ctx, SyncService::class.java).setAction(ACTION_INSTALL_UPDATE))
 
         /** Asks for a check-in with the pin; [SyncPolicy.checkInOn] decides whether it happens now. */
         fun checkIn(ctx: Context, trigger: Trigger) {
@@ -161,7 +166,8 @@ class SyncService : Service() {
     private val updating = RunAgain()
     // A check for updates, and an install, that the app's opening asked for, still to come
     private var updateForced = false
-    private var installForced = false
+    /** The owner tapped Install in the app: the only thing that installs an update. */
+    private var installRequested = false
     private val pendingDir by lazy { File(filesDir, "pending").apply { mkdirs() } }
     // Transcripts waiting to reach Fridolin (Fridolin.kt), when the app was built for it
     private val outboxDir by lazy { File(filesDir, "outbox").apply { mkdirs() } }
@@ -266,7 +272,12 @@ class SyncService : Service() {
                 val t = Trigger.of(intent.getStringExtra(EXTRA_TRIGGER))
                 trigger(t)
                 retryWaiting()
-                scope.launch { updates(t == Trigger.OPENED || t == Trigger.SYNC_NOW) }
+                // Only opening the app looks for an update (docs/PLAUD.md, "Updates"), never a background check-in.
+                if (t == Trigger.OPENED) scope.launch { updates(true) }
+            }
+            ACTION_INSTALL_UPDATE -> {
+                installRequested = true
+                installUpdate()
             }
             ACTION_UNPAIR -> unpair()
             ACTION_ASK -> intent.getStringExtra(EXTRA_TEXT)?.let { queueQuestion(it) }
@@ -325,8 +336,8 @@ class SyncService : Service() {
     }
 
     /**
-     * Asks Fridolin for a newer build of the app, fetches it, and installs it if the sync is idle
-     * now; otherwise once it is ([installUpdate]). [forced]: the app was opened, or Fetch now.
+     * Asks Fridolin for a newer build of the app and fetches it, but never installs it: the app's
+     * screen offers it and the owner's tap does ([installUpdate]). [forced]: the app was opened, or Fetch now.
      */
     private suspend fun updates(forced: Boolean) {
         if (!Fridolin.enabled) return
@@ -337,9 +348,6 @@ class SyncService : Service() {
             withContext(Dispatchers.IO) {
                 runCatching { Updater.check(this@SyncService, f) }.onFailure { AppLog.i("update: ${it.message}") }
             }
-            // The check-in the opening started may make the sync busy: the install it asked for waits for it.
-            installForced = installForced || f
-            installUpdate()
         }
     }
 
@@ -347,16 +355,16 @@ class SyncService : Service() {
      * Installs a build that was fetched, unless that would cut something off: the update ends this
      * process. Not while the app looks for the pin, connects to it, fetches from it or the pin
      * records, nor while an answer is read aloud; the link itself may stay up in instant mode, and
-     * the new version connects again. Called again whenever the sync goes idle.
+     * the new version connects again. Only after the owner's tap ([installRequested]); called again
+     * whenever the sync goes idle, so a tap during a busy sync installs once it is idle.
      */
     private fun installUpdate() {
-        if (!Fridolin.enabled || connecting || searching || leaving || exporting != null || queue.isNotEmpty() || recordingSid != null || speaker.busy) return
+        if (!installRequested || !Fridolin.enabled || connecting || searching || leaving || exporting != null || queue.isNotEmpty() || recordingSid != null || speaker.busy) return
         if (connected && SyncPrefs.mode(this) != SyncMode.INSTANT) return
-        val forced = installForced
-        installForced = false
+        installRequested = false
         scope.launch(Dispatchers.IO) {
-            if (!Updater.due(this@SyncService, forced)) return@launch
-            AppLog.i("update: the sync is idle, installing")
+            if (!Updater.due(this@SyncService, forced = true)) return@launch
+            AppLog.i("update: the owner asked and the sync is idle, installing")
             Updater.install(this@SyncService)
         }
     }

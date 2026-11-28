@@ -1,8 +1,5 @@
 package local.plaudsync
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -20,16 +17,14 @@ import java.security.MessageDigest
  * [SyncService] asks for Fridolin's release ([check]), saying how this app is and how its last
  * update went. A newer build signed with this app's own key is fetched, encrypted for this phone,
  * and checked: its SHA-256, and that Android reads it as this app, at that version, signed with
- * the same key. Once the sync is idle, it goes to Android's PackageInstaller ([install]) without
- * asking where Android lets it: once this app installed itself, from then on. Where Android still
- * asks (the first update, or "Install unknown apps" off for the app), a notification asks the
- * owner. What the app has (pairing, recordings and transcripts waiting, settings, keys) is in its
+ * the same key. It then waits until the owner taps Install in the app's screen, then goes to
+ * Android's PackageInstaller ([install]) once the sync is idle; nothing in the background
+ * installs or asks (no notification). Where Android asks (the first update), its question opens
+ * on the screen. What the app has (pairing, recordings and transcripts waiting, settings, keys) is in its
  * own storage and keystore, which an update keeps.
  */
 object Updater {
     const val EXTRA_CODE = "code"
-    private const val CHANNEL = "updates"
-    private const val NOTE = 2
 
     /** This app: its versionCode and versionName, and its signer's SHA-256, hex. */
     data class Own(val code: Long, val name: String, val cert: String?)
@@ -83,10 +78,10 @@ object Updater {
     fun describe(ctx: Context): String? {
         val r = report(ctx) ?: return null
         return "Update to ${r.code}: " + when (r.state) {
-            UpdateReport.WAITING -> "downloaded, installs once the sync is idle"
+            UpdateReport.WAITING -> "ready, tap Install update"
             UpdateReport.INSTALLING -> "installing"
-            UpdateReport.CONFIRM -> "tap the notification to install it"
-            UpdateReport.NOT_ALLOWED -> "allow app updates (button below)"
+            UpdateReport.CONFIRM -> "Android waits for your confirmation, tap Install update"
+            UpdateReport.NOT_ALLOWED -> "allow app updates (button below), then tap Install update"
             UpdateReport.INSTALLED -> "installed"
             else -> "failed, ${r.error ?: "see log"}"
         }
@@ -132,7 +127,6 @@ object Updater {
         setReport(ctx, UpdateReport(r.code, UpdateReport.INSTALLED, null, System.currentTimeMillis()))
         dir(ctx).listFiles()?.forEach { it.delete() }
         prefs(ctx).edit().remove("ready").remove("confirm").apply()
-        ctx.getSystemService(NotificationManager::class.java).cancel(NOTE)
     }
 
     /** Fetches [rel] and keeps it as ready once it is what Fridolin named, this app, signed with its key. */
@@ -167,6 +161,9 @@ object Updater {
         report(ctx, rel.code, UpdateReport.WAITING)
     }
 
+    /** The versionCode of a build that was fetched and checked and is newer than this app, else 0: what the screen offers. */
+    fun available(ctx: Context) = state(ctx).ready.takeIf { it > own(ctx).code && apk(ctx).exists() } ?: 0L
+
     /** Whether a build that was fetched waits to be installed now ([UpdatePolicy.install]). */
     fun due(ctx: Context, forced: Boolean) =
         apk(ctx).exists() && UpdatePolicy.install(own(ctx).code, state(ctx), System.currentTimeMillis(), forced)
@@ -181,9 +178,7 @@ object Updater {
         if (!allowed(ctx)) {
             // Once per build; the app's screen says so meanwhile.
             if (report(ctx)?.let { it.code == code && it.state == UpdateReport.NOT_ALLOWED } == true) return
-            report(ctx, code, UpdateReport.NOT_ALLOWED)
-            return notify(ctx, "Allow Plaud Sync to install its updates",
-                "Fridolin has a new version. Tap, then allow this app to install unknown apps.", allowIntent(ctx))
+            return report(ctx, code, UpdateReport.NOT_ALLOWED) // the app's screen has the button
         }
         try {
             val installer = ctx.packageManager.packageInstaller
@@ -210,13 +205,12 @@ object Updater {
         }
     }
 
-    /** Android asks the owner to confirm: on the screen when it is open, else in a notification. */
+    /** Android asks the owner to confirm: on the screen when it is open; else Install in the app asks again. */
     fun confirm(ctx: Context, code: Long, ask: Intent) {
         prefs(ctx).edit().putLong("confirm", code).apply()
         report(ctx, code, UpdateReport.CONFIRM)
         ask.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (foreground && runCatching { ctx.startActivity(ask) }.isSuccess) return
-        notify(ctx, "Plaud Sync update ready", "Tap to install the new version from Fridolin.", ask)
+        if (foreground) runCatching { ctx.startActivity(ask) }
     }
 
     fun failed(ctx: Context, code: Long, why: String) {
@@ -227,20 +221,5 @@ object Updater {
     /** Installed: in practice the new version settles it at its first check, since the update ends this process. */
     fun installed(ctx: Context, code: Long) {
         report(ctx, code, UpdateReport.INSTALLED)
-        ctx.getSystemService(NotificationManager::class.java).cancel(NOTE)
-    }
-
-    private fun notify(ctx: Context, title: String, text: String, intent: Intent) {
-        val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "App updates", NotificationManager.IMPORTANCE_DEFAULT))
-        val tap = PendingIntent.getActivity(ctx, NOTE, intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        nm.notify(NOTE, Notification.Builder(ctx, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setContentIntent(tap)
-            .setAutoCancel(true)
-            .setOnlyAlertOnce(true)
-            .build())
     }
 }
