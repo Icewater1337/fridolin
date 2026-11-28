@@ -577,6 +577,7 @@ func TestErrandPollVoteAfterTheBooking(t *testing.T) {
 	h.WaitSent(errandJID, "What suits you then?")
 	h.theyWrite("17:00?")
 	h.WaitSent(harnessDM, outboundmsg.ErrandBookedNotice("Alex", e.ID, whenC))
+	h.WaitSent(errandJID, "17:00 it is!") // the booking's turn is over
 	if got := h.errandOf(e.ID); got.Slots != "" {
 		t.Errorf("the poll's times outlive the booking: %q", got.Slots)
 	}
