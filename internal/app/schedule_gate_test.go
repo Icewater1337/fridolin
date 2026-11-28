@@ -177,6 +177,40 @@ func TestAGateThatLeavesAProcessBehind(t *testing.T) {
 	h.WaitFor("the gate's sleep to be stopped", func() bool { return !platform.ProcessAlive(pid) })
 }
 
+// TestAGateThatExitsJustBeforeItsTimeout: a gate that exits 1 s before
+// its timeout while a child holds its stdout, so that Run returns after
+// the deadline, keeps its own exit: 0 keeps its answer, 3 fails as an exit
+// of 3, and neither counts as timed out (#847).
+func TestAGateThatExitsJustBeforeItsTimeout(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the gate runs /bin/sh")
+	}
+	runs := fakeRuns(t)
+	h := newHarness(t, "")
+	gate := func(exit string) *manifest.ScheduleGate {
+		return &manifest.ScheduleGate{Argv: []string{"/bin/sh", "-c", `sleep 30 & sleep 2; echo '{"wake": true}'; exit ` + exit}, TimeoutSeconds: 3}
+	}
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
+		{Name: "ok", When: "every 15m", Prompt: "Look.", Report: manifest.ReportSilent, Gate: gate("0")},
+		{Name: "fails", When: "every 15m", Prompt: "Look.", Report: manifest.ReportSilent, Gate: gate("3")},
+	}})
+	for _, name := range []string{"ok", "fails"} {
+		if w := h.Do("POST", "/api/schedules/main/"+name+"/run", nil); w.Code != http.StatusOK {
+			t.Fatalf("run %s: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+	if r := h.waitRunEnded("main", "ok", 1); r.Status != sched.StatusOK {
+		t.Errorf("a gate that answered in time: %+v", r)
+	}
+	if r := h.waitRunEnded("main", "fails", 1); r.Status != sched.StatusFailed || !strings.Contains(r.Error, "exited with 3") {
+		t.Errorf("a gate that exited 3 in time: %+v", r)
+	}
+	if len(runs()) != 1 {
+		t.Errorf("the brain runs: %+v", runs())
+	}
+}
+
 // TestGateVerdict: what a gate's program did, as the run takes it.
 func TestGateVerdict(t *testing.T) {
 	t.Parallel()

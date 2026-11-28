@@ -601,7 +601,9 @@ times.
   nothing and the run says you will confirm. A time taken meanwhile goes
   back to the run, which offers other free times; "none" goes back to
   it too, to ask what suits them or poll again. The person is told in
-  their chat by the run.
+  their chat by the run. Once the errand has its booking (agreed in
+  text, say), a vote in the older poll books nothing and only reaches the
+  run as news.
 - **Owner setup.** brain.json of the core brain needs `errands`
   (with `owner_name`) and `errands.calendar`, e.g. `{"mode": "book"}`
   (or `book_after_yes` to confirm each one), plus a Google calendar

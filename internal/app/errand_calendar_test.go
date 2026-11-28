@@ -512,6 +512,11 @@ func TestErrandPollLengthIsBookable(t *testing.T) {
 	if _, err := h.b.openErrand(ctx, h.ownerRun(), req); err == nil || !strings.Contains(err.Error(), "at most 30") {
 		t.Fatalf("a window of 120 minutes with max_minutes 30: %v", err)
 	}
+	// #845: nor one shorter than a vote can book.
+	req.Window = &errand.Window{Minutes: 10}
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), req); err == nil || !strings.Contains(err.Error(), "15 to 30") {
+		t.Fatalf("a window of 10 minutes: %v", err)
+	}
 	req.Window = &errand.Window{From: "09:00"}
 	if _, err := h.b.openErrand(ctx, h.ownerRun(), req); err != nil {
 		t.Fatal(err)
@@ -548,6 +553,85 @@ func TestErrandPollVoteChangedFromNone(t *testing.T) {
 	h.vote(poll.ID, errandNumber, when)
 	h.WaitSent(harnessDM, outboundmsg.ErrandBookedNotice("Alex", e.ID, when))
 	h.WaitSent(errandJID, "Booked, see you!")
+}
+
+// TestErrandPollVoteAfterTheBooking: #846. They vote none, agree another
+// time in text, which is booked; a vote changed to a polled time then books
+// nothing, and the run hears it only as news, not as a reason to offer times.
+func TestErrandPollVoteAfterTheBooking(t *testing.T) {
+	t.Parallel()
+	h, runs, f := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarBook, Days: everyDay, DaysAhead: 5})
+	if _, err := h.b.openErrand(context.Background(), h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	loc := RuntimeConfig(h.b.cfgs).Location()
+	a, c := h.inTwoDays(14), h.inTwoDays(17)
+	whenA := errand.FormatSpan(errand.Span{Start: a, End: a.Add(time.Hour)}, loc)
+	whenC := errand.FormatSpan(errand.Span{Start: c, End: c.Add(time.Hour)}, loc)
+	runs.say(pollAnswer("Pick one:", 60, a, h.inTwoDays(15)), `{"action":"reply","text":"What suits you then?"}`,
+		bookAnswer(c, "17:00 it is!"), `{"action":"reply","text":"We are on for 17:00."}`)
+	h.theyWrite("ok")
+	poll := h.waitPoll(errandJID, outboundmsg.ErrandSlotsQuestion)
+	h.vote(poll.ID, errandNumber, outboundmsg.ErrandSlotsNone)
+	h.WaitSent(errandJID, "What suits you then?")
+	h.theyWrite("17:00?")
+	h.WaitSent(harnessDM, outboundmsg.ErrandBookedNotice("Alex", e.ID, whenC))
+	h.WaitSent(errandJID, "17:00 it is!") // the booking's turn is over
+	if got := h.errandOf(e.ID); got.Slots != "" {
+		t.Errorf("the poll's times outlive the booking: %q", got.Slots)
+	}
+	h.vote(poll.ID, errandNumber, whenA)
+	h.WaitSent(errandJID, "We are on for 17:00.")
+	handed := runs.handed()
+	if l := handed[len(handed)-1].Lines; l[len(l)-1].From != errand.FromCalendar || !strings.Contains(l[len(l)-1].Text, whenA) ||
+		!strings.Contains(l[len(l)-1].Text, whenC) || strings.Contains(l[len(l)-1].Text, "offer") || strings.Contains(l[len(l)-1].Text, "Not booked") {
+		t.Errorf("what the run heard: %+v", l[len(l)-1])
+	}
+	f.mu.Lock()
+	n := len(f.inserted)
+	f.mu.Unlock()
+	if n != 1 {
+		t.Errorf("%d events made", n)
+	}
+}
+
+// TestErrandPollVoteAfterTheBookingInOfferMode: #846. In offer mode too a
+// vote in a poll of an errand that has its booking is only news: the owner
+// hears of no choice.
+func TestErrandPollVoteAfterTheBookingInOfferMode(t *testing.T) {
+	t.Parallel()
+	h, runs, _ := calendarErrandHarness(t, manifest.ErrandCalendar{Mode: errand.CalendarOffer, Days: everyDay, DaysAhead: 5})
+	ctx := context.Background()
+	if _, err := h.b.openErrand(ctx, h.ownerRun(), dinner); err != nil {
+		t.Fatal(err)
+	}
+	e := h.onlyErrand()
+	loc := RuntimeConfig(h.b.cfgs).Location()
+	a, c := h.inTwoDays(14), h.inTwoDays(17)
+	whenA := errand.FormatSpan(errand.Span{Start: a, End: a.Add(time.Hour)}, loc)
+	whenC := errand.FormatSpan(errand.Span{Start: c, End: c.Add(time.Hour)}, loc)
+	runs.say(pollAnswer("Pick one:", 60, a), `{"action":"reply","text":"What suits you then?"}`, `{"action":"reply","text":"We are on for 17:00."}`)
+	h.theyWrite("ok")
+	poll := h.waitPoll(errandJID, outboundmsg.ErrandSlotsQuestion)
+	h.vote(poll.ID, errandNumber, outboundmsg.ErrandSlotsNone)
+	h.WaitSent(errandJID, "What suits you then?")
+	// Offer mode books nothing itself: the errand got its booking while it
+	// could (brain.json narrowed since), with the poll's times kept.
+	if ok, err := h.b.store.SetErrandBooking(ctx, e.ID, "", store.BookingEvent+"ev1", c, c.Add(time.Hour)); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	h.vote(poll.ID, errandNumber, whenA)
+	h.WaitSent(errandJID, "We are on for 17:00.")
+	handed := runs.handed()
+	if l := handed[len(handed)-1].Lines; !strings.Contains(l[len(l)-1].Text, whenC) || strings.Contains(l[len(l)-1].Text, "They chose") {
+		t.Errorf("what the run heard: %+v", l[len(l)-1])
+	}
+	for _, text := range h.SentTo(harnessDM) {
+		if text == outboundmsg.ErrandChosenNotice("Alex", e.ID, whenA) {
+			t.Error("the owner heard of a choice after the booking")
+		}
+	}
 }
 
 // TestErrandSlotPollFitsWhatsApp: #829. A full slot poll, its times and

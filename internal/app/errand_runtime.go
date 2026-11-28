@@ -274,6 +274,9 @@ func (b *App) openErrand(ctx context.Context, c mcpCaller, r errandRequest) (str
 		switch {
 		case r.Window.Minutes > longest:
 			return "", fmt.Errorf("window minutes is at most %d, brain.json's errands.calendar.max_minutes", longest)
+		case r.Window.Minutes > 0 && r.Window.Minutes < 15:
+			// pollSlots and bookInErrand take no shorter booking (#845).
+			return "", fmt.Errorf("window minutes is 15 to %d (brain.json's errands.calendar.max_minutes), or 0 for the default", longest)
 		case r.Window.Minutes == 0:
 			// The default length, but never one no vote could book.
 			r.Window.Minutes = min(errand.DefaultMinutes, longest)
