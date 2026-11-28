@@ -287,7 +287,7 @@ func TestFrideInstanceReplyAndStopAtOnce(t *testing.T) {
 	mini.mu.Unlock()
 	done := make(chan string, 2)
 	go func() {
-		_, err := h.b.fride.inst.stop(ctx, "work", "test", "test", true)
+		_, err := h.b.fride.inst.stop(ctx, "work", "test", "test", true, "")
 		done <- fmt.Sprint("stop: ", err)
 	}()
 	<-stopHolds
@@ -752,5 +752,129 @@ func TestFrideInstanceCoreLogin(t *testing.T) {
 	}
 	if len(instanceStarts(ice, "docs")) != 0 {
 		t.Error("docs, which borrows nothing, started on ice")
+	}
+}
+
+// twoCopies runs instance fridolin on two nodes, as #851 found it, with
+// FrIDE #1 on the copy that locate does not name: its task is there.
+func twoCopies(t *testing.T) (h *harness, held, other *fakeHost) {
+	t.Helper()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h = newServedHarness(t, frideInstancesConfig)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	a := h.fakeHostNode("alpha", addr, 32768, 16000, 6144)
+	b := h.fakeHostNode("bravo", addr, 32768, 16000, 6144)
+	a.setNoLogin("", map[string]string{"fridolin": ""})
+	b.setNoLogin("", map[string]string{"fridolin": ""})
+	h.WaitFor("both copies running", func() bool {
+		n := 0
+		for _, v := range h.b.fride.inst.views() {
+			if in := v.Effective.FrideHost.Instance("fridolin"); in != nil && in.State == nodeproto.FrideInstanceRunning {
+				n++
+			}
+		}
+		return n == 2
+	})
+	w, _ := locate("fridolin", h.b.fride.inst.views())
+	held, other = a, b
+	if w.v.ID == a.ID {
+		held, other = b, a
+	}
+	ctx := context.Background()
+	id, err := h.b.store.AddFrideThread(ctx, store.FrideThread{Chat: "c", Message: "work", Instance: "fridolin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.b.store.SaveFrideThread(ctx, store.FrideThread{ID: id, Node: held.ID, FrideThread: 7, TaskID: "t1", State: store.FrideSent}); err != nil {
+		t.Fatal(err)
+	}
+	return h, held, other
+}
+
+// FrIDE #851: with two copies, a reply goes to the copy holding the
+// thread's task, and fride_stop leaves that copy alone.
+func TestFrideInstanceTwoCopies(t *testing.T) {
+	t.Parallel()
+	h, held, other := twoCopies(t)
+	ctx := context.Background()
+	if out, err := h.b.fride.reply(ctx, 1, "yes"); err != nil || !strings.Contains(out, held.name) {
+		t.Fatalf("reply: %q, %v", out, err)
+	}
+	if !held.calledWith(nodeproto.MethodFrideReply, "fridolin") || other.calledWith(nodeproto.MethodFrideReply, "fridolin") {
+		t.Errorf("the reply went to %v, not to %s", other.Calls(), held.name)
+	}
+	if got, _ := h.b.store.GetFrideThread(ctx, 1); got.Node != held.ID {
+		t.Errorf("the thread's node became %s", got.Node)
+	}
+
+	// Force does not change what a stop without a node leaves.
+	out, err := h.b.fride.inst.stop(ctx, "fridolin", "test", "test", true, "")
+	if err != nil || !strings.Contains(out, "Stopped the FrIDE instance fridolin on "+other.name) || !strings.Contains(out, "Left running: "+held.name) {
+		t.Fatalf("stop: %q, %v", out, err)
+	}
+	if in, _ := held.Instance("fridolin"); in.State != nodeproto.FrideInstanceRunning {
+		t.Errorf("the copy holding the thread is %s", in.State)
+	}
+	if in, _ := other.Instance("fridolin"); in.State == nodeproto.FrideInstanceRunning {
+		t.Errorf("the idle copy still runs")
+	}
+	// Named, with force, the copy that holds it stops; without force not.
+	if _, err := h.b.fride.inst.stop(ctx, "fridolin", "test", "test", false, held.name); err == nil {
+		t.Errorf("a named copy with threads stopped without force")
+	}
+	if _, err := h.b.fride.inst.stop(ctx, "fridolin", "test", "test", true, held.name); err != nil {
+		t.Errorf("stop with node and force: %v", err)
+	}
+}
+
+// fride_instances lists each copy with its threads.
+func TestFrideInstancesListsCopies(t *testing.T) {
+	t.Parallel()
+	h, held, other := twoCopies(t)
+	reply := h.coreSays("what runs", step("fride_instances", `{}`))
+	for _, want := range []string{`"copies"`, `"node": "` + held.name + `"`, `"node": "` + other.name + `"`} {
+		if !strings.Contains(reply, want) {
+			t.Errorf("fride_instances lacks %s:\n%s", want, reply)
+		}
+	}
+}
+
+// A start its node has not declared yet counts: no second copy starts on
+// another node meanwhile.
+func TestFrideInstanceNoSecondCopy(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, frideInstancesConfig)
+	addr := h.StartNodes()
+	a := h.fakeHostNode("alpha", addr, 32768, 16000, 6144)
+	b := h.fakeHostNode("bravo", addr, 32768, 15000, 6144)
+	a.mu.Lock()
+	a.quiet = true
+	a.mu.Unlock()
+	ctx := context.Background()
+	if s, err := h.b.fride.inst.ensure(ctx, "fridolin", "", "test", "test", false); err != nil || s.NodeID != a.ID {
+		t.Fatalf("first start: %+v, %v", s, err)
+	}
+	// bravo now looks the better place.
+	b.mu.Lock()
+	b.cap.AvailableMemoryMB = 30000
+	b.mu.Unlock()
+	b.declare()
+	h.WaitFor("bravo's memory", func() bool {
+		for _, v := range h.b.fride.inst.views() {
+			if v.ID == b.ID && v.Effective.FrideHost.AvailableMemoryMB == 30000 {
+				return true
+			}
+		}
+		return false
+	})
+	if s, err := h.b.fride.inst.ensure(ctx, "fridolin", "", "test", "test", false); err != nil || s.NodeID != a.ID {
+		t.Errorf("second start: %+v, %v", s, err)
+	}
+	if got := instanceStarts(b, "fridolin"); len(got) != 0 {
+		t.Errorf("bravo got %d starts", len(got))
 	}
 }

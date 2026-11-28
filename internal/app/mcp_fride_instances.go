@@ -93,10 +93,11 @@ func (b *App) registerFrideInstanceTools(r *tools.Set[mcpCaller]) {
 		Available: b.frideInstanceTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Stop a FrIDE instance that has no open thread, when the person asks: its machine gets its memory back, its disk stays, and it starts again when work needs it. Instances stop on their own after a while idle. force=true stops it although threads are open, which interrupts their work: only when the owner asked for that.",
+				Description: "Stop a FrIDE instance that has no open thread, when the person asks: its machine gets its memory back, its disk stays, and it starts again when work needs it. Instances stop on their own after a while idle. force=true stops it although threads are open, which interrupts their work: only when the owner asked for that. An instance should run on one machine, but when it runs on several, without node this stops only the copies that hold no open thread's task (force does not change that) and says which it stopped and which it left; to stop a copy that holds threads, name its node (and force=true).",
 				InputSchema: tools.Schema(map[string]any{
 					"instance": instanceProp(),
 					"force":    map[string]any{"type": "boolean", "description": "Stop although threads are open. Only when the owner asked for it."},
+					"node":     tools.Str("Stop the copy on this machine only (its name, as fride_instances lists it). Needed to stop a copy that holds threads when the instance runs on several machines."),
 				}, "instance"),
 			}
 		},
@@ -110,6 +111,7 @@ type instanceArgs struct {
 	Size     string `json:"size"`
 	Reason   string `json:"reason"`
 	Force    bool   `json:"force"`
+	Node     string `json:"node"`
 }
 
 func readInstanceArgs(raw json.RawMessage) (instanceArgs, *mcp.CallResult) {
@@ -131,6 +133,16 @@ func readInstanceArgs(raw json.RawMessage) (instanceArgs, *mcp.CallResult) {
 type frideInstanceToolView struct {
 	frideInstanceView
 	// Threads are its open threads' numbers.
+	Threads []int64 `json:"threads"`
+	// Copies are the machines it runs on and the threads whose task is on
+	// each: more than one only when it ended up on two (#851).
+	Copies []frideCopyToolView `json:"copies"`
+}
+
+// frideCopyToolView is one running copy of an instance.
+type frideCopyToolView struct {
+	Node    string  `json:"node"`
+	State   string  `json:"state"`
 	Threads []int64 `json:"threads"`
 }
 
@@ -154,9 +166,22 @@ func (b *App) callFrideInstances(ctx context.Context, _ mcpCaller, _ json.RawMes
 	views := b.fride.inst.views()
 	list := []frideInstanceToolView{}
 	for _, v := range b.fride.inst.instanceViews(views, open) {
-		tv := frideInstanceToolView{frideInstanceView: v, Threads: []int64{}}
+		tv := frideInstanceToolView{frideInstanceView: v, Threads: []int64{}, Copies: []frideCopyToolView{}}
 		for _, t := range open[v.Name] {
 			tv.Threads = append(tv.Threads, t.ID)
+		}
+		for _, nv := range views {
+			in := nv.Effective.FrideHost.Instance(v.Name)
+			if nv.Device != nodeproto.DeviceApproved || in == nil || in.State != nodeproto.FrideInstanceRunning && in.State != nodeproto.FrideInstanceStarting {
+				continue
+			}
+			c := frideCopyToolView{Node: nv.Name, State: in.State, Threads: []int64{}}
+			for _, t := range open[v.Name] {
+				if t.Node == nv.ID {
+					c.Threads = append(c.Threads, t.ID)
+				}
+			}
+			tv.Copies = append(tv.Copies, c)
 		}
 		list = append(list, tv)
 	}
@@ -205,7 +230,7 @@ func (b *App) callFrideStop(ctx context.Context, _ mcpCaller, raw json.RawMessag
 	if bad != nil {
 		return bad, nil
 	}
-	text, err := b.fride.inst.stop(ctx, a.Instance, "core brain", "the core brain asked", a.Force)
+	text, err := b.fride.inst.stop(ctx, a.Instance, "core brain", "the core brain asked", a.Force, strings.TrimSpace(a.Node))
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}

@@ -46,6 +46,8 @@ type fakeHost struct {
 	refs map[string]int
 	// failStart makes a start fail with its text.
 	failStart string
+	// quiet makes it declare nothing, as when its declaration is late.
+	quiet bool
 	// gone makes task info and close answer that the task does not exist.
 	gone bool
 	// beforeTaskInfo runs once, before the next task info is answered.
@@ -193,6 +195,12 @@ func (f *fakeHost) declared() nodeproto.Capabilities {
 // declare tells the core what the node offers now, as the agent does
 // right after an instance changes state.
 func (f *fakeHost) declare() {
+	f.mu.Lock()
+	q := f.quiet
+	f.mu.Unlock()
+	if q {
+		return
+	}
 	f.send(nodeproto.TypeDeclare, "", nodeproto.Declare{Capabilities: f.declared()})
 }
 

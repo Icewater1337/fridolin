@@ -10,6 +10,13 @@ for compatibility.
 
 ### Fixed
 
+- **A FrIDE instance that runs on two nodes no longer refuses replies.**
+  The core starts no second copy beside one that runs or starts, even
+  before its node has declared it. If two exist, `fride_reply`, `fride_status`,
+  `fride_move` and `fride_close` go to the copy that holds the thread's
+  task. `fride_stop` takes a `node`; with several copies and none named it
+  stops only the copies that hold no open thread, `force` or not, and says
+  which it left. `fride_instances` lists every copy with its threads (#851).
 - **FrIDE's agents merge their own green pull requests and delete their
   branches again.** An instance's agent had its `gh pr merge … --delete-branch`
   refused by Claude's auto mode: its instance kept the allow rules it was

@@ -78,7 +78,7 @@ func (b *App) stopFrideInstance(ctx context.Context, name string, force bool) er
 	if force {
 		why += ", with its open threads"
 	}
-	_, err := b.fride.inst.stop(ctx, name, "dashboard", why, force)
+	_, err := b.fride.inst.stop(ctx, name, "dashboard", why, force, "")
 	return err
 }
 
