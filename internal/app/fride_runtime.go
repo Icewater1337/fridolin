@@ -982,7 +982,8 @@ func (f *frideRuntime) reachable(ctx context.Context, t store.FrideThread) strin
 	switch {
 	case err != nil:
 		return err.Error()
-	case s.NodeID != t.Node:
+	case s.NodeID != t.Node && f.unreachableOn(t.Node, t.Instance) != "":
+		// Two copies can run (#851): one that holds the task serves it.
 		return fmt.Sprintf("the FrIDE instance %s runs on %s, but the work of FrIDE #%d is on %s", t.Instance, s.Node, t.ID, f.nodeName(t.Node))
 	}
 	return ""

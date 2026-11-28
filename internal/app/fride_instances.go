@@ -66,12 +66,24 @@ type frideInstances struct {
 	active map[string]time.Time
 	failed map[string]frideFailure
 	sent   map[string]string
+	// placed is where each instance was last started and when: its node's
+	// declaration may not say so yet.
+	placed map[string]frideStartedAt
 	// toldNoLogin is, by node, the reason its instances' agents cannot
 	// log in to Claude that the owner was told of.
 	toldNoLogin map[string]string
 	// refresh asks the loop to give running instances what changed (true:
 	// even what did not).
 	refresh chan bool
+}
+
+// frideStartDeclared is how long a start counts as running before its node
+// declares it.
+const frideStartDeclared = 2 * time.Minute
+
+type frideStartedAt struct {
+	node string
+	at   time.Time
 }
 
 // frideFailure is a start that did not happen: node says a node's start
@@ -85,7 +97,7 @@ type frideFailure struct {
 }
 
 func newFrideInstances(f *frideRuntime) *frideInstances {
-	return &frideInstances{f: f, active: map[string]time.Time{}, failed: map[string]frideFailure{}, sent: map[string]string{}, toldNoLogin: map[string]string{}, refresh: make(chan bool, 1)}
+	return &frideInstances{f: f, active: map[string]time.Time{}, failed: map[string]frideFailure{}, sent: map[string]string{}, placed: map[string]frideStartedAt{}, toldNoLogin: map[string]string{}, refresh: make(chan bool, 1)}
 }
 
 // configured are the instances fride.instances names.
@@ -606,6 +618,21 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 			pin = t.Node
 		}
 	}
+	if pin == "" && stale == nil {
+		// One copy at a time: a start the node's declaration has not
+		// shown yet counts (the node says so within moments).
+		i.st.Lock()
+		p, ok := i.placed[name]
+		i.st.Unlock()
+		if ok && time.Since(p.at) < frideStartDeclared && i.f.b.nodes.Online(p.node) {
+			// Unless its node declares that it did not come up.
+			if v := slices.IndexFunc(views, func(v nodes.View) bool { return v.ID == p.node }); v >= 0 {
+				if in := views[v].Effective.FrideHost.Instance(name); in == nil || in.State == nodeproto.FrideInstanceRunning || in.State == nodeproto.FrideInstanceStarting {
+					pin = p.node
+				}
+			}
+		}
+	}
 	hosts := i.hosts(name, ic, views, pin, open)
 	i.tellNoLogin(noLoginOn(ic, views, i.lends(ic)))
 	if len(hosts) == 0 {
@@ -642,6 +669,7 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	}
 	i.st.Lock()
 	i.active[name], i.sent[name] = time.Now(), startFingerprint(p)
+	i.placed[name] = frideStartedAt{node.ID, time.Now()}
 	delete(i.failed, name)
 	i.st.Unlock()
 	detail := fmt.Sprintf("started on %s (%s) with %d MB", node.Name, node.ID, out.MemoryMB)
@@ -695,13 +723,16 @@ func (i *frideInstances) stopOn(ctx context.Context, id, nodeName, name, by, why
 	i.st.Lock()
 	delete(i.sent, name)
 	delete(i.active, name)
+	delete(i.placed, name)
 	i.st.Unlock()
 	return nil
 }
 
-// stop stops instance name wherever it runs. One with open threads only
-// with force. It returns what to say.
-func (i *frideInstances) stop(ctx context.Context, name, by, why string, force bool) (string, error) {
+// stop stops instance name wherever it runs, or on node (an id or a name)
+// only. A copy that holds open threads only with force. With several
+// copies and no node it stops those that hold none, force or not. It
+// returns what to say.
+func (i *frideInstances) stop(ctx context.Context, name, by, why string, force bool, node string) (string, error) {
 	var gone []store.FrideThread
 	defer func() { i.closeGone(ctx, gone) }() // runs after i.mu is unlocked
 	i.mu.Lock()
@@ -727,7 +758,33 @@ func (i *frideInstances) stop(ctx context.Context, name, by, why string, force b
 	if err != nil {
 		return "", err
 	}
-	if ts := open[name]; len(ts) > 0 && !force {
+	copies := len(where)
+	if node != "" {
+		where = slices.DeleteFunc(where, func(w frideWhere) bool { return w.v.ID != node && !strings.EqualFold(w.v.Name, node) })
+		if len(where) == 0 {
+			return "", apperr.New(apperr.NotFound, fmt.Sprintf("the FrIDE instance %s does not run on %q", name, node))
+		}
+	}
+	// held are the open threads whose task is on w's copy.
+	held := func(w frideWhere) []store.FrideThread {
+		if copies == 1 {
+			return open[name]
+		}
+		return slices.DeleteFunc(slices.Clone(open[name]), func(t store.FrideThread) bool { return t.Node != w.v.ID })
+	}
+	var left []string
+	if node == "" && copies > 1 {
+		where = slices.DeleteFunc(where, func(w frideWhere) bool {
+			if ts := held(w); len(ts) > 0 {
+				left = append(left, fmt.Sprintf("%s (holds %s)", w.v.Name, threadList(ts)))
+				return true
+			}
+			return false
+		})
+		if len(where) == 0 {
+			return fmt.Sprintf("Stopped no copy of the FrIDE instance %s: each holds open threads, on %s. To stop one, name its node, with force=true.", name, strings.Join(left, "; ")), nil
+		}
+	} else if ts := held(where[0]); len(ts) > 0 && !force {
 		return "", apperr.New(apperr.Conflict, fmt.Sprintf("the FrIDE instance %s has open threads (%s): close them first (fride_close), or stop it anyway, which interrupts their work", name, threadList(ts)))
 	}
 	var on []string
@@ -737,7 +794,11 @@ func (i *frideInstances) stop(ctx context.Context, name, by, why string, force b
 		}
 		on = append(on, w.v.Name)
 	}
-	return fmt.Sprintf("Stopped the FrIDE instance %s on %s; its disk stays, and it starts again when work needs it.", name, strings.Join(on, ", ")), nil
+	out := fmt.Sprintf("Stopped the FrIDE instance %s on %s; its disk stays, and it starts again when work needs it.", name, strings.Join(on, ", "))
+	if len(left) > 0 {
+		out += " Left running: " + strings.Join(left, "; ") + ". To stop one of those, name its node, with force=true."
+	}
+	return out, nil
 }
 
 // params are what fride.instance.start gets for instance name at mb:
@@ -874,7 +935,7 @@ func (i *frideInstances) idleStop(ctx context.Context) {
 				continue
 			}
 			why := fmt.Sprintf("idle for %d minutes", minutes)
-			if _, err := i.stop(ctx, in.Name, frideByIdle, why, false); err != nil {
+			if _, err := i.stop(ctx, in.Name, frideByIdle, why, false, ""); err != nil {
 				log.Printf("fride: the idle stop of the FrIDE instance %s: %v", in.Name, err)
 			}
 		}
