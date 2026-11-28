@@ -272,7 +272,8 @@ class SyncService : Service() {
                 val t = Trigger.of(intent.getStringExtra(EXTRA_TRIGGER))
                 trigger(t)
                 retryWaiting()
-                scope.launch { updates(t == Trigger.OPENED || t == Trigger.SYNC_NOW) }
+                // Only opening the app looks for an update (docs/PLAUD.md, "Updates"), never a background check-in.
+                if (t == Trigger.OPENED) scope.launch { updates(true) }
             }
             ACTION_INSTALL_UPDATE -> {
                 installRequested = true

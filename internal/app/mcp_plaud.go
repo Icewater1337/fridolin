@@ -34,7 +34,7 @@ func (b *App) registerPlaudTools(r *tools.Set[mcpCaller]) {
 		Available: b.plaudAppTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Update the Plaud Sync app on the owner's phone: build it again from the source Fridolin runs (on this machine or a node that builds Android apps), which takes a few minutes. Each paired phone then fetches the build at its next check-in, usually within 10 minutes, but installs it only when the owner opens Plaud Sync and taps Install update; nothing installs in the background. Only when the owner asks for it. Check how it went with plaud_app_status.",
+				Description: "Update the Plaud Sync app on the owner's phone: build it again from the source Fridolin runs (on this machine or a node that builds Android apps), which takes a few minutes. A paired phone looks for the build only when the owner opens Plaud Sync, and installs it only on their tap on Install update; nothing installs in the background. Only when the owner asks for it. Check how it went with plaud_app_status.",
 				InputSchema: tools.Schema(nil),
 			}
 		},

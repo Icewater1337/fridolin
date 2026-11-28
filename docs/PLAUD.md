@@ -120,10 +120,9 @@ phone is paired), or ask the core brain, which has `plaud_app_update` and
 
 1. Fridolin builds the app as above. The build's versionCode is past the
    build before and past what each phone runs; its versionName is the
-   source's (`0.10`). Fridolin keeps it with its SHA-256 and the certificate
+   source's (`0.11`). Fridolin keeps it with its SHA-256 and the certificate
    it is signed with (`<data_dir>/plaud/app/release.json`).
-2. At its check-ins (at most every 10 minutes, and at once when the app is
-   opened or was just updated), the app asks for the release through the
+2. Only when the app is opened (never at a background check-in), the app asks for the release through the
    site, at `/_fridolin/devices/app/release` with a JWT (aud
    `fridolin:app-release`) that says which version it runs, the SHA-256 of
    the certificate it is signed with and how its last update went. The
