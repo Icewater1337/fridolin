@@ -238,6 +238,7 @@ func (b *App) bookInErrand(ctx context.Context, e store.Errand, s manifest.Erran
 		return notBooked("the calendar could not take it just now")
 	}
 	_, _ = b.store.SetErrandBooking(ctx, e.ID, store.BookingMaking, store.BookingEvent+ev.ID, span.Start, span.End)
+	_ = b.store.SetErrandSlots(ctx, e.ID, "") // no older poll's vote books now (#846)
 	b.auditErrand(e, "booked", when)
 	b.tellErrandOwner(ctx, e, outboundmsg.ErrandBookedNotice(e.Name, e.ID, when))
 	return fmt.Sprintf("Booked %s in %s's calendar.", when, owner), nil
@@ -362,6 +363,7 @@ func (b *App) errandBookingDecided(a store.Approval) {
 		return
 	}
 	_, _ = b.store.SetErrandBooking(ctx, e.ID, store.BookingMaking, store.BookingEvent+ev.ID, span.Start, span.End)
+	_ = b.store.SetErrandSlots(ctx, e.ID, "") // no older poll's vote books now (#846)
 	b.auditErrand(e, "booked", when)
 	b.tellErrandOwner(ctx, e, outboundmsg.ErrandBookedNotice(e.Name, e.ID, when))
 	tell(fmt.Sprintf("%s confirmed: %s is booked in their calendar. Tell them.", owner, when))

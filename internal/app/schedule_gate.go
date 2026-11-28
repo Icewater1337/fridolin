@@ -169,6 +169,11 @@ func (a *agents) localGate(br *brainruntime.Brain, agent string, g manifest.Sche
 	cmd.Stdout, cmd.Stderr = out.Stdout(), out.Stderr()
 	platform.IsolateProcessGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
+	// exec calls Cancel only when ctx ends before the gate exits. Run itself
+	// returns up to WaitDelay later, by when the deadline may have passed for
+	// a gate that answered in time (#847).
+	stopped, kill := false, cmd.Cancel
+	cmd.Cancel = func() error { stopped = errors.Is(ctx.Err(), context.DeadlineExceeded); return kill() }
 	err := cmd.Run()
 	if cmd.Process != nil {
 		// What the gate left behind (a daemon, an ssh ControlPersist) stops
@@ -176,12 +181,13 @@ func (a *agents) localGate(br *brainruntime.Brain, agent string, g manifest.Sche
 		// ctx ends before Run returns.
 		_ = platform.KillProcessGroup(cmd.Process.Pid)
 	}
-	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
-		// It exited 0, but a child kept its stdout open past WaitDelay: its
-		// answer is the output read so far.
+	exited := cmd.ProcessState != nil && cmd.ProcessState.Exited()
+	if exited && cmd.ProcessState.Success() && (errors.Is(err, exec.ErrWaitDelay) || errors.Is(err, context.DeadlineExceeded)) {
+		// It exited 0, but a child kept its stdout open past WaitDelay (or
+		// the deadline came as it exited): its answer is the output read so far.
 		err = nil
 	}
-	res := gateOutcome{over: out.Exceeded(), timedOut: errors.Is(ctx.Err(), context.DeadlineExceeded)}
+	res := gateOutcome{over: out.Exceeded(), timedOut: stopped && !exited}
 	res.stdout, res.stderr = out.Text()
 	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		res.exit = ee.ExitCode()

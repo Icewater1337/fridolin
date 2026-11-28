@@ -104,17 +104,14 @@ func (b *App) sendSlotPoll(ctx context.Context, e store.Errand, spans []errand.S
 // booked (bookInErrand honours the mode and checks it is still free), or
 // in offer mode passed to the run and the owner as their choice; none
 // goes back to the run. Either way the run hears of it and tells them.
-// The poll's times stay until a time is taken, so that a vote changed
-// from none to a time still counts.
+// The poll's times stay until a time is taken or booked, so that a vote
+// changed from none to a time still counts; once the errand has its
+// booking, a vote is only news for the run.
 func (b *App) errandSlotsVote(id string, v pollVote) {
 	ctx := context.Background()
 	e, err := b.store.GetErrand(ctx, id)
 	if err != nil || e.State != store.ErrandOpen || len(v.Selected) == 0 || chat.IdentityKey(v.Voter.User) != chat.IdentityKey(e.Contact) {
 		return
-	}
-	var raw [][2]time.Time
-	if json.Unmarshal([]byte(e.Slots), &raw) != nil || len(raw) == 0 {
-		return // an older poll, or one already answered
 	}
 	s, _ := b.errandSettings(e.Brain)
 	loc := RuntimeConfig(b.cfgs).Location()
@@ -124,6 +121,21 @@ func (b *App) errandSlotsVote(id string, v pollVote) {
 			return
 		}
 		b.errands.soon(e.ID, 0, b.errandTurn)
+	}
+	if e.Booked != "" {
+		// A vote in a poll from before the booking (#846) is only news.
+		when := errand.FormatSpan(errand.Span{Start: e.BookedFrom, End: e.BookedTo}, loc)
+		b.auditErrand(e, "voted after the booking", v.Selected[0])
+		state := "is booked for " + when + " already"
+		if strings.HasPrefix(e.Booked, store.BookingAsking) {
+			state = "waits for the owner to confirm " + when
+		}
+		tell(fmt.Sprintf("They voted %q in an older poll; this conversation %s, and that stays.", v.Selected[0], state))
+		return
+	}
+	var raw [][2]time.Time
+	if json.Unmarshal([]byte(e.Slots), &raw) != nil || len(raw) == 0 {
+		return // an older poll, or one already answered
 	}
 	if v.Selected[0] == outboundmsg.ErrandSlotsNone {
 		b.auditErrand(e, "voted", "none of the times")
